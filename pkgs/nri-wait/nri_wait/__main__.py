@@ -19,7 +19,9 @@ def main() -> None:
             f"[nri-wait] OCI state: id={oci_state.get('id')} pid={oci_state.get('pid')} bundle={oci_state.get('bundle')}",
             file=sys.stderr,
         )
-    except Exception as e:
+    # Anything at all. A hook that dies here says nothing about why, and the
+    # missing 'id' below is the message the operator needs.
+    except Exception as e:  # noqa: BLE001
         print(f"[nri-wait] Could not parse OCI state from stdin: {e}", file=sys.stderr)
 
     container_id = oci_state.get("id")
