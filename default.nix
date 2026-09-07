@@ -14,8 +14,16 @@ let
   #
   # git+https and not github:, because a GitHub tarball carries no submodule
   # and the siblings are exactly what this is for.
+  #
+  # `..` from a store path leaves the store root, and Nix refuses that rather
+  # than answering false: "'nix' is too short to be a valid store path". So
+  # ask only when this checkout is not itself in the store.
+  inUmbrella =
+    builtins.substring 0 11 (toString ./.) != "/nix/store/"
+    && builtins.pathExists ../nix/wire.nix;
+
   umbrella =
-    if builtins.pathExists ../nix/wire.nix then
+    if inUmbrella then
       import ../nix/wire.nix
     else
       import (
