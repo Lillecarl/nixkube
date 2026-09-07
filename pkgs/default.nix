@@ -57,6 +57,12 @@ self: pkgs: {
 
   ci-debug = pkgs.callPackage ./ci-debug { inherit pkgs; };
 
+  # The two kubernetes-csi sidecars the node DaemonSet runs, and images for
+  # them. Built here so a node with no route to registry.k8s.io can still run
+  # the driver -- which is every node inside a Nix build sandbox. See
+  # ./csi-sidecars.
+  csi-sidecars = pkgs.callPackage ./csi-sidecars { };
+
   pynixd =
     let
       path =
