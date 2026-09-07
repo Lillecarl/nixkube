@@ -186,6 +186,32 @@ class NodeServicer(csi_grpc.NodeBase):
                 target_path=request.target_path,
             )
             log.info("publishing_volume")
+
+            # Already published. Say so and touch nothing.
+            #
+            # The CSI spec requires this: "If the volume corresponding to the
+            # volume_id has already been published at the specified
+            # target_path [...] the Plugin MUST reply 0 OK". kubelet asks
+            # again after every restart, because its reconstructed volume
+            # state is uncertain until the driver confirms it.
+            #
+            # Without the guard the second call rebuilds `volume_root` --
+            # which is the source of the *live* bind mount a running pod is
+            # using. Measured: a kubelet restart left the resident pod's
+            # mount reading
+            #
+            #     /nixkube/nix/var/nix-csi/volumes/csi-ff7e...//deleted
+            #
+            # and the re-mount refused with ENOENT, because the kernel marks
+            # an unlinked directory DCACHE_CANT_MOUNT and will not mount onto
+            # a mount whose root carries it. The pod kept running with an
+            # empty store, which for a container whose command is a store
+            # path is the worst of both worlds.
+            if is_mount(Path(request.target_path)):
+                log.info("already_published")
+                await stream.send_message(csi_pb2.NodePublishVolumeResponse())
+                return
+
             try:
                 pod = await Pod.get(pod_name, namespace=pod_namespace)
             except NotFoundError:
