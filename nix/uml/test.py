@@ -566,6 +566,22 @@ async def report(cp):
     )
     print(f"[nixkube] the node's /nix (rc={rc}):\n{out}", flush=True)
 
+    # What the nri-wait hook said before it gave up.
+    #
+    # The hook runs at createRuntime, so its stderr goes into runc's error,
+    # into containerd's, and from there into a Kubernetes event. kubelet
+    # cuts that event's message at about 1KB, which lands mid-sentence and
+    # drops the one line that says which deadline the hook hit. containerd's
+    # own journal keeps the whole thing. Measured: the event ended at
+    # "[nri-wait] OCI state: id=hello pid=2081 bundle=..." and the verdict
+    # was 900 characters further on.
+    rc, out = await cp.execute(
+        "journalctl --unit containerd --no-pager --lines 4000"
+        " | grep --text nri-wait | tail -n 20",
+        timeout=120,
+    )
+    print(f"[nixkube] what nri-wait said (rc={rc}):\n{out}", flush=True)
+
     # Every container of the DaemonSet's pod, by name, from the API server.
     #
     # `diagnose` tails the log files off the node, which works but competes
