@@ -1,16 +1,40 @@
 # SPDX-License-Identifier: MIT
 
-{
-  # Every input this repository uses, so that a caller can supply its own.
+let
+  # nixidae is the umbrella that holds this repository, and it owns the
+  # inputs. Inside it, that is the checkout one directory up. Outside it, it
+  # is fetched, and this working copy is put in place of the submodule that
+  # came down with it. Either way the answer is the same one, so a build here
+  # and a build from the umbrella agree.
   #
-  # The default is what a build of this repository on its own gets: the
-  # revisions flake.lock records. The nixidae umbrella passes its own set
-  # instead, so a checkout that holds nixkube beside easykubenix builds
-  # against that working copy rather than a published tarball.
+  # The input that matters is easykubenix. From the umbrella it is the
+  # working copy in the next directory, and that copy in turn reaches the
+  # nanopynix beside it, so a change anywhere in the chain is built here with
+  # nothing published in between.
   #
-  # This used to be a `let` outside the function, which no caller could
-  # reach.
-  inputs ?
+  # git+https and not github:, because a GitHub tarball carries no submodule
+  # and the siblings are exactly what this is for.
+  umbrella =
+    if builtins.pathExists ../nix/wire.nix then
+      import ../nix/wire.nix
+    else
+      import (
+        (builtins.fetchTree (builtins.parseFlakeRef "git+https://github.com/nixidae/nixidae?submodules=1"))
+        .outPath
+        + "/nix/wire.nix"
+      );
+
+  # Set to make a `--file .` build agree with a flake evaluation. It turns
+  # off the overrides the umbrella works through, so going out to fetch one
+  # would cost a clone and change nothing.
+  overridesDisabled =
+    let
+      value = builtins.getEnv "FLAKE_COMPATISH_DISABLE_OVERRIDES";
+    in
+    value != "" && value != "0";
+
+  # What this file did before the umbrella: read flake.lock and nothing else.
+  own =
     (
       let
         lock = builtins.fromJSON (builtins.readFile ./flake.lock);
@@ -22,7 +46,20 @@
           self = ./.;
         };
       }
-    ).inputs,
+    ).inputs;
+in
+{
+  # Every input this repository uses, so that a caller can supply its own.
+  # This used to be a `let` outside the function, which no caller could
+  # reach.
+  inputs ?
+    if overridesDisabled then
+      own
+    else
+      umbrella {
+        project = "nixkube";
+        source = ./.;
+      },
   system ? builtins.currentSystem,
 }:
 rec {
