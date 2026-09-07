@@ -357,7 +357,9 @@ class NriPlugin(NriPluginBase):
 
         # Cleanup stale hardlink farm volumes when container is removed
         if event.event == nri_pb2.Event.REMOVE_CONTAINER:
-            await garbage_collect_stale_volumes(self.cri_socket)
+            await garbage_collect_stale_volumes(
+                self.cri_socket, removed_id=event.container.id or None
+            )
 
         await stream.send_message(nri_pb2.Empty())
 
