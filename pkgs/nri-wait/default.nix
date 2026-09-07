@@ -5,6 +5,8 @@
   buildPythonApplication,
   hatchling,
   pyzmq,
+  pytest,
+  pytestCheckHook,
 }:
 
 buildPythonApplication {
@@ -17,6 +19,15 @@ buildPythonApplication {
 
   build-system = [ hatchling ];
   dependencies = [ pyzmq ];
+
+  # These tests are the whole reason the hook is trustworthy: they hold it
+  # to timing the daemon's silence rather than the build. They need no
+  # cluster and no network, only two ZeroMQ sockets, so the package build
+  # is the right place for them.
+  nativeCheckInputs = [
+    pytest
+    pytestCheckHook
+  ];
 
   meta = with lib; {
     description = "OCI hook that waits for NRI build completion";
