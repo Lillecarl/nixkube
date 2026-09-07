@@ -74,6 +74,15 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
     within the CSI daemonset. The daemonset should only handle mounting pre-built paths.
     This will improve separation of concerns and allow dedicated builder infrastructure.
     """
+    if not PYNIXD_ENABLED:
+        # There is no cache to copy to. Without this the node signs the
+        # closure and then runs `nix copy` six times against a name that
+        # does not resolve, sleeping 5, 10, 20, 40 and 60 seconds between
+        # the attempts. Measured on a node with pynixd off: 135s of that
+        # per container, and the same again on every GC pass.
+        logger.debug("copy_to_cache_skipped", reason="pynixd_disabled")
+        return
+
     if package_paths is not None and not package_paths:
         logger.debug("copy_to_cache_skipped", reason="no_paths")
         return

@@ -44,6 +44,11 @@ def make_mock_run(copy_results: list[SubprocessResult]):
 class TestCopyToCacheRetry:
     """Tests for copy_to_cache() retry loop and backoff behavior."""
 
+    @pytest.fixture(autouse=True)
+    def pynixd_enabled(self, monkeypatch):
+        """There is a cache to copy to. Without one copy_to_cache returns at once."""
+        monkeypatch.setattr("src.cache.PYNIXD_ENABLED", True)
+
     @pytest.mark.asyncio
     async def test_empty_paths_returns_early(self):
         """Empty package_paths should skip all subprocess calls."""
@@ -140,3 +145,39 @@ class TestCopyToCacheRetry:
 
         assert sign_called
         assert copy_called
+
+
+class TestCopyToCacheWithoutPynixd:
+    """copy_to_cache() when the deployment has no cache at all."""
+
+    @pytest.fixture(autouse=True)
+    def pynixd_disabled(self, monkeypatch):
+        monkeypatch.setattr("src.cache.PYNIXD_ENABLED", False)
+
+    @pytest.mark.asyncio
+    async def test_paths_run_nothing(self):
+        """No cache means no sign, no copy and no retries."""
+        from src.cache import copy_to_cache
+
+        with (
+            patch("src.cache.run_captured", new_callable=AsyncMock) as mock_run,
+            patch("src.cache.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
+            await copy_to_cache(PATHS)
+
+        mock_run.assert_not_called()
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_all_paths_run_nothing(self):
+        """The GC pass asks for every path in the store. It gets the same answer."""
+        from src.cache import copy_to_cache
+
+        with (
+            patch("src.cache.run_captured", new_callable=AsyncMock) as mock_run,
+            patch("src.cache.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
+            await copy_to_cache(None)
+
+        mock_run.assert_not_called()
+        mock_sleep.assert_not_called()
