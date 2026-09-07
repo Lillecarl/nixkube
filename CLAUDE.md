@@ -31,7 +31,7 @@ The CSI layer supports two driver names for backwards compatibility:
 
 ### Build System
 
-The project uses Nix with flake-compatish for backwards compatibility. Key build outputs are defined in `default.nix`:
+This repository is not a flake. `nix/sources.nix` asks the nixidae umbrella where every dependency lives, and `default.nix` takes that set as `sources`. Build with `nix build --file . <attribute>`. Key build outputs are defined in `default.nix`:
 
 - **Environments** (`environments/`): Separate Nix environments for cache and node, built using dinix (a service manager). Each environment:
   - Shares common services (openssh, nix-daemon, shared-setup)

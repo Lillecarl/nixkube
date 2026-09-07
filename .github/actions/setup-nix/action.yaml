@@ -31,7 +31,7 @@ runs:
     - name: Restore and save Nix store
       uses: nix-community/cache-nix-action@main
       with:
-        primary-key: nix-${{ runner.os }}-${{ inputs.cache_key }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+        primary-key: nix-${{ runner.os }}-${{ inputs.cache_key }}-${{ hashFiles('**/*.nix') }}
         restore-prefixes-first-match: nix-${{ runner.os }}-${{ inputs.cache_key }}
         gc-max-store-size-linux: 1G
         purge: true

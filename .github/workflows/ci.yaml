@@ -199,7 +199,7 @@ jobs:
           useDaemon: false
 
       - name: Build documentation
-        run: nix build .#nixkube-docs --out-link result --print-build-logs --print-out-paths
+        run: nix build --file . nixkube-docs --out-link result --print-build-logs --print-out-paths
 
       - name: Verify docs closure
         run: nix store verify --recursive --no-trust "$(readlink -f result)"

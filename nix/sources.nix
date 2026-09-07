@@ -18,8 +18,7 @@
 # file returns and imports what it wants.
 let
   inUmbrella =
-    builtins.substring 0 11 (toString ../.) != "/nix/store/"
-    && builtins.pathExists ../../nix/wire.nix;
+    builtins.substring 0 11 (toString ../.) != "/nix/store/" && builtins.pathExists ../../nix/wire.nix;
 
   wire =
     if inUmbrella then
