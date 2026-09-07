@@ -26,6 +26,7 @@
   pytest, # Unit tests
   pytest-asyncio, # Async test support
   hypothesis, # Property-based testing
+  pytestCheckHook, # Runs them
 }:
 let
   pyproject = builtins.fromTOML (builtins.readFile ./pyproject.toml);
@@ -56,10 +57,14 @@ buildPythonApplication {
     structlog
     rich
   ];
+  # pytest and its plugins were here already, with nothing to run them, so
+  # `nix build` never saw a test result. The hook is what makes the list mean
+  # something.
   nativeCheckInputs = [
     pytest
     pytest-asyncio
     hypothesis
+    pytestCheckHook
   ];
   makeWrapperArgs = [
     "--set"

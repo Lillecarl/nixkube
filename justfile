@@ -10,7 +10,7 @@ fmt:
 
 # Run Python tests
 test:
-    direnv exec . python -m pytest pkgs/nixkube/tests -v
+    direnv exec . python -m pytest pkgs/nixkube/tests pkgs/nri-wait/tests -v
 
 # Build manifests only (local, fast)
 build-manifests:
