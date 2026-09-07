@@ -6,7 +6,7 @@ from asyncio import Semaphore
 from collections import defaultdict
 from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import structlog
 from csi import csi_grpc, csi_pb2
@@ -144,7 +144,7 @@ def csi_error_handler(
 
 
 class NodeServicer(csi_grpc.NodeBase):
-    volume_locks: defaultdict[str, Semaphore] = defaultdict(Semaphore)
+    volume_locks: ClassVar[defaultdict[str, Semaphore]] = defaultdict(Semaphore)
 
     def __init__(self, system: str, plugin_name: str = "nixkube"):
         self.system = system
@@ -350,7 +350,7 @@ class NodeServicer(csi_grpc.NodeBase):
                 )
                 cleanup_stale_entries(active_handles)
             except Exception:
-                log.error("stale_cleanup_failed", exc_info=True)
+                log.exception("stale_cleanup_failed")
                 # Report error event on CSI driver controller since we don't have pod info here
                 try:
                     controller_pod = Pod(

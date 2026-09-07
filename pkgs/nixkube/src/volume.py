@@ -225,7 +225,7 @@ def cleanup_failed_volume(gc_root: Path, volume_root: Path) -> None:
         if path.exists():
             try:
                 shutil.rmtree(path)
-            except Exception as e:
+            except OSError as e:
                 failed_paths.append(f"{path}: {e}")
 
     if failed_paths:
