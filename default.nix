@@ -261,5 +261,28 @@ rec {
 
   nixImage = pkgs.callPackage ./niximage.nix { };
   scratchImage = pkgs.callPackage ./scratchimage.nix { };
+
+  # Every image the node DaemonSet names, as a tarball a UML guest can import.
+  # There is no registry in a Nix build sandbox. See nix/uml/images.nix.
+  umlImages = pkgs.callPackage ./nix/uml/images.nix { inherit nixImage scratchImage; };
+
+  # Do those tarballs carry the tags the DaemonSet asks for? Seconds, against
+  # twenty minutes of cluster before an ErrImagePull says the same thing.
+  umlImagesMatch = umlImages.check umlManifest.manifestJSONFile;
+
+  # nixkube on a real node, under User-Mode Linux, in a Nix build sandbox --
+  # so no KVM, no root, and a derivation that passes or fails. See nix/uml.
+  umlManifest = kubenixInstance {
+    module.imports = [
+      ./kubenix/ci
+      ./nix/uml/manifest.nix
+      ./nix/uml/workloads.nix
+    ];
+  };
+
+  umlTest = pkgs.callPackage ./nix/uml {
+    inherit sources umlImages;
+    manifest = umlManifest;
+  };
   ci-debug = pkgs.callPackage ./pkgs/ci-debug { };
 }
