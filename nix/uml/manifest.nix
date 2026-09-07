@@ -16,13 +16,13 @@
 #            `Never` -- `Always`, which two of them do say, fails on an image
 #            that is already there.
 #
-#   store    The node's Nix store is normally a directory of its own that
-#            the init container fills by *substituting* into it. Here there
-#            is nothing to substitute from and nothing to fill: the guest's
-#            /nix/store is the sandbox's, so the node environment is already
-#            in it, and `boot.uml.nixDatabase` has already told Nix so.
-#            `hostMountPath = "/"` points the node at that store instead of
-#            at a copy of it.
+#   store    The node's Nix store is a directory of its own that the init
+#            container fills by *substituting* into it, and there is no
+#            binary cache to substitute from. So the guest fills it first:
+#            its own /nix/store is the sandbox's, over hostfs, and
+#            `nixkube-seed-store` copies what nixkube needs one directory
+#            across before kubelet starts. The init container then finds
+#            the paths already valid and copies nothing.
 { lib, ... }:
 let
   # Every container in an object, whether it runs first or not.
@@ -66,31 +66,48 @@ in
     push = true;
 
     /*
-      The node's store is the guest's store, not a copy of it.
+      A directory of the node's own, on the node's own filesystem.
 
-      `/` is what the option's own description calls untested, and this is
-      the test. The layout works out exactly: kubenix/daemonset.nix mounts
-      this path at `/nix-volume` in the init container, where Nix makes a
-      chroot store and therefore looks for `/nix-volume/nix/store`; and at
-      `/nix` in the node container, with `subPath = "nix"`. With `/` both
-      resolve to the guest's own `/nix/store` -- which is the build
-      sandbox's, over hostfs.
+      `/` was tried first, and it is very nearly right: the guest's
+      /nix/store is the build sandbox's over hostfs, so pointing the node
+      at `/` gives it a store that already holds everything the manifest
+      names, with nothing copied and nothing fetched. The whole DaemonSet
+      came up in 34 seconds that way.
 
-      So `nix build --store /nix-volume` finds the node environment already
-      present and already valid, and copies nothing. The default
-      `/var/lib/nix-csi` would have it fetch, over HTTP, a closure sitting
-      on the same filesystem.
+      It breaks one thing, and the thing it breaks is not small. The
+      driver's own state lives at `/nix/var/nix-csi` *inside the node
+      container*, which is this path plus `nix/var/nix-csi` on the node.
+      With `/` that is the guest's /nix -- an overlay, because a guest's
+      whole /nix is one overlay mount over hostfs. NRI's read-write mode
+      then asks the kernel for an overlay whose upperdir is on that
+      overlay, and the kernel refuses:
+
+          fsconfig('upperdir'=.../containers/<id>/upper): Invalid argument
+
+      overlayfs does not accept an overlayfs as an upper layer. A real node
+      has an ordinary directory here and never meets this, so the test was
+      the only thing that did -- and it was hiding half of NRI.
+
+      The cost is a copy: this directory is not the guest's store, so
+      something has to fill it. `nixkube-seed-store` in ./default.nix does,
+      before kubelet starts, from the guest's own store on the same disk.
+      Measured at about 40 seconds, against `kubeadm init` taking longer --
+      so it costs nothing in wall clock, and nothing is fetched.
     */
-    hostMountPath = "/";
+    hostMountPath = "/nixkube";
 
     /*
       No substituters at all.
 
-      Nothing should need one -- see above -- and an unreachable one is
-      worse than none. With cachix and cache.nixos.org in the list (which
-      is what kubenix/ci sets) a miss costs four HTTP retries and a DNS
-      timeout each before failing, which reads as a hang. Empty means a
-      genuine miss fails at once and says so:
+      Nothing needs one: `nixkube-seed-store` in ./default.nix copies
+      everything this node will be asked for into its store before kubelet
+      starts, so the init container finds the paths already valid.
+
+      An unreachable substituter is worse than none. kubenix/ci lists
+      cachix and cache.nixos.org, and each miss against those costs four
+      HTTP retries and a DNS timeout against a resolver a build sandbox
+      cannot reach -- which reads as a hang. Empty means a genuine miss
+      fails at once and says which path:
 
           error: path '...-nodeEnv' is required, but there is no
           substituter that can build it

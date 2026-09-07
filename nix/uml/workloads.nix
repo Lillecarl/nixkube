@@ -7,12 +7,11 @@
 # build sandbox has no network. These are the offline half, written out
 # rather than filtered, so each one says what it proves.
 #
-# One thing has to be said about proof. user-mode-nixos bind-mounts the
-# guest's /nix/store into *every* container, because kubeadm's own images are
-# symlink farms into the store. So a container that runs a store path proves
-# nothing on its own -- it would run with the driver switched off. Every job
-# here therefore reaches its binary through the path the pod asked the driver
-# for, and nowhere else.
+# Every job here reaches its binary through the path the pod asked the driver
+# for, and nowhere else. That is not decoration: the node hands out no /nix at
+# all of its own accord -- kubeadm patches give the control plane its store
+# and nothing else gets one -- so a container whose command is a store path
+# cannot start unless nixkube put the store there.
 {
   config,
   curPkgs,
@@ -22,14 +21,25 @@
 let
   cfg = config.nixkube;
 
-  # Not /nix. The store is already at /nix in every container here, so a
-  # volume mounted there would prove nothing.
+  # Not /nix, which is where the NRI plugin puts its own mount. Keeping the
+  # volume somewhere else is what lets the test say which of the two put a
+  # file where it found it.
+  #
+  # ./probe.nix and ./default.nix's `settings` repeat this literal. Three
+  # places, because the first two are separate evaluations and the third is
+  # what the test says to `kubectl exec`.
   mountPath = "/mnt/csi";
 
   system = curPkgs.stdenv.hostPlatform.system;
 
   labels = cfg.labels // {
     "app.kubernetes.io/component" = "uml-test";
+  };
+
+  # Its own component, so the wait for the jobs above does not also wait for
+  # a Deployment that never finishes.
+  residentLabels = cfg.labels // {
+    "app.kubernetes.io/component" = "uml-resident";
   };
 
   # A CSI ephemeral volume holding one store path, and nothing else.
@@ -61,7 +71,8 @@ let
       backoffLimit = 0;
       template.spec = {
         restartPolicy = "Never";
-      } // spec;
+      }
+      // spec;
     };
   };
 in
@@ -79,6 +90,44 @@ in
     Job.csi-shared = job {
       containers = helloThroughVolume;
       volumes = storeVolume;
+    };
+
+    /*
+      Something for the chaos scenarios to disturb.
+
+      Every job above starts, prints and exits, so by the time anything
+      breaks the driver there is nothing left running. This stays up,
+      holding a CSI volume and an NRI mount, and the question after each
+      scenario is whether it still has them -- a pod that loses its /nix
+      while running is a different failure from one that cannot start.
+
+      `sleep` is a store path, which is also what makes the NRI plugin act
+      on this pod. So one pod covers both.
+    */
+    Deployment.resident = {
+      metadata.labels = residentLabels;
+      spec = {
+        replicas = 1;
+        selector.matchLabels = residentLabels;
+        template = {
+          metadata.labels = residentLabels;
+          spec = {
+            containers = lib.mkNamedList {
+              resident = {
+                image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
+                command = [
+                  "${curPkgs.coreutils}/bin/sleep"
+                  "infinity"
+                ];
+                volumeMounts = lib.mkNamedList {
+                  store.mountPath = mountPath;
+                };
+              };
+            };
+            volumes = storeVolume;
+          };
+        };
+      };
     };
   };
 }
