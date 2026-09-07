@@ -25,7 +25,7 @@ from ..events import report_event
 from ..nix import fetch_packages, get_build_args, get_current_system
 from ..volume import prepare_volume
 from .annotations import extract_container_store_paths, parse_nix_rw, parse_store_mounts
-from .cleanup import garbage_collect_stale_volumes
+from .cleanup import schedule_garbage_collection
 from .mount import kernel_supports_ro, kernel_supports_rw, mount_in_container
 from .zmq import ZeroMQServer
 
@@ -140,9 +140,12 @@ from .zmq import ZeroMQServer
 # 1. Container runs with /nix and store mounts injected
 #
 # 2. On container removal (StateChange REMOVE_CONTAINER event)
-#    - garbage_collect_stale_volumes(cri_socket): Queries CRI for active containers,
-#      removes any stale volumes (including the one being removed) that are orphaned
-#      by crashed containers or abrupt shutdowns
+#    - schedule_garbage_collection(cri_socket): acknowledges the event at once
+#      and sweeps in the background. Queries CRI for active containers, removes
+#      any stale volumes (including the one being removed) that are orphaned by
+#      crashed containers or abrupt shutdowns. In the background because
+#      containerd deadlines every NRI request, and a sweep is slower than an
+#      acknowledgement may be.
 #
 # ============================================================================
 
@@ -357,7 +360,7 @@ class NriPlugin(NriPluginBase):
 
         # Cleanup stale hardlink farm volumes when container is removed
         if event.event == nri_pb2.Event.REMOVE_CONTAINER:
-            await garbage_collect_stale_volumes(
+            schedule_garbage_collection(
                 self.cri_socket, removed_id=event.container.id or None
             )
 
