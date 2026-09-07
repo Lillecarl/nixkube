@@ -74,6 +74,22 @@ def wait_for_completion(
 ) -> None:
     """Subscribe to PUB socket and wait for build completion message.
 
+    ``timeout`` is how long the build daemon may stay silent. It is not a
+    budget for the build. The daemon publishes a heartbeat every ten seconds
+    while it works, and each heartbeat pushes the deadline out again. So a
+    build takes as long as it takes, and only silence fails.
+
+    There used to be a second deadline as well, an absolute one. It started
+    at the same moment and ran for the same duration, and nothing reset it.
+    That made the heartbeat decoration: no build could last longer than
+    ``timeout``, however healthy it was. Measured on a one-CPU node with
+    three containers starting at once -- the hook gave up at 30s, and the
+    daemon reported the build a success 11s later, into a container runc had
+    already destroyed.
+
+    One gap stays, and it is worth naming. A pump that publishes while Nix
+    hangs is a pump that lies. This detects a dead daemon, not a stuck build.
+
     Raises SystemExit(1) on timeout or error.
     """
     sub = context.socket(zmq.SUB)
@@ -95,70 +111,50 @@ def wait_for_completion(
         sub.close()
         sys.exit(1)
 
-    # Wait for completion message with rolling timeout on progress updates
-    absolute_deadline = time.time() + timeout  # Absolute deadline (safety timeout)
-    progress_deadline = time.time() + timeout  # Resets on progress messages
+    # The only deadline. Every heartbeat pushes it out again.
+    deadline = time.time() + timeout
 
     while True:
-        # Check absolute safety deadline
-        now = time.time()
-        if now >= absolute_deadline:
+        remaining = deadline - time.time()
+        if remaining <= 0:
             print(
-                f"[nri-wait] Absolute timeout waiting for build completion ({timeout}s)",
+                f"[nri-wait] The build daemon said nothing for {timeout}s",
                 file=sys.stderr,
             )
             sub.close()
             sys.exit(1)
 
-        # Use whichever deadline is sooner
-        next_deadline = min(absolute_deadline, progress_deadline)
-        remaining = next_deadline - now
-        remaining_ms = max(1, int(remaining * 1000))
-        sub.setsockopt(zmq.RCVTIMEO, remaining_ms)
+        sub.setsockopt(zmq.RCVTIMEO, max(1, int(remaining * 1000)))
 
         try:
             msg_bytes = sub.recv()
-
-            # Try to parse as JSON
-            try:
-                msg = json.loads(msg_bytes.decode())
-                print(f"[nri-wait] Received message: {msg}", file=sys.stderr)
-
-                if msg.get("container_id") == container_id:
-                    # Exit immediately on "done" status
-                    if msg.get("status") == "done":
-                        print(
-                            f"[nri-wait] Build completed for container {container_id}",
-                            file=sys.stderr,
-                        )
-                        sub.close()
-                        return
-
-                    # Reset progress deadline on status updates (e.g., "progress", "building")
-                    if msg.get("status") in ("progress", "building"):
-                        progress_deadline = time.time() + timeout
-                        print(
-                            f"[nri-wait] Progress update for container {container_id}, "
-                            f"progress timeout reset to {timeout}s",
-                            file=sys.stderr,
-                        )
-
-            except (json.JSONDecodeError, UnicodeDecodeError, KeyError):
-                # Ignore unparsable messages
-                pass
-
         except zmq.error.Again:
-            # Timeout from recv - check which deadline we hit
-            if time.time() >= progress_deadline:
-                print(
-                    f"[nri-wait] Progress timeout waiting for build completion ({timeout}s)",
-                    file=sys.stderr,
-                )
-                sub.close()
-                sys.exit(1)
-            # Otherwise loop and check absolute deadline
-
+            continue  # Re-check the deadline at the top of the loop.
         except zmq.error.ZMQError as e:
             print(f"[nri-wait] Socket error: {e}", file=sys.stderr)
             sub.close()
             sys.exit(1)
+
+        try:
+            msg = json.loads(msg_bytes.decode())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue  # Ignore unparsable messages.
+
+        print(f"[nri-wait] Received message: {msg}", file=sys.stderr)
+        if msg.get("container_id") != container_id:
+            continue
+
+        if msg.get("status") == "done":
+            print(
+                f"[nri-wait] Build completed for container {container_id}",
+                file=sys.stderr,
+            )
+            sub.close()
+            return
+
+        if msg.get("status") in ("progress", "building"):
+            deadline = time.time() + timeout
+            print(
+                f"[nri-wait] Progress for container {container_id}, {timeout}s more",
+                file=sys.stderr,
+            )
