@@ -6,7 +6,7 @@ import sys
 
 import zmq
 
-from . import check_build_status, wait_for_completion
+from . import check_build_status, connect_updates, wait_for_completion
 
 
 def main() -> None:
@@ -44,27 +44,30 @@ def main() -> None:
     # Create ZeroMQ context
     context = zmq.Context()
 
+    def ask() -> bool:
+        """Ask the daemon whether the build is done, and report our PID and bundle."""
+        return check_build_status(context, query_socket, oci_state, timeout)
+
     try:
-        # Phase 1: Query if build is already done (also registers the PID/bundle with nix-nri)
-        if check_build_status(
-            context,
-            query_socket,
-            oci_state,
-            timeout,
-        ):
+        # Phase 1: Subscribe first. See connect_updates for why the order matters.
+        sub = connect_updates(context, pub_socket)
+
+        # Phase 2: Query if build is already done (also registers the PID/bundle with nix-nri)
+        if ask():
             print(
                 f"[nri-wait] Build already completed for {container_id}",
                 file=sys.stderr,
             )
+            sub.close()
             return
 
         print(
-            f"[nri-wait] Build pending for {container_id}, subscribing to updates...",
+            f"[nri-wait] Build pending for {container_id}, waiting for updates...",
             file=sys.stderr,
         )
 
-        # Phase 2: Subscribe to PUB socket and wait for completion
-        wait_for_completion(context, pub_socket, container_id, timeout)
+        # Phase 3: Wait for completion
+        wait_for_completion(sub, container_id, timeout, ask)
     finally:
         context.term()
 

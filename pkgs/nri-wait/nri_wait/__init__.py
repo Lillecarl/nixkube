@@ -3,6 +3,7 @@
 import json
 import sys
 import time
+from collections.abc import Callable
 
 import zmq
 
@@ -69,10 +70,42 @@ def check_build_status(
     return False
 
 
+def connect_updates(context: zmq.Context, pub_socket_path: str) -> zmq.Socket:
+    """Subscribe to the PUB socket.
+
+    The caller does this *before* it queries the REP socket. ZeroMQ drops a
+    published message that no subscriber has joined for yet, so a "done"
+    published between the query's answer and the subscription reaches
+    nobody. The hook would then wait for a heartbeat that never arrives:
+    the daemon stops its pump as soon as the build is done.
+
+    Raises SystemExit(1) if the socket cannot be reached.
+    """
+    sub = context.socket(zmq.SUB)
+
+    # Subscribe to all messages (empty filter = all)
+    sub.setsockopt(zmq.SUBSCRIBE, b"")
+
+    socket_path = f"ipc://{pub_socket_path}"
+    print(f"[nri-wait] Connecting to pub socket: {socket_path}", file=sys.stderr)
+
+    try:
+        sub.connect(socket_path)
+    except zmq.error.ZMQError as e:
+        print(f"[nri-wait] Failed to connect to pub socket: {e}", file=sys.stderr)
+        sub.close()
+        sys.exit(1)
+
+    return sub
+
+
 def wait_for_completion(
-    context: zmq.Context, pub_socket_path: str, container_id: str, timeout: int
+    sub: zmq.Socket,
+    container_id: str,
+    timeout: int,
+    recheck: Callable[[], bool],
 ) -> None:
-    """Subscribe to PUB socket and wait for build completion message.
+    """Wait on the PUB socket for the build completion message.
 
     ``timeout`` is how long the build daemon may stay silent. It is not a
     budget for the build. The daemon publishes a heartbeat every ten seconds
@@ -90,33 +123,25 @@ def wait_for_completion(
     One gap stays, and it is worth naming. A pump that publishes while Nix
     hangs is a pump that lies. This detects a dead daemon, not a stuck build.
 
+    ``recheck`` asks the REP socket for the status. The REP socket is the
+    truth and the PUB socket is only the fast path, so a silent daemon gets
+    one direct question before this gives up.
+
     Raises SystemExit(1) on timeout or error.
     """
-    sub = context.socket(zmq.SUB)
-
-    # Subscribe to all messages (empty filter = all)
-    sub.setsockopt(zmq.SUBSCRIBE, b"")
-
-    # Set timeout
-    timeout_ms = timeout * 1000
-    sub.setsockopt(zmq.RCVTIMEO, timeout_ms)
-
-    socket_path = f"ipc://{pub_socket_path}"
-    print(f"[nri-wait] Connecting to pub socket: {socket_path}", file=sys.stderr)
-
-    try:
-        sub.connect(socket_path)
-    except zmq.error.ZMQError as e:
-        print(f"[nri-wait] Failed to connect to pub socket: {e}", file=sys.stderr)
-        sub.close()
-        sys.exit(1)
-
     # The only deadline. Every heartbeat pushes it out again.
     deadline = time.time() + timeout
 
     while True:
         remaining = deadline - time.time()
         if remaining <= 0:
+            if recheck():
+                print(
+                    f"[nri-wait] Build already completed for {container_id}",
+                    file=sys.stderr,
+                )
+                sub.close()
+                return
             print(
                 f"[nri-wait] The build daemon said nothing for {timeout}s",
                 file=sys.stderr,
