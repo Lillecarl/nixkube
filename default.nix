@@ -1,7 +1,16 @@
 # SPDX-License-Identifier: MIT
 
-let
-  inputs =
+{
+  # Every input this repository uses, so that a caller can supply its own.
+  #
+  # The default is what a build of this repository on its own gets: the
+  # revisions flake.lock records. The nixidae umbrella passes its own set
+  # instead, so a checkout that holds nixkube beside easykubenix builds
+  # against that working copy rather than a published tarball.
+  #
+  # This used to be a `let` outside the function, which no caller could
+  # reach.
+  inputs ?
     (
       let
         lock = builtins.fromJSON (builtins.readFile ./flake.lock);
@@ -13,9 +22,7 @@ let
           self = ./.;
         };
       }
-    ).inputs;
-in
-{
+    ).inputs,
   system ? builtins.currentSystem,
 }:
 rec {
