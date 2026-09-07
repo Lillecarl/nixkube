@@ -2,9 +2,9 @@
 
 let
   system = builtins.currentSystem;
-  inputs = (import ../. { }).inputs;
+  sources = (import ../. { }).sources;
 
-  pkgs = import inputs.nixpkgs {
+  pkgs = import sources.nixpkgs {
     inherit system;
     config = {
       allowUnfree = true;
@@ -12,7 +12,7 @@ let
   };
 
   # You can use flakes, npins, niv, fetchTree, fetchFromGitHub or whatever.
-  ekn = import inputs.easykubenix {
+  ekn = import sources.easykubenix {
     inherit pkgs;
     modules = [
       (

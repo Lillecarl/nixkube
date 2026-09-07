@@ -3,7 +3,7 @@
 {
   pkgs,
   lib,
-  inputs,
+  sources,
   ...
 }:
 let
@@ -32,9 +32,9 @@ let
 in
 {
   kubernetes.resources.${namespace} = {
-    ConfigMap.inputs = {
+    ConfigMap.sources = {
       metadata.labels = labels;
-      data = inputs;
+      data = sources;
     };
 
     Job.flake-hello = {

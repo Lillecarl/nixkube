@@ -13,22 +13,10 @@ let
     "nixkube.nix_daemon".level = "WARNING";
     "httpx".level = "WARNING";
   };
-  inputs =
-    (
-      let
-        lockFile = builtins.readFile ../flake.lock;
-        lockAttrs = builtins.fromJSON lockFile;
-        fcLockInfo = lockAttrs.nodes.flake-compatish.locked;
-        fcSrc = builtins.fetchTree fcLockInfo;
-        flake-compatish = import fcSrc;
-      in
-      flake-compatish {
-        source = ../.;
-        overrides = {
-          self = ../.;
-        };
-      }
-    ).inputs;
+  # A module reached through easykubenix's option merge, which does not carry
+  # this repository's arguments, so it asks for the sources itself. The
+  # umbrella answers the same way it does for ../default.nix.
+  sources = import ../nix/sources.nix;
 in
 {
   imports = [
@@ -239,7 +227,7 @@ in
 
     pkgs = lib.mkOption {
       type = lib.types.path;
-      default = inputs.nixpkgs;
+      default = sources.nixpkgs;
       internal = true;
     };
     push = lib.mkOption {
@@ -250,7 +238,7 @@ in
     dinix = lib.mkOption {
       type = lib.types.path;
       internal = true;
-      default = inputs.dinix;
+      default = sources.dinix;
     };
     labels = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;

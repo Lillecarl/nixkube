@@ -1,87 +1,23 @@
 # SPDX-License-Identifier: MIT
 
-let
-  # nixidae is the umbrella that holds this repository, and it owns the
-  # inputs. Inside it, that is the checkout one directory up. Outside it, it
-  # is fetched, and this working copy is put in place of the submodule that
-  # came down with it. Either way the answer is the same one, so a build here
-  # and a build from the umbrella agree.
-  #
-  # The input that matters is easykubenix. From the umbrella it is the
-  # working copy in the next directory, and that copy in turn reaches the
-  # nanopynix beside it, so a change anywhere in the chain is built here with
-  # nothing published in between.
-  #
-  # git+https and not github:, because a GitHub tarball carries no submodule
-  # and the siblings are exactly what this is for.
-  #
-  # `..` from a store path leaves the store root, and Nix refuses that rather
-  # than answering false: "'nix' is too short to be a valid store path". So
-  # ask only when this checkout is not itself in the store.
-  inUmbrella =
-    builtins.substring 0 11 (toString ./.) != "/nix/store/"
-    && builtins.pathExists ../nix/wire.nix;
-
-  umbrella =
-    if inUmbrella then
-      import ../nix/wire.nix
-    else
-      import (
-        (builtins.fetchTree (builtins.parseFlakeRef "git+https://github.com/nixidae/nixidae?submodules=1"))
-        .outPath
-        + "/nix/wire.nix"
-      );
-
-  # Set to make a `--file .` build agree with a flake evaluation. It turns
-  # off the overrides the umbrella works through, so going out to fetch one
-  # would cost a clone and change nothing.
-  overridesDisabled =
-    let
-      value = builtins.getEnv "FLAKE_COMPATISH_DISABLE_OVERRIDES";
-    in
-    value != "" && value != "0";
-
-  # What this file did before the umbrella: read flake.lock and nothing else.
-  own =
-    (
-      let
-        lock = builtins.fromJSON (builtins.readFile ./flake.lock);
-        flake-compatish = import (builtins.fetchTree lock.nodes.flake-compatish.locked);
-      in
-      flake-compatish {
-        source = ./.;
-        overrides = {
-          self = ./.;
-        };
-      }
-    ).inputs;
-in
 {
-  # Every input this repository uses, so that a caller can supply its own.
-  # This used to be a `let` outside the function, which no caller could
-  # reach.
-  inputs ?
-    if overridesDisabled then
-      own
-    else
-      umbrella {
-        project = "nixkube";
-        source = ./.;
-      },
+  # Where every dependency lives, as directories. nix/sources.nix says how
+  # this repository finds the umbrella that owns them.
+  sources ? import ./nix/sources.nix,
   system ? builtins.currentSystem,
 }:
 rec {
-  pkgs = import inputs.nixpkgs {
+  pkgs = import sources.nixpkgs {
     inherit system;
     config = {
       allowUnfree = true;
     };
     overlays = [ (import ./pkgs) ];
   };
-  inherit inputs;
+  inherit sources;
   lib = pkgs.lib;
 
-  easykubenix = import inputs.easykubenix;
+  easykubenix = import sources.easykubenix;
 
   kubenixApply = kubenixInstance { };
   kubenixCI1 = kubenixInstance {
@@ -132,7 +68,7 @@ rec {
       ./kubenix
       ./kubenix/ci/test-workloads.nix
       {
-        _module.args.inputs = inputs;
+        _module.args.sources = sources;
       }
       {
         kluctl.discriminator = "nixkube-test";
@@ -195,7 +131,7 @@ rec {
         module
         ./kubenix
         {
-          _module.args.inputs = inputs;
+          _module.args.sources = sources;
         }
         {
           config = {
@@ -217,7 +153,7 @@ rec {
       ''
         #! ${pkgs.runtimeShell}
         export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
-        # ${lib.concatStrings (lib.attrValues inputs)}
+        # ${lib.concatStrings (lib.attrValues sources)}
         nix-store -qR --include-outputs $(nix-store -qd ${kubenixPush.deploymentScript}) | grep -v '\.drv$' | cachix push nix-csi
       '';
 
@@ -241,7 +177,7 @@ rec {
       ''
         #! ${pkgs.runtimeShell}
         export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
-        # ${lib.concatStrings (lib.attrValues inputs)}
+        # ${lib.concatStrings (lib.attrValues sources)}
         nix-store -qR --include-outputs $(nix-store -qd ${kubenixPushBoth.deploymentScript}) | grep -v '\.drv$' | cachix push nix-csi
       '';
 
@@ -309,8 +245,8 @@ rec {
     };
   };
 
-  treefmt = inputs.treefmt-nix.lib.mkWrapper pkgs {
-    projectRootFile = "flake.nix";
+  treefmt = (import sources.treefmt-nix).mkWrapper pkgs {
+    projectRootFile = "default.nix";
     programs.fish_indent.enable = true;
     programs.isort.enable = true;
     programs.nixfmt.enable = true;
