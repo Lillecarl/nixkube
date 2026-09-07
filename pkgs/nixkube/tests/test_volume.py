@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from src.volume import is_mount
+from src.volume import is_mount, is_mount_source
 
 
 class TestIsMount:
@@ -87,3 +87,68 @@ class TestIsMount:
             f"tmpfs {subdir.resolve()} tmpfs rw 0 0\n",
         )
         assert is_mount(target, mounts_file=mounts) is False
+
+
+class TestIsMountSource:
+    """Tests for is_mount_source() using a temp mountinfo file.
+
+    Field 4 is the mounted subtree inside its filesystem. For a bind mount
+    that is the source directory, which is what a volume root is.
+    """
+
+    def write_mountinfo(self, tmp_path: Path, content: str) -> Path:
+        mountinfo = tmp_path / "mountinfo"
+        mountinfo.write_text(content)
+        return mountinfo
+
+    def line(self, root: str, target: str) -> str:
+        return f"81 26 0:52 {root} {target} rw,relatime shared:1 - ext4 /dev/ubda rw\n"
+
+    def test_source_present_returns_true(self, tmp_path: Path):
+        """A volume root something is mounted from is live."""
+        volume = tmp_path / "volume"
+        volume.mkdir()
+        info = self.write_mountinfo(
+            tmp_path, self.line(str(volume.resolve()), "/var/lib/kubelet/x/mount")
+        )
+        assert is_mount_source(volume, mountinfo_file=info) is True
+
+    def test_deleted_source_still_returns_true(self, tmp_path: Path):
+        """The kernel marks an unlinked source "//deleted". It is still live.
+
+        This is the state that used to make a pod unrepairable: the mount
+        serves an unlinked directory, and no later mount can replace it.
+        """
+        volume = tmp_path / "volume"
+        volume.mkdir()
+        info = self.write_mountinfo(
+            tmp_path,
+            self.line(f"{volume.resolve()}//deleted", "/var/lib/kubelet/x/mount"),
+        )
+        assert is_mount_source(volume, mountinfo_file=info) is True
+
+    def test_target_is_not_a_source(self, tmp_path: Path):
+        """Being a mount *point* says nothing about being a mount *source*."""
+        volume = tmp_path / "volume"
+        volume.mkdir()
+        info = self.write_mountinfo(
+            tmp_path, self.line("/somewhere/else", str(volume.resolve()))
+        )
+        assert is_mount_source(volume, mountinfo_file=info) is False
+
+    def test_absent_source_returns_false(self, tmp_path: Path):
+        """Nothing mounts it, so it is collectable."""
+        volume = tmp_path / "volume"
+        volume.mkdir()
+        info = self.write_mountinfo(tmp_path, self.line("/other", "/mnt/x"))
+        assert is_mount_source(volume, mountinfo_file=info) is False
+
+    def test_unreadable_mountinfo_returns_true(self, tmp_path: Path):
+        """Unknown must not authorise a delete.
+
+        The opposite default loses a running pod's store whenever the mount
+        table cannot be read, which is the moment it is least safe to guess.
+        """
+        volume = tmp_path / "volume"
+        volume.mkdir()
+        assert is_mount_source(volume, mountinfo_file=tmp_path / "missing") is True

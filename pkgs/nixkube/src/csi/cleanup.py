@@ -7,6 +7,7 @@ from pathlib import Path
 import structlog
 
 from ..constants import CSI_GCROOTS, CSI_VOLUMES, KUBELET_PODS_PATH
+from ..volume import is_mount_source
 
 logger = structlog.get_logger("nixkube.csi")
 
@@ -56,6 +57,14 @@ def cleanup_stale_entries(active_handles: set[str]) -> None:
 
     for volume in CSI_VOLUMES.iterdir():
         if volume.name not in active_handles:
+            # A volume kubelet no longer lists, but the kernel still mounts,
+            # belongs to a pod that is still running. `active_handles` comes
+            # from reading vol_data.json files, and a kubelet that is
+            # restarting can leave that answer short. The mount table cannot
+            # be short: it is what the pod is actually using.
+            if is_mount_source(volume):
+                logger.info("stale_volume_still_mounted", path=str(volume))
+                continue
             try:
                 shutil.rmtree(volume)
                 logger.debug("removed_stale_volume", path=str(volume))

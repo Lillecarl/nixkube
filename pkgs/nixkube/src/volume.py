@@ -218,10 +218,52 @@ async def mount_volume(
                 )
 
 
+def is_mount_source(path: Path, mountinfo_file: Path | None = None) -> bool:
+    """Is `path` the source of a mount that is live right now?
+
+    Field 4 of a /proc/self/mountinfo line is the mounted subtree's path
+    inside its filesystem, which for a bind mount is the source directory.
+    The kernel appends "//deleted" to it once that directory is unlinked, so
+    a match here also catches a source somebody has already destroyed.
+
+    /proc/self/mounts cannot answer this: it prints the *device* for a bind
+    mount, not the directory. That is why `is_mount` cannot be reused.
+    """
+    if mountinfo_file is None:
+        mountinfo_file = Path("/proc/self/mountinfo")
+
+    try:
+        wanted = str(path.resolve())
+        for line in mountinfo_file.read_text().splitlines():
+            fields = line.split()
+            if len(fields) >= 4 and fields[3].removesuffix("//deleted") == wanted:
+                return True
+        return False
+    except (FileNotFoundError, OSError):
+        # Unreadable means unknown, and unknown must not authorise a delete.
+        logger.warning(
+            "mountinfo_check_failed", mountinfo_file=str(mountinfo_file), exc_info=True
+        )
+        return True
+
+
 def cleanup_failed_volume(gc_root: Path, volume_root: Path) -> None:
-    """Clean up resources after a failed volume operation."""
+    """Clean up resources after a failed volume operation.
+
+    A volume root that something is still mounted from is not cleaned up. It
+    belongs to a running pod, and deleting it does not undo the mount -- the
+    kernel keeps serving the unlinked directory and marks it "//deleted", so
+    the pod reads an empty store and no later publish can repair the mount,
+    because the kernel refuses to mount onto a deleted mount root.
+
+    That is how one transient build error used to destroy a pod that had
+    been running happily for an hour.
+    """
     failed_paths = []
     for path in [gc_root, volume_root]:
+        if path == volume_root and is_mount_source(path):
+            logger.info("cleanup_skipped_live_mount", path=str(path))
+            continue
         if path.exists():
             try:
                 shutil.rmtree(path)
