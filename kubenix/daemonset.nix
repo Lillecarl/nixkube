@@ -105,6 +105,41 @@ in
                       "nixkube"
                     ];
                     securityContext.privileged = true;
+
+                    /*
+                      Ask the livenessprobe sidecar whether the driver still
+                      answers, and restart this container when it does not.
+
+                      The sidecar was already here, calling Probe over
+                      /csi/nixkube/csi.sock and serving the answer on 9808.
+                      Nothing read it. So a driver that had become
+                      unreachable stayed that way, and the only symptom was
+                      pods stuck in ContainerCreating with no event to say
+                      why -- kubelet cannot report a driver it cannot talk
+                      to.
+
+                      Measured: deleting /var/lib/kubelet/plugins/nixkube/
+                      csi.sock left the DaemonSet 5/5 Running with 0
+                      restarts, and a pod that wanted a volume waited 298
+                      seconds without one thing changing. Unlinking the
+                      path does not close the listening socket the driver
+                      holds, so nothing inside the driver notices either.
+
+                      failureThreshold x periodSeconds is 50s of real
+                      unreachability before a restart, and
+                      initialDelaySeconds keeps a slow start from counting.
+                    */
+                    livenessProbe = {
+                      httpGet = {
+                        path = "/healthz";
+                        port = 9808;
+                      };
+                      initialDelaySeconds = 30;
+                      periodSeconds = 10;
+                      timeoutSeconds = 5;
+                      failureThreshold = 5;
+                    };
+
                     env = lib.mkNamedList {
                       PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
                       ENABLE_COMPAT_DRIVER.value = lib.boolToString cfg.node.compat;
@@ -218,6 +253,11 @@ in
                       "--csi-address=/csi/nixkube/csi.sock"
                       "--health-port=9808"
                     ];
+                    # The port nix-node's livenessProbe reads. Named so the
+                    # two stay together when somebody moves one.
+                    ports = lib.mkNamedList {
+                      healthz.containerPort = 9808;
+                    };
                     volumeMounts = lib.mkNamedList {
                       csi-socket.mountPath = "/csi";
                       registration.mountPath = "/registration";
