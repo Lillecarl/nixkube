@@ -407,16 +407,31 @@ async def the_state_is_wiped(cp, settings):
     await on_node(cp, f"rm -rf {d['volumes']}/* {d['containers']}/*")
 
 
+# What the pod that was already running is entitled to afterwards.
+#
+# KEEPS is the normal answer, and it is the strong one: the scenario breaks
+# the driver and leaves the node's files alone, so a pod that was already
+# served must still hold its mounts.
+#
+# REPLACED is for the one scenario that deletes those files. The resident's
+# CSI volume root is among them, and a bind mount whose source is unlinked
+# goes on serving the unlinked directory -- the kernel marks it "//deleted"
+# and nothing outside the pod's mount namespace can repair it. Asking that
+# pod to still work would be asking for the impossible, so the question
+# becomes the honest one: does the Deployment's replacement come up whole?
+KEEPS = "keeps its mounts"
+REPLACED = "is replaced"
+
 SCENARIOS = (
-    ("kubernetes deletes the pod", kubernetes_deletes_the_pod),
-    ("crictl stops the container", crictl_stops_the_container),
-    ("crictl removes the container", crictl_removes_the_container),
-    ("crictl removes the sandbox", crictl_removes_the_sandbox),
-    ("the process is killed outright", the_process_is_killed),
-    ("kubelet restarts", kubelet_restarts),
-    ("containerd restarts", containerd_restarts),
-    ("its csi socket is deleted", the_csi_socket_is_deleted),
-    ("its state directories are wiped", the_state_is_wiped),
+    ("kubernetes deletes the pod", kubernetes_deletes_the_pod, KEEPS),
+    ("crictl stops the container", crictl_stops_the_container, KEEPS),
+    ("crictl removes the container", crictl_removes_the_container, KEEPS),
+    ("crictl removes the sandbox", crictl_removes_the_sandbox, KEEPS),
+    ("the process is killed outright", the_process_is_killed, KEEPS),
+    ("kubelet restarts", kubelet_restarts, KEEPS),
+    ("containerd restarts", containerd_restarts, KEEPS),
+    ("its csi socket is deleted", the_csi_socket_is_deleted, KEEPS),
+    ("its state directories are wiped", the_state_is_wiped, REPLACED),
 )
 
 
@@ -447,7 +462,7 @@ async def chaos(cp, settings):
     """
     only = [s for s in settings.get("scenarios", "").split(",") if s.strip()]
 
-    for name, action in SCENARIOS:
+    for name, action, resident in SCENARIOS:
         if only and not any(s.strip() in name for s in only):
             continue
         print(f"\n[nixkube] ======== {name} ========", flush=True)
@@ -455,6 +470,10 @@ async def chaos(cp, settings):
         await wait_for_apiserver(cp)
         await wait_for_driver(cp)
         await probe(cp, settings, name)
+        if resident is REPLACED:
+            # `--wait` by default, so the old pod is gone before
+            # `check_resident` counts pods and finds the new one.
+            await kubectl(cp, f"delete pod --namespace {NAMESPACE} {RESIDENT}")
         await check_resident(cp, settings, name)
         await check_reconciled(cp, settings, name)
 
