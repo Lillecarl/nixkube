@@ -17,8 +17,27 @@
 # This repository is not a flake. Every entry point here takes the set this
 # file returns and imports what it wants.
 let
-  inUmbrella =
-    builtins.substring 0 11 (toString ../.) != "/nix/store/" && builtins.pathExists ../../nix/wire.nix;
+  # Where this checkout sits. Inside the umbrella, whether that umbrella is a
+  # working copy or a pinned store path, this is `<umbrella>/nixkube`.
+  # Fetched on its own, it is a store path with nothing above it.
+  root = toString ../.;
+
+  # `../..` from a bare store path leaves the store root, and Nix refuses to
+  # evaluate that at all: "'nix' is too short to be a valid store path".
+  # `builtins.tryEval` does not catch it -- measured, not assumed -- so the
+  # question has to be avoided rather than caught.
+  #
+  # A bare store path is exactly `/nix/store/` plus one component. Anything
+  # deeper has a directory between this checkout and the store root, which is
+  # precisely the case where the umbrella is the thing in the store and this
+  # checkout is inside it.
+  escapesStore = builtins.match "/nix/store/[^/]+" root != null;
+
+  # Being in the store does not mean the umbrella is absent. An earlier
+  # version tested "not in the store", which is only ever true in a working
+  # copy -- so every downstream project that pinned the umbrella silently
+  # took the fetch below instead of the umbrella it shipped inside.
+  inUmbrella = !escapesStore && builtins.pathExists ../../nix/wire.nix;
 
   wire =
     if inUmbrella then
