@@ -4,6 +4,7 @@
 {
   imports = [
     ./options.nix
+    ./assertions.nix
     ./namespace.nix
     ./daemonset.nix
     ./csidriver.nix
