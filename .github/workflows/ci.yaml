@@ -86,15 +86,29 @@ jobs:
         uses: ./.github/actions/setup-nix
         with:
           cache_key: build-arm64
+      # One derivation at a time, with every core.
+      #
+      # This runner has 4 cores and 16 GB, and `max-jobs auto` lets it build
+      # four of nixkube's Python packages at once. grpclib-ttrpc compiles a Go
+      # ttrpc test server and runs its suite, and four more run grpcio-tools.
+      # Measured twice: run 34376191226 died after 1h14m with "the hosted
+      # runner lost communication with the server ... starves it for
+      # CPU/Memory", and the run before it reached the 6h job limit. amd64
+      # never hit either, because everything it needs is already substitutable.
+      #
+      # Only 14 of the 241 paths in that closure are missing from
+      # cache.nixos.org, so this is a small build starving a small runner, not
+      # a large one. Serialising costs little when the cache is warm and
+      # nothing is built at all.
       - name: Build and push environments
         run: |
           unlink nix-envs || true
-          nix build --show-trace --file . push --out-link nix-envs
+          nix build --show-trace --max-jobs 1 --cores 4 --file . push --out-link nix-envs
           ./nix-envs/bin/push
       - name: Build and push arm64 nix image
         run: |
           unlink nix-nix || true
-          nix build --show-trace --file . nixImage.pushArch.aarch64-linux --out-link nix-nix
+          nix build --show-trace --max-jobs 1 --cores 4 --file . nixImage.pushArch.aarch64-linux --out-link nix-nix
           ./nix-nix/bin/push-nix-aarch64-linux
   build-manifests:
     needs: [build-amd64, build-arm64]
