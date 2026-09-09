@@ -82,15 +82,65 @@ let
       in
       lib.concatMap offendingMounts containers;
 
-  offenders = lib.pipe config.kubernetes.resources [
-    (lib.mapAttrsToList (
-      _namespace: kinds:
-      lib.mapAttrsToList (
-        kind: named: lib.mapAttrsToList (name: resource: offendersIn kind name resource) named
-      ) kinds
-    ))
-    lib.flatten
-  ];
+  /*
+    An env var with an empty string value never survives a round trip.
+
+    `EnvVar.Value` is `json:"value,omitempty"` in the Kubernetes Go types, so
+    the apiserver drops it:
+
+      rendered   {"name": "PYNIXD_SSH_HOST", "value": ""}
+      live       {"name": "PYNIXD_SSH_HOST"}
+
+    Every GitOps tool then reports a difference between git and the cluster on
+    a field that nobody can make match. Measured on nixlab2, where one such key
+    held an ArgoCD Application OutOfSync for a whole session, and twice sent the
+    reader after an unrelated unhealthy component first.
+
+    The value belongs somewhere the apiserver does not rewrite. A string inside
+    a ConfigMap is not an EnvVar and survives, which is where pynixd's
+    `ssh_host` went.
+
+    This is the same family as a rendered `kustomize = {}`: any field the
+    apiserver drops must not be rendered.
+  */
+  emptyEnvIn =
+    kind: name: resource:
+    let
+      pod = podSpecOf resource;
+    in
+    if pod == null then
+      [ ]
+    else
+      let
+        containers = (listOf pod "containers") ++ (listOf pod "initContainers");
+        offending =
+          container:
+          lib.pipe (listOf container "env") [
+            (lib.filter (entry: entry.value or null == ""))
+            (map (
+              entry:
+              "${kind}/${name}: container ${container.name or "?"} sets ${entry.name} to an "
+              + "empty string, which the apiserver drops"
+            ))
+          ];
+      in
+      lib.concatMap offending containers;
+
+  # Walk every rendered resource with one of the checks above.
+  walk =
+    check:
+    lib.pipe config.kubernetes.resources [
+      (lib.mapAttrsToList (
+        _namespace: kinds:
+        lib.mapAttrsToList (
+          kind: named: lib.mapAttrsToList (name: resource: check kind name resource) named
+        ) kinds
+      ))
+      lib.flatten
+    ];
+
+  offenders = walk offendersIn;
+  emptyEnvOffenders = walk emptyEnvIn;
 in
 {
   config = lib.mkIf cfg.enable {
@@ -104,6 +154,17 @@ in
           + "Talos. Give the subdirectory its own hostPath volume and mount it "
           + "plainly. See issue #16.\n  "
           + lib.concatStringsSep "\n  " offenders;
+      }
+      {
+        assertion = emptyEnvOffenders == [ ];
+        message =
+          "An env var is set to an empty string. EnvVar.Value is "
+          + "`json:\"value,omitempty\"`, so the apiserver drops it and the live "
+          + "object never matches what was rendered. Every GitOps tool then "
+          + "reports drift that nobody can resolve. Carry the value somewhere "
+          + "the apiserver does not rewrite, such as a ConfigMap, or give it a "
+          + "value that is not empty.\n  "
+          + lib.concatStringsSep "\n  " emptyEnvOffenders;
       }
     ];
   };
