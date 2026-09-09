@@ -2,9 +2,6 @@
 name: "Setup Nix & Caches"
 description: "Installs Nix and sets up substituters"
 inputs:
-  github_token:
-    description: "GitHub Token for API access"
-    required: true
   cache_key:
     description: "Cache key"
     required: true

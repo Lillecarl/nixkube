@@ -25,7 +25,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: check
       - name: Run type checker
         run: nix-shell --run "pyright pkgs/nixkube/src"
@@ -41,7 +40,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: build-amd64
       - name: Build and push environments
         run: |
@@ -61,7 +59,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: build-arm64
       - name: Build and push environments
         run: |
@@ -82,7 +79,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: build-manifests
       - name: Create nix multi-arch manifest
         run: |
@@ -105,7 +101,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: test-kind-cache
       - name: Create Kind cluster
         uses: helm/kind-action@main
@@ -148,7 +143,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: test-kind-nocache
       - name: Create Kind cluster
         uses: helm/kind-action@main
@@ -227,7 +221,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: release
       - name: Render deployment manifest
         run: |
