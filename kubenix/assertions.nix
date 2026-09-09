@@ -39,6 +39,22 @@ let
     resource.spec.template.spec or resource.spec.jobTemplate.spec.template.spec
       or (if resource.spec or null != null && resource.spec ? containers then resource.spec else null);
 
+  # A list field of a rendered resource. `x or [ ]` is not enough: easykubenix
+  # renders through typed submodules whose optional fields default to null, so
+  # the attribute is present and null rather than missing. Measured on a
+  # consumer tree -- Deployment/hubble-ui has a container with a null
+  # volumeMounts, and `or [ ]` let the null through to lib.filter.
+  listOf =
+    attrs: field:
+    let
+      value = attrs.${field} or null;
+    in
+    if value == null then [ ] else value;
+
+  # Present-and-null is not "has a subPath" either. Nothing hit this yet, but
+  # `mount ? subPath` would fire on it and print "with subPath null".
+  hasSubPath = mount: mount.subPath or null != null;
+
   offendersIn =
     kind: name: resource:
     let
@@ -48,15 +64,15 @@ let
       [ ]
     else
       let
-        hostPathVolumes = lib.pipe (pod.volumes or [ ]) [
+        hostPathVolumes = lib.pipe (listOf pod "volumes") [
           (lib.filter (volume: volume ? hostPath))
           (map (volume: volume.name))
         ];
-        containers = (pod.containers or [ ]) ++ (pod.initContainers or [ ]);
+        containers = (listOf pod "containers") ++ (listOf pod "initContainers");
         offendingMounts =
           container:
-          lib.pipe (container.volumeMounts or [ ]) [
-            (lib.filter (mount: mount ? subPath && lib.elem mount.name hostPathVolumes))
+          lib.pipe (listOf container "volumeMounts") [
+            (lib.filter (mount: hasSubPath mount && lib.elem mount.name hostPathVolumes))
             (map (
               mount:
               "${kind}/${name}: container ${container.name or "?"} mounts hostPath volume "

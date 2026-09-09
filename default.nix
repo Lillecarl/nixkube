@@ -243,6 +243,38 @@ rec {
         cp --no-preserve=mode ${optionsDocs.optionsCommonMark} $GIT_ROOT/doc/options.md
       '';
 
+  # Evaluate the hostPath+subPath assertion against a container that has no
+  # volumeMounts at all.
+  #
+  # easykubenix renders through typed submodules whose optional fields default
+  # to null, so such a container has `volumeMounts = null`, not a missing
+  # attribute. `x or [ ]` does not catch that, and the assertion crashed on a
+  # consumer tree with "expected a list but found null".
+  #
+  # Every container nixkube declares has volumeMounts, so none of the six
+  # instances above can produce the shape. This attribute does, on purpose.
+  assertionsNullShape =
+    let
+      instance = kubenixInstance {
+        module.imports = [
+          (
+            { lib, ... }:
+            {
+              kubernetes.resources.nixkube.Deployment.nullprobe = {
+                spec.template.spec.containers = lib.mkNamedList {
+                  backend.image = "example/backend";
+                };
+              };
+            }
+          )
+        ];
+      };
+    in
+    pkgs.runCommand "assertions-null-shape" { } ''
+      test -s ${instance.manifestYAMLFile}
+      echo ok > $out
+    '';
+
   # NixOS integration tests — spin up real kubeadm clusters in VMs
   nixosTests = {
     containerd = import ./tests/nixos/integration.nix {
