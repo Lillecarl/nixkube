@@ -154,7 +154,27 @@ rec {
         #! ${pkgs.runtimeShell}
         export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
         # ${lib.concatStrings (lib.attrValues sources)}
-        nix-store -qR --include-outputs $(nix-store -qd ${kubenixPush.deploymentScript}) | grep -v '\.drv$' | cachix push nix-csi
+        #
+        # The runtime closure, and not the derivation closure with its outputs.
+        #
+        # `-qR --include-outputs` on the .drv uploads every build-time
+        # dependency's output as well: compilers, sources, intermediate
+        # results. A node needs none of them. That was there to speed up
+        # rebuilds while nixkube carried a patched Nix, and nixkube no longer
+        # overrides Nix at all, so the reason has gone.
+        #
+        # Measured on the aarch64 side, which is where the cost showed:
+        #
+        #   derivation closure   1270 paths   1197 absent from cachix   4.91 GiB
+        #   runtime closure       328 paths    298 absent               1.37 GiB
+        #
+        # cachix compresses each path with zstd on the runner. Five gigabytes
+        # of that on a 4-core arm runner is what "the hosted runner lost
+        # communication with the server ... starves it for CPU/Memory" looks
+        # like, and build-arm64 died that way twice. amd64 never did, because
+        # its build-time outputs went to cachix over months of runs and were
+        # skipped. See issue #21.
+        nix-store -qR ${kubenixPush.deploymentScript} | cachix push nix-csi
       '';
 
   # Push kubenixCI2 (nocache variant) store paths to cachix.
@@ -168,8 +188,9 @@ rec {
         set -euo pipefail
         # No 2>/dev/null on either command. Both wrote the reason a push failed
         # to stderr, and both threw it away. See issue #12.
-        DRV=$(nix-store -qd $(nix build --no-link --print-out-paths --file ${builtins.toString ./.} kubenixCI2.deploymentScript))
-        nix-store -qR --include-outputs "$DRV" | grep -v '\.drv$' | cachix push nix-csi
+        # The runtime closure, for the reason given on `push` above.
+        OUT=$(nix build --no-link --print-out-paths --file ${builtins.toString ./.} kubenixCI2.deploymentScript)
+        nix-store -qR "$OUT" | cachix push nix-csi
       '';
 
   # Push environments for both x86_64-linux and aarch64-linux to cachix.
@@ -184,7 +205,8 @@ rec {
         #! ${pkgs.runtimeShell}
         export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
         # ${lib.concatStrings (lib.attrValues sources)}
-        nix-store -qR --include-outputs $(nix-store -qd ${kubenixPushBoth.deploymentScript}) | grep -v '\.drv$' | cachix push nix-csi
+        # The runtime closure, for the reason given on `push` above.
+        nix-store -qR ${kubenixPushBoth.deploymentScript} | cachix push nix-csi
       '';
 
   uploadScratch =
