@@ -262,18 +262,39 @@ rec {
             {
               kubernetes.resources.nixkube.Deployment.nullprobe = {
                 spec.template.spec.containers = lib.mkNamedList {
-                  backend.image = "example/backend";
+                  backend = {
+                    image = "example/backend";
+                    # Present and null, which is the shape that broke the
+                    # assertion. Leaving it out gives a *missing* attribute
+                    # instead, and `x or [ ]` handles that one -- so a probe
+                    # that omits it passes whether the code is fixed or not.
+                    #
+                    # This attribute made exactly that mistake, and the test
+                    # that convinced me otherwise was `c.volumeMounts or null
+                    # == null`, which answers null for a missing attribute too.
+                    volumeMounts = null;
+                  };
                 };
               };
             }
           )
         ];
       };
+      # Evaluate the assertions, and do not build the manifest.
+      #
+      # This read `test -s ${"$"}{instance.manifestYAMLFile}`, which realises the
+      # whole closure. That failed the check job on a runner with a cold store,
+      # for a test whose entire subject is an evaluation. Reading
+      # config.assertions forces every condition, including the walk over
+      # kubernetes.resources that this attribute exists to exercise, and
+      # nothing is built.
+      #
+      # The output closure of this derivation was empty either way, which is
+      # what I measured and why I got it wrong. The cost was in the inputs.
+      failed = lib.filter (entry: !entry.assertion) instance.config.assertions;
     in
-    pkgs.runCommand "assertions-null-shape" { } ''
-      test -s ${instance.manifestYAMLFile}
-      echo ok > $out
-    '';
+    assert failed == [ ];
+    pkgs.runCommand "assertions-null-shape" { } "echo ok > $out";
 
   # An operator can cap or disable builders through nixkube.pynixd.settings.
   #
