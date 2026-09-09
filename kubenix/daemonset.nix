@@ -168,10 +168,42 @@ in
                         mountPath = "/var/lib/kubelet";
                         mountPropagation = "Bidirectional";
                       };
-                      nix-store = {
+                      /*
+                        A plain mount of <hostMountPath>/nix, and not `subPath =
+                        "nix"` on the parent volume.
+
+                        The kubelet performs a subPath bind itself, in its own
+                        mount namespace. A distribution that runs the kubelet in
+                        a container does not have <hostMountPath> in that
+                        namespace, so the kubelet binds an empty directory over
+                        /nix and every store path is missing. The container then
+                        cannot exec out of /nix/var/result/bin, and the error
+                        names $PATH rather than the store.
+
+                        Measured on Talos v1.13.9, one pod, one hostPath volume,
+                        mounted twice:
+
+                          /vol  (plain)           dev 253:5 xfs   nix/store = 242 paths
+                          /nix  (subPath: nix)    dev 0:62 overlay   empty
+
+                        and directly, through /proc:
+
+                          host pid 1  mnt:[4026531832]  .../nix/store -> 242 entries
+                          kubelet     mnt:[4026532779]  .../nix/store ->   0 entries
+
+                        A plain hostPath mount is handed to the runtime as a
+                        path instead, and resolves against the host tree. That
+                        is also why initcopy sees a populated store while
+                        nix-node does not: initcopy writes through the plain
+                        mount at /nix-volume.
+
+                        kubeadm runs its kubelet in the host mount namespace, so
+                        no test with a kubeadm control plane can see this.
+                        See issue #16.
+                      */
+                      nix-root = {
                         mountPath = "/nix";
                         mountPropagation = "Bidirectional";
-                        subPath = "nix";
                       };
 
                       ssh-config.mountPath = "/etc/ssh";
@@ -275,6 +307,17 @@ in
                   registration.hostPath.path = "/var/lib/kubelet/plugins_registry";
                   nix-store.hostPath = {
                     path = cfg.hostMountPath;
+                    type = "DirectoryOrCreate";
+                  };
+                  # The store root, as its own volume, so nix-node mounts it
+                  # without subPath. See the nix-root volumeMount above.
+                  #
+                  # DirectoryOrCreate is required, not a convenience: the
+                  # kubelet checks hostPath type when it sets up pod volumes,
+                  # which happens before initcopy runs. `Directory` would fail
+                  # on a node that has no store yet.
+                  nix-root.hostPath = {
+                    path = "${cfg.hostMountPath}/nix";
                     type = "DirectoryOrCreate";
                   };
                   csi-socket.hostPath = {
