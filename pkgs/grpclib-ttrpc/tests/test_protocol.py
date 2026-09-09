@@ -76,7 +76,7 @@ class TestSingleFrame:
         assert flags == FLAG_REMOTE_CLOSED
 
     def test_data_frame_feeds_existing_stream(self):
-        proto, _, handler = make_proto()
+        proto, _, _handler = make_proto()
         proto.data_received(encode_frame(1, MSG_TYPE_REQUEST, 0, b"req"))
 
         proto.data_received(encode_frame(1, MSG_TYPE_DATA, 0, b"data"))
@@ -169,7 +169,7 @@ class TestOversizedPayload:
 
 class TestDataFrameRouting:
     def test_data_frame_for_unknown_stream_ignored(self):
-        proto, _, handler = make_proto()
+        proto, _, _handler = make_proto()
         # No prior REQUEST frame for stream 5
         proto.data_received(encode_frame(5, MSG_TYPE_DATA, 0, b"orphan"))
         # No crash, handler not notified

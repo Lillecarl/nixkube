@@ -76,7 +76,7 @@ class FakeTransport(asyncio.Transport):
         data = bytes(self.written)
         self.written.clear()
         while len(data) >= HEADER_SIZE:
-            length, stream_id, msg_type, flags, payload, data = decode_frame(data)
+            _length, stream_id, msg_type, flags, payload, data = decode_frame(data)
             frames.append((stream_id, msg_type, flags, payload))
         return frames
 

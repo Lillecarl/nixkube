@@ -61,7 +61,7 @@ def encoded(msg):
 @pytest.mark.asyncio
 async def test_recv_message_unary():
     req = DummyRequest(value="hello")
-    stream, _, buf = make_stream(
+    stream, _, _buf = make_stream(
         Cardinality.UNARY_UNARY,
         preload=[encoded(req), None],
     )
@@ -137,7 +137,7 @@ async def test_trailing_unary_ok_sends_response():
 
     frames = transport.pop_frames()
     assert len(frames) == 1
-    sid, mtype, flags, payload = frames[0]
+    _sid, mtype, flags, payload = frames[0]
     assert mtype == MSG_TYPE_RESPONSE
     assert flags & FLAG_REMOTE_CLOSED
     resp = Response.FromString(payload)
@@ -151,7 +151,7 @@ async def test_trailing_unary_error_sends_response_empty_payload():
     await stream.send_trailing_metadata(status=Status.NOT_FOUND, status_message="gone")
     frames = transport.pop_frames()
     assert len(frames) == 1
-    _, mtype, flags, payload = frames[0]
+    _, mtype, _flags, payload = frames[0]
     assert mtype == MSG_TYPE_RESPONSE
     resp = Response.FromString(payload)
     assert resp.status.code == Status.NOT_FOUND.value

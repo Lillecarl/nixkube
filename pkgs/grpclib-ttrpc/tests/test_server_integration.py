@@ -105,7 +105,7 @@ async def test_echo_stream(streaming_client: TtrpcClient) -> None:
     await streaming_client.send_data_frame(sid, b"", close=True)
 
     # Server echoes back the payload
-    flags, payload = await streaming_client.read_data_frame()
+    _flags, payload = await streaming_client.read_data_frame()
     reply = dec(payload, EchoPayload)
     assert reply.seq == 43
     assert reply.msg == "stream"
@@ -358,7 +358,7 @@ async def test_client_side_timeout_on_slow_operation(
 
     # Should receive response within 1 second
     try:
-        flags, payload = await asyncio.wait_for(
+        _flags, payload = await asyncio.wait_for(
             streaming_client.read_data_frame(),
             timeout=1.0,
         )

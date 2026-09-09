@@ -51,7 +51,7 @@ async def tcp_server():
 
 @pytest_asyncio.fixture
 async def tcp_client(tcp_server):
-    server, port = tcp_server
+    _server, port = tcp_server
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     client = TtrpcClient(reader, writer)
     yield client
@@ -73,7 +73,7 @@ async def unix_server():
 
 @pytest_asyncio.fixture
 async def unix_client(unix_server):
-    server, path = unix_server
+    _server, path = unix_server
     reader, writer = await asyncio.open_unix_connection(path)
     client = TtrpcClient(reader, writer)
     yield client
@@ -220,7 +220,7 @@ async def test_grpc_error_in_handler(tcp_server):
                 )
             }
 
-    server, port = tcp_server
+    _server, _port = tcp_server
     # spin up a separate server for this test
     err_server = Server([ErrorService()])
     await err_server.start(host="127.0.0.1", port=0)
