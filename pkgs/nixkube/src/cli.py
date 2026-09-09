@@ -6,6 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
+import anyio
 import structlog
 
 from .constants import (
@@ -145,11 +146,15 @@ async def async_main():
     siblings, and exits the process (Kubernetes restarts the pod with backoff).
     """
     config: dict = {}
-    logging_config_path = Path("/etc/nix/logging.json")
+    # `anyio.Path`, not `pathlib.Path`: `open()` in an async function blocks
+    # the event loop. It costs nothing here, since nothing else is running
+    # yet, but the rule is worth keeping whole -- this is the only place in
+    # the service that reads a file from async code.
+    logging_config_path = anyio.Path("/etc/nix/logging.json")
+    config_present = await logging_config_path.exists()
 
-    if logging_config_path.exists():
-        with open(logging_config_path) as f:
-            config = json.load(f)
+    if config_present:
+        config = json.loads(await logging_config_path.read_text())
 
     renderer = config.pop("renderer", "json")
     configure_structlog(renderer)
@@ -163,7 +168,7 @@ async def async_main():
     logging.getLogger().setLevel(root_level)
 
     logger = structlog.get_logger("nixkube")
-    if logging_config_path.exists():
+    if config_present:
         logger.info("logging_config_loaded", path=str(logging_config_path))
     else:
         logger.info("logging_config_fallback", path=str(logging_config_path))

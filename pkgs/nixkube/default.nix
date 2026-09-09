@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 {
+  anyio, # Structured concurrency, and non-blocking file IO in async code
   buildPythonApplication, # Builder
   dockerTools, # binSh, caCertificates, usrBinEnv for container setup
   hatchling, # Build system
@@ -38,6 +39,7 @@ buildPythonApplication {
   pyproject = true;
   build-system = [ hatchling ];
   dependencies = [
+    anyio
     coreutils
     cryptography
     cri-proto-python
