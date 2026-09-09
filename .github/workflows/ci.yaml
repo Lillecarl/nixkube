@@ -178,9 +178,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: nixbuild/nix-quick-install-action@v35
+      # nix-csi is the cache this repository owns, and the one every other job
+      # pushes to. The token can push to it. A push to `lillecarl` answered
+      # 403 "You're not authorized to access binary cache lillecarl."
       - uses: cachix/cachix-action@v15
         with:
-          name: lillecarl
+          name: nix-csi
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           useDaemon: false
       - name: Build documentation
