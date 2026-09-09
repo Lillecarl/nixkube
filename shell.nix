@@ -18,6 +18,29 @@ let
     ++ pkgs.nixkube.dependencies
     ++ pkgs.pynixd-nixkube.dependencies;
   python = pkgs.python3.withPackages pypkgs;
+
+  # `pylsp-mypy` fails its own test suite on python3.14 in the pinned
+  # nixpkgs, so the whole shell refused to build -- and with it `check`,
+  # whose first step is `nix-shell --run "pyright ..."`. An editor
+  # integration was able to fail CI.
+  #
+  #   FAILED test/test_plugin.py::test_plugin - assert 2 == 1
+  #   FAILED test/test_plugin.py::test_handling_of_line_endings[...] - KeyError: 'code'
+  #   FAILED test/test_plugin.py::test_multiple_workspaces - assert 1 == 0
+  #   ... 7 failed, 32 passed
+  #
+  # Broken upstream, not here: `cache.nixos.org` returns 404 for it, so
+  # nixpkgs' own builders did not get it either. Every other tool in this
+  # shell returns 200.
+  #
+  # Skipping its tests is safe in a way that skipping Nix's was not (see
+  # `pkgs/default.nix`). There is no cache entry to lose, because there is no
+  # successful build to cache, and nothing outside this shell holds it -- it
+  # ships in no image and no environment.
+  pylsp-mypy = pkgs.python3Packages.pylsp-mypy.overridePythonAttrs (_: {
+    doCheck = false;
+    doInstallCheck = false;
+  });
   xonsh = pkgs.xonsh.override {
     extraPackages = pypkgs;
   };
@@ -33,7 +56,7 @@ pkgs.mkShell {
     pkgs.kluctl
     pkgs.kubectx
     pkgs.pyright
-    pkgs.python3Packages.pylsp-mypy
+    pylsp-mypy
     pkgs.python3Packages.pylsp-rope
     pkgs.python3Packages.python-lsp-ruff
     pkgs.python3Packages.python-lsp-server
