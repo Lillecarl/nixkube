@@ -328,6 +328,23 @@ in
               spec = {
                 accessModes = [ "ReadWriteOnce" ];
                 resources.requests.storage = "10Gi";
+              }
+              # Omitted when null, and not rendered as `storageClassName: null`.
+              #
+              # The option means "use the cluster's default StorageClass", and
+              # the way to say that is to leave the key out. Rendering a null
+              # says something else: the apiserver defaults an unset
+              # storageClassName to the name of the default class and stores
+              # it, so the live object holds a string where the manifest holds
+              # null, permanently.
+              #
+              # volumeClaimTemplates are immutable after creation, so nothing
+              # can reconcile that difference later either.
+              #
+              # Same rule as the empty env var above -- a field the apiserver
+              # rewrites must not be rendered -- and this is the null case of
+              # it rather than the empty-string one.
+              // lib.optionalAttrs (cfg.pynixd.storageClassName != null) {
                 inherit (cfg.pynixd) storageClassName;
               };
             };
