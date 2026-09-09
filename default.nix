@@ -294,11 +294,30 @@ rec {
       stock = kubenixInstance { };
       got = capped.config.nixkube.pynixd.controller.settings;
       base = stock.config.nixkube.pynixd.controller.settings;
+
+      # The value the program actually reads.
+      #
+      # Asserting the option alone is not enough, and this check made that
+      # mistake first: the option merged correctly while the StatefulSet still
+      # carried a hardcoded PYNIXD_BUILDER_MAX of "3". NixkubeCentralSettings
+      # reads these from the environment only, so the literal won and capping
+      # builders did nothing.
+      envOf =
+        instance: name:
+        let
+          pod = instance.config.kubernetes.resources.nixkube.StatefulSet.pynixd.spec.template.spec;
+          container = lib.head (lib.filter (c: c.name == "pynixd") pod.containers);
+        in
+        (lib.head (lib.filter (e: e.name == name) container.env)).value;
     in
     assert got.builder-min == 0 && got.builder-max == 0;
     # The defaults still apply where the operator said nothing.
     assert got.idle-timeout == 300;
     assert base.builder-min == 1 && base.builder-max == 3;
+    assert envOf capped "PYNIXD_BUILDER_MAX" == "0";
+    assert envOf capped "PYNIXD_BUILDER_MIN" == "0";
+    assert envOf stock "PYNIXD_BUILDER_MAX" == "3";
+    assert envOf stock "PYNIXD_BUILDER_MIN" == "1";
     pkgs.runCommand "builder-settings-override" { } "echo ok > $out";
 
   # NixOS integration tests — spin up real kubeadm clusters in VMs
