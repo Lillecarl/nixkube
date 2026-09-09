@@ -1,4 +1,0 @@
-Host eu.nixbuild.net
-  IdentityFile ~/.ssh/nixbuild_key
-Host *
-  StrictHostKeyChecking no

@@ -25,7 +25,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: check
       - name: Run type checker
@@ -42,7 +41,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: build-amd64
       - name: Build and push environments
@@ -63,7 +61,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: build-arm64
       - name: Build and push environments
@@ -85,7 +82,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: build-manifests
       - name: Create nix multi-arch manifest
@@ -109,7 +105,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: test-kind-cache
       - name: Create Kind cluster
@@ -153,7 +148,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: test-kind-nocache
       - name: Create Kind cluster
@@ -233,7 +227,6 @@ jobs:
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
         with:
-          nixbuild_key: ${{ secrets.NIXBUILD_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cache_key: release
       - name: Render deployment manifest

@@ -171,7 +171,11 @@ rec {
       '';
 
   # Push environments for both x86_64-linux and aarch64-linux to cachix.
-  # Requires builders that support both architectures (e.g. nixbuild.net or ssh builders).
+  #
+  # Needs a machine that can build both, so it is a hand-run script and not a
+  # CI step: CI builds each architecture on a runner of that architecture
+  # instead (`build-amd64`, `build-arm64`), which is what `push` above is for.
+  # Point it at your own ssh builder if you need it.
   push-env =
     pkgs.writeScriptBin "push-env" # bash
       ''
