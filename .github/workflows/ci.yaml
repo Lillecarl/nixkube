@@ -28,6 +28,12 @@ jobs:
           cache_key: check
       - name: Run type checker
         run: nix-shell --run "pyright pkgs/nixkube/src"
+      # Evaluation-only, and its closure is empty, so this costs seconds. It
+      # renders a container with no volumeMounts to keep the hostPath+subPath
+      # assertion working against easykubenix's submodule defaults, which
+      # nixkube's own resources never produce.
+      - name: Check the assertion against a consumer-shaped render
+        run: nix build --show-trace --file . assertionsNullShape
       - name: Check formatting
         run: |
           nix run --file . treefmt
