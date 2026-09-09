@@ -166,8 +166,10 @@ rec {
         #! ${pkgs.runtimeShell}
         export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
         set -euo pipefail
-        DRV=$(nix-store -qd $(nix build --no-link --print-out-paths --file ${builtins.toString ./.} kubenixCI2.deploymentScript 2>/dev/null))
-        nix-store -qR --include-outputs "$DRV" 2>/dev/null | grep -v '\.drv$' | cachix push nix-csi
+        # No 2>/dev/null on either command. Both wrote the reason a push failed
+        # to stderr, and both threw it away. See issue #12.
+        DRV=$(nix-store -qd $(nix build --no-link --print-out-paths --file ${builtins.toString ./.} kubenixCI2.deploymentScript))
+        nix-store -qR --include-outputs "$DRV" | grep -v '\.drv$' | cachix push nix-csi
       '';
 
   # Push environments for both x86_64-linux and aarch64-linux to cachix.

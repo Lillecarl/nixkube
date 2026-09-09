@@ -90,8 +90,16 @@ jobs:
           unlink nix-scratches || true
           nix build --show-trace --file . scratchImage.push --out-link nix-scratches
           ./nix-scratches/bin/push
+      # Let this fail the job. The cache is load-bearing, not an optimisation:
+      # a node cannot bring itself up without nodeEnv, and a node with no local
+      # store cannot build one. A push that silently does nothing shows up days
+      # later as a pod stuck in ContainerCreating, nowhere near this line.
+      #
+      # A fork has no token and cannot push. That case is skipped by name here,
+      # rather than by discarding every error including the real ones.
       - name: Push nocache variant store paths
-        run: nix run --file . push-ci2 2>/dev/null || true
+        if: env.CACHIX_AUTH_TOKEN != ''
+        run: nix run --file . push-ci2
   test-kind-cache:
     needs: build-manifests
     runs-on: ubuntu-latest
