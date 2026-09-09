@@ -90,6 +90,12 @@ async def run_setup() -> None:
     # Fix gcroot symlinks: nix build re-registers /nix/var/result so the
     # gcroot chain points to /nix/var/result (not the stale /nix-volume path
     # left by the initContainer).
+    #
+    # Only the registration is stale. The symlink target is already right: a
+    # chroot-store build writes the logical `/nix/store/...` path, not the
+    # `--store` prefix. Measured, because reading this as "the target names
+    # /nix-volume" makes it look like the cause of a failure to exec out of
+    # /nix/var/result/bin, and it is not. See issue #16.
     await try_console(
         "nix",
         "build",
