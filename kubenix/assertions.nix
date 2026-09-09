@@ -91,10 +91,21 @@ let
       rendered   {"name": "PYNIXD_SSH_HOST", "value": ""}
       live       {"name": "PYNIXD_SSH_HOST"}
 
-    Every GitOps tool then reports a difference between git and the cluster on
-    a field that nobody can make match. Measured on nixlab2, where one such key
-    held an ArgoCD Application OutOfSync for a whole session, and twice sent the
-    reader after an unrelated unhealthy component first.
+    So the rendered object and the live one differ on a field nobody can make
+    match. That much is measured, on nixlab2.
+
+    What is *not* established is that this causes a GitOps tool to report
+    drift. It was reported here as the cause of an ArgoCD Application staying
+    OutOfSync, and then disproved on the same cluster: Rook's
+    ceph-csi-controller-manager carries the same shape, on the same
+    Application, and ArgoCD calls it Synced. A tool that normalises against the
+    live object does not care.
+
+    The reason to refuse it is simpler and does not need the drift claim.
+    Writing a field that cannot survive is writing something untrue: the
+    manifest says the variable is set to the empty string, and no object ever
+    holds that. Anything that later diffs, audits or reasons about the
+    rendered form starts from a value the cluster never had.
 
     The value belongs somewhere the apiserver does not rewrite. A string inside
     a ConfigMap is not an EnvVar and survives, which is where pynixd's
@@ -199,10 +210,10 @@ in
         message =
           "An env var is set to an empty string. EnvVar.Value is "
           + "`json:\"value,omitempty\"`, so the apiserver drops it and the live "
-          + "object never matches what was rendered. Every GitOps tool then "
-          + "reports drift that nobody can resolve. Carry the value somewhere "
-          + "the apiserver does not rewrite, such as a ConfigMap, or give it a "
-          + "value that is not empty.\n  "
+          + "object never matches what was rendered, so the manifest states a "
+          + "value no object ever holds. Carry it somewhere the apiserver does "
+          + "not rewrite, such as a ConfigMap, or give it a value that is not "
+          + "empty.\n  "
           + lib.concatStringsSep "\n  " emptyEnvOffenders;
       }
     ];

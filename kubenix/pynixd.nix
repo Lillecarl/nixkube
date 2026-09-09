@@ -164,8 +164,11 @@ in
         #
         # `EnvVar.Value` is `json:"value,omitempty"`, so the apiserver drops an
         # empty string: the object renders with `"value": ""` and comes back
-        # without it. Every GitOps tool then sees a permanent difference
-        # between git and the cluster, on a field nobody can make match.
+        # without it. The manifest then states a value no object ever holds.
+        #
+        # Not because it causes GitOps drift. That was reported and then
+        # disproved on the same cluster -- ArgoCD calls another Deployment with
+        # the same shape Synced.
         #
         # Not fixed by removing the setting. pynixd defaults `ssh_host` to
         # 127.0.0.1, so an absent value binds loopback and nothing outside the
