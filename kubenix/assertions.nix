@@ -14,14 +14,18 @@ let
     for a hostPath volume outside /var/lib/kubelet it often cannot. It then
     binds an empty directory, with no error anywhere.
 
-    Measured on Talos v1.13.9, one pod, one hostPath volume, mounted twice:
-
-      /vol  (plain)         dev 253:5 xfs      nix/store = 242 paths
-      /nix  (subPath: nix)  dev 0:62 overlay   empty
-
     A CSI volume is a different case and is allowed. Its source lives under
     /var/lib/kubelet, which a containerised kubelet must have or it cannot
     work at all.
+
+    Both sides are measured, on Talos v1.13.9. One pod, one volume, mounted
+    twice -- once plainly and once with subPath -- for each kind of volume:
+
+      hostPath + subPath   source 0:62    overlay, container rootfs, EMPTY
+      CSI      + subPath   source 253:5   xfs /dev/vda5, populated
+
+    That contrast is the whole reason this assertion refuses one and permits
+    the other.
 
     This is issue #16. It cost days to find, because the symptom named $PATH
     and not the mount. No test with a kubeadm control plane can catch it --
