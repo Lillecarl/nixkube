@@ -209,6 +209,37 @@ rec {
         nix-store -qR ${kubenixPushBoth.deploymentScript} | cachix push nix-csi
       '';
 
+  # Publish both `nix:` images and the multi-arch manifest, by hand.
+  #
+  # `build-arm64` cannot do this. It stalls part-way through substituting from
+  # cachix, on a warm cache and a clean runner, and issue #21 has the
+  # elimination list. Until that is understood, this is how a `nix:` tag gets
+  # published, and it takes about two minutes.
+  #
+  # Needs a machine that can build both architectures, exactly like `push-env`.
+  # Point Nix at a builder for the one it cannot do itself:
+  #
+  #   nix run --file . push-images --builders "@$HOME/tmp/builders"
+  #
+  # REPO_USERNAME and REPO_TOKEN must be set, and the token needs
+  # `write:packages`. A `gh` token does not have that by default:
+  #
+  #   gh auth refresh -s write:packages
+  #   REPO_USERNAME=<user> REPO_TOKEN="$(gh auth token)" nix run --file . push-images
+  #
+  # The manifest step needs both per-architecture tags to exist already, which
+  # is why they are pushed first and in order.
+  push-images = pkgs.writeShellApplication {
+    name = "push-images";
+    text = ''
+      : "''${REPO_USERNAME:?set REPO_USERNAME}"
+      : "''${REPO_TOKEN:?set REPO_TOKEN, with write:packages}"
+      ${lib.getExe' nixImage.pushArch.x86_64-linux "push-nix-x86_64-linux"}
+      ${lib.getExe' nixImage.pushArch.aarch64-linux "push-nix-aarch64-linux"}
+      ${lib.getExe' nixImage.pushManifest "push-nix-manifest"}
+    '';
+  };
+
   uploadScratch =
     let
       scratchVersion = "1.0.1";
