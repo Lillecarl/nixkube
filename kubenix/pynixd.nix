@@ -156,6 +156,11 @@ in
     nixkube.pynixd.builder.settings = lib.mkMerge [
       (lib.mapAttrsRecursive (n: v: lib.mkDefault v) {
         # builder-specific JSON defaults go here (e.g., schedule-mode)
+        #
+        # Empty on purpose. builder-config then renders `config.json = {}`,
+        # which reads like a bug and is not one: it means nothing is
+        # configured, and PynixdSettings() supplies its own defaults. It has
+        # been reported as a fault once already.
       })
       (lib.mapAttrsRecursive (n: v: lib.mkDefault v) config.nixkube.pynixd.settings)
     ];
