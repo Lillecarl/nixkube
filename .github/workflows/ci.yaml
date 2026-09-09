@@ -8,6 +8,20 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+# One run per ref. A push to a branch cancels the run the previous push
+# started, because that run is testing a commit nobody will deploy.
+#
+# Measured on 2026-09-09, after a day of small commits to develop: 22 runs
+# unfinished at once and 18 concurrent build-arm64 jobs, each rebuilding the
+# same 954 MiB aarch64 closure from source. None could help another, because
+# `push` only runs after its own build finishes. Every one of those was a
+# duplicate of the newest.
+#
+# Tags keep their runs. A release is not superseded by the next push, and
+# cancelling one would leave a version half published.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 env:
   REPO_USERNAME: ${{ github.actor }}
   REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
