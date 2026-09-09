@@ -275,6 +275,32 @@ rec {
       echo ok > $out
     '';
 
+  # An operator can cap or disable builders through nixkube.pynixd.settings.
+  #
+  # Both the built-in defaults and the shared settings were wrapped in
+  # mkDefault, so two definitions of builder-max met at the same priority and
+  # the evaluation failed with a conflict rather than one winning. mkForce did
+  # not help, because mapAttrsRecursive re-wrapped it. The option that looks
+  # like the way to cap builders could not set the three keys that have
+  # defaults, which is every key anyone would want to change.
+  builderSettingsOverride =
+    let
+      capped = kubenixInstance {
+        module.config.nixkube.pynixd.settings = {
+          builder-min = 0;
+          builder-max = 0;
+        };
+      };
+      stock = kubenixInstance { };
+      got = capped.config.nixkube.pynixd.controller.settings;
+      base = stock.config.nixkube.pynixd.controller.settings;
+    in
+    assert got.builder-min == 0 && got.builder-max == 0;
+    # The defaults still apply where the operator said nothing.
+    assert got.idle-timeout == 300;
+    assert base.builder-min == 1 && base.builder-max == 3;
+    pkgs.runCommand "builder-settings-override" { } "echo ok > $out";
+
   # NixOS integration tests — spin up real kubeadm clusters in VMs
   nixosTests = {
     containerd = import ./tests/nixos/integration.nix {

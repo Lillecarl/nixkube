@@ -34,6 +34,10 @@ jobs:
       # nixkube's own resources never produce.
       - name: Check the assertion against a consumer-shaped render
         run: nix build --show-trace --file . assertionsNullShape
+      # Also evaluation-only. Both of these encode a shape a consumer reported
+      # and this repository's own instances cannot produce.
+      - name: Check that an operator can cap builders
+        run: nix build --show-trace --file . builderSettingsOverride
       - name: Check formatting
         run: |
           nix run --file . treefmt

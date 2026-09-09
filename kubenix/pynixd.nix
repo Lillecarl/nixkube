@@ -144,13 +144,23 @@ in
   };
   config = lib.mkIf (cfg.enable && cfg.pynixd.enable) {
     # shared settings -> controller settings
+    #
+    # The defaults here are mkOptionDefault, and the shared settings pass
+    # through with whatever priority the consumer gave them.
+    #
+    # Both sides used to be wrapped in mkDefault, which made
+    # `nixkube.pynixd.settings` inert for exactly the keys that have a default:
+    # two mkDefault definitions of builder-max conflict rather than one winning,
+    # and mkForce did not help either, because mapAttrsRecursive re-wrapped it.
+    # So an operator could not cap or disable builders at all, and the option
+    # that looks like the way to do it failed with a priority conflict.
     nixkube.pynixd.controller.settings = lib.mkMerge [
-      (lib.mapAttrsRecursive (n: v: lib.mkDefault v) {
+      (lib.mapAttrsRecursive (n: v: lib.mkOptionDefault v) {
         builder-max = 3;
         builder-min = 1;
         idle-timeout = 300;
       })
-      (lib.mapAttrsRecursive (n: v: lib.mkDefault v) config.nixkube.pynixd.settings)
+      config.nixkube.pynixd.settings
     ];
     # shared settings -> builder settings
     nixkube.pynixd.builder.settings = lib.mkMerge [
@@ -162,7 +172,7 @@ in
         # configured, and PynixdSettings() supplies its own defaults. It has
         # been reported as a fault once already.
       })
-      (lib.mapAttrsRecursive (n: v: lib.mkDefault v) config.nixkube.pynixd.settings)
+      config.nixkube.pynixd.settings
     ];
 
     nixkube.pynixd.builder.nixConfig.settings = {
