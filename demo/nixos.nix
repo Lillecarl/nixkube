@@ -39,8 +39,10 @@ let
           ...
         }:
         {
+          # The prune scope: an apply deletes objects carrying this label that
+          # it did not produce. Read by kluctl and by `ekn kubeapply` alike.
+          ekn.environment = "demodeploy";
           kluctl = {
-            discriminator = "demodeploy"; # Used for kluctl pruning (removing resources not in generated manifests)
             preDeployScript = # bash
               ''
                 nix copy \

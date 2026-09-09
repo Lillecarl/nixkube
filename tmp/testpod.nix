@@ -25,8 +25,8 @@ let
           ];
         in
         {
+          ekn.environment = "nixtest";
           kluctl = {
-            discriminator = "nixtest";
             preDeployScript = # bash
               ''
                 nix copy \

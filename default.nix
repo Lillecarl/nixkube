@@ -71,7 +71,7 @@ rec {
         _module.args.sources = sources;
       }
       {
-        kluctl.discriminator = "nixkube-test";
+        ekn.environment = "nixkube-test";
         nixkube.enable = false;
       }
     ];
