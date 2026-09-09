@@ -13,7 +13,6 @@ Source: nri/pkg/net/multiplex/{mux.go,ttrpc.go}
 
 import asyncio
 import struct
-from typing import Dict, Optional
 
 import structlog
 
@@ -84,7 +83,7 @@ class NriMux:
         self._writer = writer
         # Pre-create queues for both channels so read_loop and consumers
         # always share the same queue object regardless of start order.
-        self._channels: Dict[int, asyncio.Queue] = {
+        self._channels: dict[int, asyncio.Queue] = {
             PLUGIN_SERVICE_CONN: asyncio.Queue(),
             RUNTIME_SERVICE_CONN: asyncio.Queue(),
         }
@@ -97,7 +96,7 @@ class NriMux:
         """Return a Transport that wraps writes for *conn_id*."""
         return MuxChannelTransport(conn_id, self._writer)
 
-    async def read_channel(self, conn_id: int) -> Optional[bytes]:
+    async def read_channel(self, conn_id: int) -> bytes | None:
         """Return the next payload chunk for *conn_id*, or None on EOF."""
         q = self._channels.get(conn_id)
         if q is None:

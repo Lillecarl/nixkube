@@ -11,7 +11,8 @@ to cancel siblings and exit the process (Kubernetes restarts the pod with backof
 import asyncio
 import time
 from collections import deque
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 import structlog
 

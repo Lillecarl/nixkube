@@ -106,7 +106,7 @@ class TestFormatEventNote:
         """Logs that fit exactly at boundary should not be truncated."""
         msg = "x"
         # Calculate exact size: message (1 byte) + newline (1 byte) + remaining
-        available = self.MAX_SIZE - len("x".encode()) - 1
+        available = self.MAX_SIZE - len(b"x") - 1
         logs = "y" * available
         result = _format_event_note(msg, logs=logs)
         assert len(result.encode()) <= self.MAX_SIZE

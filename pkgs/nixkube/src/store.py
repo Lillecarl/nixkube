@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 STORE_PATH_RE = re.compile(r"/nix/store/[a-z0-9]{32}-[^\s/]+")
 

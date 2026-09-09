@@ -4,7 +4,6 @@
 import asyncio
 import struct
 from pathlib import Path
-from typing import Optional
 
 import structlog
 from grpclib.const import Status
@@ -149,14 +148,14 @@ class NriServer:
         self.plugin_idx = plugin_idx
         self.codec = ProtoCodec()
 
-        self._reader: Optional[asyncio.StreamReader] = None
-        self._writer: Optional[asyncio.StreamWriter] = None
-        self._mux: Optional[NriMux] = None
-        self._handler: Optional[TtrpcHandler] = None
-        self._protocol: Optional[TtrpcProtocol] = None
+        self._reader: asyncio.StreamReader | None = None
+        self._writer: asyncio.StreamWriter | None = None
+        self._mux: NriMux | None = None
+        self._handler: TtrpcHandler | None = None
+        self._protocol: TtrpcProtocol | None = None
 
-        self._read_task: Optional[asyncio.Task] = None
-        self._serve_task: Optional[asyncio.Task] = None
+        self._read_task: asyncio.Task | None = None
+        self._serve_task: asyncio.Task | None = None
         self._is_closed = False
 
     async def start(self) -> None:

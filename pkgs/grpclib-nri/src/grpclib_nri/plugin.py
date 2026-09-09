@@ -10,7 +10,7 @@ NRI Event Subscription Bitmask Encoding:
 """
 
 import abc
-from typing import Sequence
+from collections.abc import Sequence
 
 import structlog
 from nri import nri_grpc, nri_pb2

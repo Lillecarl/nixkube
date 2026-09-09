@@ -14,8 +14,10 @@ from grpclib_ttrpc.protocol import (
 from grpclib_ttrpc.server import Stream
 from ttrpc.ttrpc_pb2 import Response
 
-from .dummy_pb2 import DummyReply  # type: ignore[import-not-found]
-from .dummy_pb2 import DummyRequest  # type: ignore[import-not-found]
+from .dummy_pb2 import (
+    DummyReply,  # type: ignore[import-not-found]
+    DummyRequest,  # type: ignore[import-not-found]
+)
 from .helpers import FakeTransport
 
 # ---------------------------------------------------------------------------

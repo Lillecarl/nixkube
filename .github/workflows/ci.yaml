@@ -189,30 +189,23 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
       - uses: nixbuild/nix-quick-install-action@v35
-
       - uses: cachix/cachix-action@v15
         with:
           name: lillecarl
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           useDaemon: false
-
       - name: Build documentation
         run: nix build --file . nixkube-docs --out-link result --print-build-logs --print-out-paths
-
       - name: Verify docs closure
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
-
       - name: Prepare Pages artifact
         run: |
           mkdir -p public
           cp -r --no-preserve=mode,ownership result/. public/
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public
-
   docs-deploy:
     if: github.ref == 'refs/heads/develop'
     needs: docs-build
@@ -230,7 +223,6 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
   release:
     needs: [check, build-manifests, test-kind-cache, test-kind-nocache]
     runs-on: ubuntu-latest

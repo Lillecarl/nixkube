@@ -2,19 +2,10 @@
 
 import asyncio
 import socket
+from collections.abc import Callable, Collection
 from contextlib import nullcontext
 from types import TracebackType
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Collection,
-    Dict,
-    Generic,
-    Optional,
-    Set,
-    Type,
-)
+from typing import TYPE_CHECKING, Any, Generic, Optional
 
 import structlog
 from grpclib._typing import IServable
@@ -83,12 +74,12 @@ class Stream(StreamIterator[_RecvType], Generic[_RecvType, _SendType]):
         raw_stream: TtrpcRawStream,
         method_name: str,
         cardinality: Cardinality,
-        recv_type: Type[_RecvType],
-        send_type: Type[_SendType],
+        recv_type: type[_RecvType],
+        send_type: type[_SendType],
         *,
         codec: CodecBase,
-        deadline: Optional[Deadline] = None,
-        metadata: Optional[_Metadata] = None,
+        deadline: Deadline | None = None,
+        metadata: _Metadata | None = None,
     ) -> None:
         self._raw_stream = raw_stream
         self._method_name = method_name
@@ -105,7 +96,7 @@ class Stream(StreamIterator[_RecvType], Generic[_RecvType, _SendType]):
 
     # --- receiving -----------------------------------------------------------
 
-    async def recv_message(self) -> Optional[_RecvType]:
+    async def recv_message(self) -> _RecvType | None:
         """Receive the next message from the client."""
         payload = await self._raw_stream.read_payload()
         if payload is None:
@@ -147,7 +138,7 @@ class Stream(StreamIterator[_RecvType], Generic[_RecvType, _SendType]):
         self,
         *,
         status: Status = Status.OK,
-        status_message: Optional[str] = None,
+        status_message: str | None = None,
         **_kwargs: Any,
     ) -> None:
         """Send the final frame for this RPC call.
@@ -182,17 +173,17 @@ class Stream(StreamIterator[_RecvType], Generic[_RecvType, _SendType]):
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
         if self._send_trailing_metadata_done:
             return True
 
         if exc_val is not None:
             if isinstance(exc_val, GRPCError):
                 status: Status = exc_val.status
-                status_message: Optional[str] = exc_val.message
+                status_message: str | None = exc_val.message
             elif isinstance(exc_val, Exception):
                 status = Status.UNKNOWN
                 status_message = "Internal Server Error"
@@ -223,7 +214,7 @@ class Stream(StreamIterator[_RecvType], Generic[_RecvType, _SendType]):
 
 
 async def request_handler(
-    mapping: Dict[str, "const.Handler"],
+    mapping: dict[str, "const.Handler"],
     raw_stream: TtrpcRawStream,
     method_name: str,
     flags: int,
@@ -246,7 +237,7 @@ async def request_handler(
             raw_stream.send_frame(MSG_TYPE_RESPONSE, FLAG_REMOTE_CLOSED, response_bytes)
             return
 
-        deadline: Optional[Deadline] = None
+        deadline: Deadline | None = None
         if timeout_nano:
             deadline = Deadline.from_timeout(timeout_nano / 1e9)
 
@@ -323,13 +314,13 @@ class TtrpcHandler(_GC, AbstractTtrpcHandler):
 
     def __init__(
         self,
-        mapping: Dict[str, "const.Handler"],
+        mapping: dict[str, "const.Handler"],
         codec: CodecBase,
     ) -> None:
         self.mapping = mapping
         self.codec = codec
-        self._tasks: Dict[int, "asyncio.Task[None]"] = {}
-        self._cancelled: Set["asyncio.Task[None]"] = set()
+        self._tasks: dict[int, asyncio.Task[None]] = {}
+        self._cancelled: set[asyncio.Task[None]] = set()
 
     def __gc_collect__(self) -> None:
         self._tasks = {s: t for s, t in self._tasks.items() if not t.done()}
@@ -421,18 +412,18 @@ class Server(_GC):
         self,
         handlers: Collection[IServable],
         *,
-        codec: Optional[CodecBase] = None,
+        codec: CodecBase | None = None,
     ) -> None:
-        mapping: Dict[str, "const.Handler"] = {}
+        mapping: dict[str, const.Handler] = {}
         for handler in handlers:
             mapping.update(handler.__mapping__())
 
         self._mapping = mapping
         self._codec = codec if codec is not None else ProtoCodec()
 
-        self._server: Optional[asyncio.AbstractServer] = None
-        self._server_closed_fut: Optional["asyncio.Future[None]"] = None
-        self._handlers: Set[TtrpcHandler] = set()
+        self._server: asyncio.AbstractServer | None = None
+        self._server_closed_fut: asyncio.Future[None] | None = None
+        self._handlers: set[TtrpcHandler] = set()
 
     def __gc_collect__(self) -> None:
         self._handlers = {
@@ -447,17 +438,17 @@ class Server(_GC):
 
     async def start(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
+        host: str | None = None,
+        port: int | None = None,
         *,
-        path: Optional[str] = None,
+        path: str | None = None,
         family: "socket.AddressFamily" = socket.AF_UNSPEC,
         flags: "socket.AddressInfo" = socket.AI_PASSIVE,
-        sock: Optional[socket.socket] = None,
+        sock: socket.socket | None = None,
         backlog: int = 100,
         ssl: Optional["_ssl.SSLContext"] = None,
-        reuse_address: Optional[bool] = None,
-        reuse_port: Optional[bool] = None,
+        reuse_address: bool | None = None,
+        reuse_port: bool | None = None,
     ) -> None:
         """Start listening.
 
@@ -527,9 +518,9 @@ class Server(_GC):
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         self.close()
         await self.wait_closed()

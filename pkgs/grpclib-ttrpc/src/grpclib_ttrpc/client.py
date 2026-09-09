@@ -2,7 +2,8 @@
 
 import asyncio
 import struct
-from typing import Any, AsyncIterator, Optional, Type, TypeVar
+from collections.abc import AsyncIterator
+from typing import Any, TypeVar
 
 import structlog
 from grpclib.const import Status
@@ -33,12 +34,12 @@ async def unary_call(
     service: str,
     method: str,
     request: object,
-    request_type: Type,
-    response_type: Type[_T],
+    request_type: type,
+    response_type: type[_T],
     *,
     connect_timeout: float = 5.0,
     response_timeout: float = 30.0,
-    codec: Optional[CodecBase] = None,
+    codec: CodecBase | None = None,
 ) -> _T:
     """Make a single unary ttrpc RPC call over a Unix socket.
 
@@ -176,7 +177,7 @@ class Client:
         *,
         host: str = "localhost",
         port: int = 9000,
-        codec: Optional[CodecBase] = None,
+        codec: CodecBase | None = None,
         connect_timeout: float = 5.0,
     ) -> None:
         """Create a new ttrpc Client.
@@ -195,8 +196,8 @@ class Client:
         self.port = port
         self.codec = codec or ProtoCodec()
         self.connect_timeout = connect_timeout
-        self._reader: Optional[asyncio.StreamReader] = None
-        self._writer: Optional[asyncio.StreamWriter] = None
+        self._reader: asyncio.StreamReader | None = None
+        self._writer: asyncio.StreamWriter | None = None
         self._next_stream_id = 1  # odd = client-initiated
 
     async def _connect(self) -> None:
@@ -270,8 +271,8 @@ class Client:
         service: str,
         method: str,
         request: _RequestT,
-        request_type: Type[_RequestT],
-        response_type: Type[_ResponseT],
+        request_type: type[_RequestT],
+        response_type: type[_ResponseT],
         *,
         timeout: float = 30.0,
     ) -> _ResponseT:
@@ -319,8 +320,8 @@ class Client:
         service: str,
         method: str,
         request: _RequestT,
-        request_type: Type[_RequestT],
-        response_type: Type[_ResponseT],
+        request_type: type[_RequestT],
+        response_type: type[_ResponseT],
         *,
         timeout: float = 30.0,
     ) -> AsyncIterator[_ResponseT]:
@@ -378,7 +379,7 @@ class Client:
         self,
         service: str,
         method: str,
-        response_type: Type[_ResponseT],
+        response_type: type[_ResponseT],
         *,
         timeout: float = 30.0,
     ) -> "ClientStreamContext":
@@ -406,7 +407,7 @@ class Client:
         self,
         service: str,
         method: str,
-        response_type: Type[_ResponseT],
+        response_type: type[_ResponseT],
         *,
         timeout: float = 30.0,
     ) -> "BidirectionalStreamContext":
@@ -438,7 +439,7 @@ class ClientStreamContext:
         self,
         client: Client,
         stream_id: int,
-        response_type: Type[_ResponseT],
+        response_type: type[_ResponseT],
     ) -> None:
         self.client = client
         self.stream_id = stream_id
@@ -493,13 +494,13 @@ class BidirectionalStreamContext:
         self,
         client: Client,
         stream_id: int,
-        response_type: Type[_ResponseT],
+        response_type: type[_ResponseT],
     ) -> None:
         self.client = client
         self.stream_id = stream_id
         self.response_type = response_type
         self._closed = False
-        self._reader_task: Optional[asyncio.Task] = None
+        self._reader_task: asyncio.Task | None = None
         self._response_queue: asyncio.Queue = asyncio.Queue()
 
     async def send(self, message: Any) -> None:

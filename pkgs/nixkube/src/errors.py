@@ -166,5 +166,3 @@ class CommandTimeoutError(SubprocessError):
     for logging and event emission. The CSI error handler will catch this
     and emit appropriate Kubernetes events.
     """
-
-    pass

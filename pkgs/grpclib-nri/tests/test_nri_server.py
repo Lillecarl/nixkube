@@ -64,7 +64,7 @@ async def test_plugin_survives_registration(nri_server: NriServer) -> None:
 @pytest.mark.asyncio
 async def test_nri_server_lifecycle(
     test_server_bin,
-    socket_path,  # noqa: F811
+    socket_path,
 ) -> None:
     """Test that NriServer can be started and stopped cleanly."""
     logger = structlog.get_logger("test.nri_lifecycle")

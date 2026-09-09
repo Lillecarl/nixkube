@@ -1,7 +1,6 @@
 """Per-stream async byte buffer for ttrpc."""
 
 import asyncio
-from typing import Optional
 
 from grpclib.exceptions import StreamTerminatedError
 
@@ -20,7 +19,7 @@ class StreamBuffer:
     def __init__(self) -> None:
         # Queue contains: bytes (data), _EOF_SENTINEL (end-of-stream), or None (error marker)
         self._queue: asyncio.Queue = asyncio.Queue()
-        self._error: Optional[Exception] = None
+        self._error: Exception | None = None
 
     def feed_data(self, data: bytes) -> None:
         """Push a raw payload into the queue (called by protocol layer)."""
@@ -36,7 +35,7 @@ class StreamBuffer:
         # wake up any waiter immediately so it sees the error
         self._queue.put_nowait(None)
 
-    async def read_message(self) -> Optional[bytes]:
+    async def read_message(self) -> bytes | None:
         """Block until a payload is available.
 
         Returns ``None`` at EOF, raises :py:exc:`StreamTerminatedError` on

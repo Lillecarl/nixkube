@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
 
 import grpclib.client
 import kr8s

@@ -3,7 +3,7 @@
 import abc
 import asyncio
 import struct
-from typing import Callable, Dict, Optional
+from collections.abc import Callable
 
 import structlog
 from grpclib.exceptions import ProtocolError
@@ -65,7 +65,7 @@ class TtrpcRawStream:
     def feed_error(self, exc: Exception) -> None:
         self._buffer.feed_error(exc)
 
-    async def read_payload(self) -> Optional[bytes]:
+    async def read_payload(self) -> bytes | None:
         """Await the next raw payload from the client."""
         return await self._buffer.read_message()
 
@@ -146,9 +146,9 @@ class TtrpcProtocol(asyncio.Protocol):
     def __init__(self, handler: AbstractTtrpcHandler) -> None:
         self._handler = handler
         self._buf = bytearray()
-        self._transport: Optional[asyncio.Transport] = None
-        self._connection: Optional[TtrpcConnection] = None
-        self._streams: Dict[int, TtrpcRawStream] = {}
+        self._transport: asyncio.Transport | None = None
+        self._connection: TtrpcConnection | None = None
+        self._streams: dict[int, TtrpcRawStream] = {}
 
     # asyncio.Protocol callbacks -------------------------------------------
 
@@ -168,7 +168,7 @@ class TtrpcProtocol(asyncio.Protocol):
         self._buf.extend(data)
         self._try_parse_frames()
 
-    def connection_lost(self, exc: Optional[Exception]) -> None:
+    def connection_lost(self, exc: Exception | None) -> None:
         log.debug("connection_lost", exc=repr(exc), active_streams=len(self._streams))
         err: Exception = exc or ConnectionResetError("ttrpc connection closed")
         for raw_stream in list(self._streams.values()):
