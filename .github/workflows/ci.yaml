@@ -38,8 +38,6 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
-        with:
-          cache_key: check
       - name: Run type checker
         run: nix-shell --run "pyright pkgs/nixkube/src"
       # Evaluation-only, and its closure is empty, so this costs seconds. It
@@ -65,8 +63,6 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
-        with:
-          cache_key: build-amd64
       - name: Build and push environments
         run: |
           unlink nix-envs || true
@@ -84,22 +80,18 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
-        with:
-          cache_key: build-arm64
-      # One derivation at a time, with every core.
+      # One derivation at a time, with every core. This is insurance, not the
+      # fix for what killed this job.
       #
-      # This runner has 4 cores and 16 GB, and `max-jobs auto` lets it build
-      # four of nixkube's Python packages at once. grpclib-ttrpc compiles a Go
-      # ttrpc test server and runs its suite, and four more run grpcio-tools.
-      # Measured twice: run 34376191226 died after 1h14m with "the hosted
-      # runner lost communication with the server ... starves it for
-      # CPU/Memory", and the run before it reached the 6h job limit. amd64
-      # never hit either, because everything it needs is already substitutable.
+      # `max-jobs auto` lets a 4-core, 16 GB runner build four of nixkube's
+      # Python packages at once; grpclib-ttrpc compiles a Go ttrpc test server
+      # and runs its suite, and four more run grpcio-tools. That would be a
+      # plausible cause and is not this one: the job stalls while *fetching*
+      # from cachix, before it builds anything. See issue #21 and the note in
+      # the setup-nix action.
       #
-      # Only 14 of the 241 paths in that closure are missing from
-      # cache.nixos.org, so this is a small build starving a small runner, not
-      # a large one. Serialising costs little when the cache is warm and
-      # nothing is built at all.
+      # Kept because this runner has died twice, and the next path that lands
+      # uncached will be built here rather than fetched.
       - name: Build and push environments
         run: |
           unlink nix-envs || true
@@ -118,8 +110,6 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
-        with:
-          cache_key: build-manifests
       - name: Create nix multi-arch manifest
         run: |
           unlink nix-manifest || true
@@ -148,8 +138,6 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
-        with:
-          cache_key: test-kind-cache
       - name: Create Kind cluster
         uses: helm/kind-action@main
       - name: Clean runner
@@ -190,8 +178,6 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
-        with:
-          cache_key: test-kind-nocache
       - name: Create Kind cluster
         uses: helm/kind-action@main
       - name: Clean runner
@@ -271,8 +257,6 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
-        with:
-          cache_key: release
       - name: Render deployment manifest
         run: |
           nix build --show-trace --file . kubenixApply.manifestYAMLFile
