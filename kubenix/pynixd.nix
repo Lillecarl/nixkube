@@ -159,6 +159,23 @@ in
         builder-max = 3;
         builder-min = 1;
         idle-timeout = 300;
+        # Listen on every interface, and carried in config.json rather than in
+        # an env var.
+        #
+        # `EnvVar.Value` is `json:"value,omitempty"`, so the apiserver drops an
+        # empty string: the object renders with `"value": ""` and comes back
+        # without it. Every GitOps tool then sees a permanent difference
+        # between git and the cluster, on a field nobody can make match.
+        #
+        # Not fixed by removing the setting. pynixd defaults `ssh_host` to
+        # 127.0.0.1, so an absent value binds loopback and nothing outside the
+        # Pod can reach it. `""` is what asyncssh takes for every interface,
+        # v4 and v6, which "0.0.0.0" would not give.
+        #
+        # PynixdSettings reads env first and this file second, so moving the
+        # value here keeps the behaviour and drops the phantom field. A string
+        # inside a ConfigMap is not an EnvVar and survives.
+        ssh_host = "";
       })
       config.nixkube.pynixd.settings
     ];
@@ -167,10 +184,15 @@ in
       (lib.mapAttrsRecursive (n: v: lib.mkDefault v) {
         # builder-specific JSON defaults go here (e.g., schedule-mode)
         #
-        # Empty on purpose. builder-config then renders `config.json = {}`,
-        # which reads like a bug and is not one: it means nothing is
-        # configured, and PynixdSettings() supplies its own defaults. It has
-        # been reported as a fault once already.
+        # Was empty on purpose, and `config.json = {}` reads like a bug and is
+        # not one: it means nothing is configured, and PynixdSettings()
+        # supplies its own defaults. It has been reported as a fault once.
+        #
+        # ssh_host is here for the same reason it is on the controller: an
+        # empty env var is dropped by the apiserver, and pynixd's own default
+        # of 127.0.0.1 would leave the builder unreachable from the
+        # controller. See the controller block above.
+        ssh_host = "";
       })
       config.nixkube.pynixd.settings
     ];
@@ -213,15 +235,24 @@ in
                   inherit image;
                   env = lib.mkNamedList {
                     PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
-                    PYNIXD_SSH_HOST.value = "";
+                    # PYNIXD_SSH_HOST is deliberately absent. It is set in
+                    # config.json instead -- see nixkube.pynixd.settings above.
                     PYNIXD_SSH_PORT.value = "22";
                     PYNIXD_HTTP_PORT.value = "8080";
                     PYNIXD_SSH_HOST_KEY.value = "/etc/ssh-key/id_ed25519";
                     HOME.value = "/data/var/nix-csi/root";
                     PYNIXD_KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
-                    PYNIXD_BUILDER_MAX.value = "3";
-                    PYNIXD_BUILDER_MIN.value = "1";
-                    PYNIXD_IDLE_TIMEOUT.value = "300";
+                    # From the settings, not literals.
+                    #
+                    # NixkubeCentralSettings reads these three from the
+                    # environment only -- it has no config-file source, unlike
+                    # PynixdSettings. So a literal here silently wins over
+                    # anything an operator puts in nixkube.pynixd.settings, and
+                    # the option to cap builders did nothing whatever its
+                    # priority.
+                    PYNIXD_BUILDER_MAX.value = toString cfg.pynixd.controller.settings.builder-max;
+                    PYNIXD_BUILDER_MIN.value = toString cfg.pynixd.controller.settings.builder-min;
+                    PYNIXD_IDLE_TIMEOUT.value = toString cfg.pynixd.controller.settings.idle-timeout;
                     PYNIXD_SCHEDULE_MODE.value = "scheduler";
                     PYNIXD_SYSTEMS.value = lib.concatStringsSep "," (builtins.attrNames enabledSystems);
                     PYNIXD_CONFIG.value = "/etc/pynixd-config/config.json";
@@ -376,10 +407,11 @@ in
                 ];
                 inherit image;
                 env = lib.mkNamedList {
-                  PYNIXD_SSH_HOST.value = "";
+                  # PYNIXD_SSH_HOST is deliberately absent, as on the
+                  # controller. builder.settings carries it into config.json.
                   PYNIXD_SSH_PORT.value = "22";
                   PYNIXD_HTTP_PORT.value = "8080";
-                  PYNIXD_IDLE_TIMEOUT.value = "300";
+                  PYNIXD_IDLE_TIMEOUT.value = toString cfg.pynixd.controller.settings.idle-timeout;
                   HOME.value = "/nix/var/nix-csi/root";
                   PYNIXD_CONFIG.value = "/nix/etc/builder-config/config.json";
                 };
