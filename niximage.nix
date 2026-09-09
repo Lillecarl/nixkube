@@ -83,9 +83,21 @@ rec {
             # the shape of #8. The loop stats each path, which is what catches
             # it, and nothing is hashed -- `nix store verify` would, and would
             # cost minutes on a 954 MiB closure at every node start.
+            # `-e` alone is wrong, because a store path can itself be a symlink.
+            #
+            # `nix-<version>-man` is one: it points at an absolute
+            # `/nix/store/...-nix-manual-...`. Read from /nix-volume that
+            # target resolves against the container's own /nix/store, where it
+            # is not, so `-e` calls a present path absent. At runtime the CSI
+            # mounts this store at /nix and it resolves.
+            #
+            # Measured on a node: 2 of 312 entries are symlinks, both
+            # `nix-*-man`, and both were rejected while every other entry
+            # passed. `-L` accepts the link itself; nix already guarantees the
+            # target is in the closure, which the loop checks separately.
             missing=0
             while read -r p; do
-              if [ ! -e "/nix-volume$p" ]; then
+              if [ ! -e "/nix-volume$p" ] && [ ! -L "/nix-volume$p" ]; then
                 echo "incomplete store: $p is registered and absent" >&2
                 missing=1
               fi
