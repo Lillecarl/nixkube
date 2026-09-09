@@ -186,7 +186,7 @@ class BuilderManager:
                 try:
                     job = await Job.get(job_name, namespace=self.namespace)
                     await self._delete_job(job)
-                except Exception:
+                except Exception:  # noqa: BLE001 -- best-effort cleanup of a probe job; reconciliation follows regardless
                     log.warning("probe_job_cleanup_failed", job=job_name)
 
         await self._reconcile_systems()
@@ -338,7 +338,7 @@ class BuilderManager:
                         await self._ensure_min_builders()
             except asyncio.CancelledError:
                 return
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- watch loop: any failure is retried after _RECONNECT_DELAY
                 log.warning("builder_watch_error", error=f"{type(e).__name__}: {e}")
 
             await asyncio.sleep(_RECONNECT_DELAY)
@@ -672,7 +672,7 @@ class BuilderManager:
             template = await PodTemplate.get(
                 BUILDER_PODTEMPLATE_NAME, namespace=self.namespace
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 -- absent, malformed or unreachable all mean the same thing to the caller
             log.error("builder_podtemplate_not_found", name=BUILDER_PODTEMPLATE_NAME)
             return None
 

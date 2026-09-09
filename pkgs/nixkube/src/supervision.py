@@ -79,7 +79,7 @@ async def supervised(
         except CrashLoopError:
             raise
         except Exception:
-            log.error("service_crashed", exc_info=True)
+            log.exception("service_crashed")
 
         tracker.record_and_check()
         log.info("service_restarting", backoff_seconds=1)

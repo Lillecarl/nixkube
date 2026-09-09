@@ -153,7 +153,7 @@ class ZeroMQServer:
             await self.pub_socket.send(msg.encode())
             log.info("zmq_published_done")
         except Exception:
-            log.error("zmq_publish_done_failed", exc_info=True)
+            log.exception("zmq_publish_done_failed")
 
     async def start_request_handler(self) -> None:
         """Handle build status queries on REP socket (blocks until cancelled)."""
@@ -200,12 +200,12 @@ class ZeroMQServer:
                     await self.rep_socket.send(response.encode())
                     log.debug("zmq_rep_response_sent")
                 except Exception:
-                    logger.error("zmq_rep_query_error", exc_info=True)
+                    logger.exception("zmq_rep_query_error")
                     await self.rep_socket.send(b'{"error":"internal error"}')
         except asyncio.CancelledError:
             logger.info("zmq_rep_handler_cancelled")
         except Exception:
-            logger.error("zmq_rep_handler_error", exc_info=True)
+            logger.exception("zmq_rep_handler_error")
 
     def shutdown(self) -> None:
         """Terminate ZeroMQ context."""

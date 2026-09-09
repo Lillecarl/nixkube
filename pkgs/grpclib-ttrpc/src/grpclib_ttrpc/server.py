@@ -5,7 +5,7 @@ import socket
 from collections.abc import Callable, Collection
 from contextlib import nullcontext
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Generic, Optional
+from typing import TYPE_CHECKING, Any, Generic, Optional, Self
 
 import structlog
 from grpclib._typing import IServable
@@ -119,9 +119,8 @@ class Stream(StreamIterator[_RecvType], Generic[_RecvType, _SendType]):
         :py:meth:`send_trailing_metadata` sends them together with the status.
         For server-streaming responses each call emits a DATA frame.
         """
-        if not self._cardinality.server_streaming:
-            if self._send_message_done:
-                raise ProtocolError("Message was already sent")
+        if not self._cardinality.server_streaming and self._send_message_done:
+            raise ProtocolError("Message was already sent")
 
         encoded = self._codec.encode(message, self._send_type)
 
@@ -203,7 +202,7 @@ class Stream(StreamIterator[_RecvType], Generic[_RecvType, _SendType]):
                 status=status, status_message=status_message
             )
         except Exception:
-            log.error("trailing_metadata_error", exc_info=True)
+            log.exception("trailing_metadata_error")
 
         return True  # suppress the original exception
 
@@ -274,29 +273,29 @@ async def request_handler(
                 raise
             except asyncio.TimeoutError:
                 if wrapper.cancel_failed:
-                    log.error("deadline_cancellation_failed", exc_info=True)
+                    log.exception("deadline_cancellation_failed")
                     raise GRPCError(Status.DEADLINE_EXCEEDED)
                 elif wrapper.cancelled:
                     log.info("deadline_exceeded")
                     raise GRPCError(Status.DEADLINE_EXCEEDED)
                 else:
-                    log.error("timeout_error", exc_info=True)
+                    log.exception("timeout_error")
                     raise
             except StreamTerminatedError as err:
                 if wrapper.cancel_failed:
-                    log.error("cancellation_failed", exc_info=True)
+                    log.exception("cancellation_failed")
                     raise
                 else:
                     assert wrapper.cancelled
                     log.info("request_cancelled", error=str(err))
                     raise
             except Exception:
-                log.error("application_error", exc_info=True)
+                log.exception("application_error")
                 raise
     except ProtocolError:
-        log.error("protocol_error", exc_info=True)
+        log.exception("protocol_error")
     except Exception:
-        log.error("server_error", exc_info=True)
+        log.exception("server_error")
     finally:
         release_stream()
 
@@ -344,7 +343,7 @@ class TtrpcHandler(_GC, AbstractTtrpcHandler):
         try:
             req = Request.FromString(initial_payload)
         except Exception:
-            log.error("parse_request_failed", exc_info=True)
+            log.exception("parse_request_failed")
             release()
             return
 
@@ -513,7 +512,7 @@ class Server(_GC):
                 {loop.create_task(h.wait_closed()) for h in self._handlers}
             )
 
-    async def __aenter__(self) -> "Server":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(

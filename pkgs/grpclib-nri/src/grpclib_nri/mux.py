@@ -125,7 +125,7 @@ class NriMux:
                     await q.put(payload)
         except asyncio.IncompleteReadError:
             log.debug("mux_connection_closed")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- a read loop that dies takes every channel with it
             log.warning("mux_read_loop_error", exc=repr(exc))
         finally:
             # Signal EOF to all channel consumers.

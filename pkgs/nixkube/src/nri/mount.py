@@ -350,7 +350,7 @@ def _mount_worker(
                 )
 
         result_queue.put(None)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- forwarded to the parent process through the queue, traceback attached
         e.__notes__ = [traceback.format_exc()]
         result_queue.put(e)
 

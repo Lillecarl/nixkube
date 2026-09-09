@@ -2,6 +2,7 @@
 """NRI server: async context for running a plugin with automatic registration and reconnection."""
 
 import asyncio
+import contextlib
 import struct
 from pathlib import Path
 
@@ -35,7 +36,7 @@ async def _serve_plugin_channel(
                 protocol.connection_lost(None)
                 return
             protocol.data_received(chunk)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- whatever went wrong, the protocol has to be told the connection ended
         protocol.connection_lost(exc)
 
 
@@ -169,7 +170,7 @@ class NriServer:
         while not self._is_closed:
             try:
                 await self._run()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- reconnect loop: any failure is retried with backoff
                 if self._is_closed:
                     break
                 logger.warning(
@@ -216,10 +217,9 @@ class NriServer:
         # Close writer
         if self._writer:
             self._writer.close()
-            try:
+            # Already closing; a failure to confirm it changes nothing here.
+            with contextlib.suppress(Exception):
                 await self._writer.wait_closed()
-            except Exception:
-                pass
 
         logger.debug("server_closed")
 

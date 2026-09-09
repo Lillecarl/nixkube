@@ -159,7 +159,9 @@ class TtrpcProtocol(asyncio.Protocol):
         self._connection = TtrpcConnection()
         try:
             peer = transport.get_extra_info("peername")
-        except (AttributeError, Exception):
+        # `Exception` already covers the `AttributeError` a transport double
+        # raises; naming both said nothing the second one did not.
+        except Exception:  # noqa: BLE001 -- the peer name is for a log line, and no transport owes us one
             peer = None
         log.debug("connection_established", peer=peer)
 

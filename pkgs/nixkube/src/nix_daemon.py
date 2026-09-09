@@ -123,4 +123,4 @@ async def _pipe_nix_logs(stream: asyncio.StreamReader) -> None:
             else:
                 logger.debug("nix_daemon_log", line=line)
     except Exception:
-        logger.error("nix_daemon_log_error", exc_info=True)
+        logger.exception("nix_daemon_log_error")

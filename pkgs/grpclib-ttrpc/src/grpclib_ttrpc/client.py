@@ -3,7 +3,7 @@
 import asyncio
 import struct
 from collections.abc import AsyncIterator
-from typing import Any, TypeVar
+from typing import Any, Self, TypeVar
 
 import structlog
 from grpclib.const import Status
@@ -155,7 +155,7 @@ async def unary_call(
         writer.close()
         try:
             await writer.wait_closed()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- already closing; the reason is worth a line, not a raise
             log.debug("close_error", exc=repr(exc))
 
 
@@ -224,7 +224,7 @@ class Client:
             self._writer.close()
             try:
                 await self._writer.wait_closed()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- already closing; the reason is worth a line, not a raise
                 log.debug("close_error", exc=repr(exc))
             self._writer = None
             self._reader = None
@@ -480,7 +480,7 @@ class ClientStreamContext:
 
         return self.client.codec.decode(resp.payload, self.response_type)
 
-    async def __aenter__(self) -> "ClientStreamContext":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -565,10 +565,10 @@ class BidirectionalStreamContext:
                 if flags & FLAG_REMOTE_CLOSED:
                     await self._response_queue.put(None)
                     break
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- forwarded to the awaiting caller through the queue, not swallowed
             await self._response_queue.put(exc)
 
-    async def __aenter__(self) -> "BidirectionalStreamContext":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:

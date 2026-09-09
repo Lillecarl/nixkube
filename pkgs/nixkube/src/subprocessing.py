@@ -212,7 +212,7 @@ async def _read_stream(
             if log_level != logging.NOTSET:
                 logger.log(log_level, "subprocess_output", line=decoded)
     except Exception:
-        logger.error("stream_read_error", exc_info=True)
+        logger.exception("stream_read_error")
 
 
 def log_command(*args, log_level: int) -> None:
