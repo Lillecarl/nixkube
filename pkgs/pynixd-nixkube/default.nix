@@ -44,6 +44,28 @@ buildPythonApplication {
     kr8s
     asyncinotify
   ];
+  # Import every module, not just the package. There are no tests here, and
+  # __init__.py is a docstring, so nothing in this build ever executed an
+  # import statement. Four modules asked for `pynixd.types.ids`, which pynixd
+  # renamed, and the package built and shipped anyway. It failed on a cluster,
+  # at startup, with ModuleNotFoundError.
+  #
+  # setup.py reads FAKE_NSS and CA_CERTS at import time, and makeWrapperArgs
+  # sets them on the console script. The check sets the same two, so it sees
+  # what the program sees when it runs.
+  preInstallCheck = ''
+    export FAKE_NSS=${fakeNss}
+    export CA_CERTS=${dockerTools.caCertificates}
+  '';
+  pythonImportsCheck = [
+    "pynixd_nixkube"
+    "pynixd_nixkube.builder_main"
+    "pynixd_nixkube.builder_manager"
+    "pynixd_nixkube.central_main"
+    "pynixd_nixkube.config"
+    "pynixd_nixkube.ssh_keys"
+  ];
+
   makeWrapperArgs = [
     "--set"
     "FAKE_NSS"
