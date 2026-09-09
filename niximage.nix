@@ -66,6 +66,31 @@ rec {
                 --out-link /nix-volume/nix/var/result \
                 --fallback \
                 "$STORE_PATH"
+
+            # Is every reference actually here?
+            #
+            # `nix build` can report success over a store that already holds
+            # the top path and not all of its closure, and the node then starts
+            # a container that cannot exec out of /nix/var/result/bin. The error
+            # names $PATH, not the missing store path, so it reads as a broken
+            # image rather than an incomplete store. That is issue #8: a
+            # `containerWrapper` absent from the cache, found only after
+            # comparing symlink targets by hand on a live node.
+            #
+            # `path-info --recursive` alone is not enough, and I measured that
+            # rather than assuming it: it answers from the database, so a path
+            # that is registered and absent from disk passes. That is exactly
+            # the shape of #8. The loop stats each path, which is what catches
+            # it, and nothing is hashed -- `nix store verify` would, and would
+            # cost minutes on a 954 MiB closure at every node start.
+            missing=0
+            while read -r p; do
+              if [ ! -e "/nix-volume$p" ]; then
+                echo "incomplete store: $p is registered and absent" >&2
+                missing=1
+              fi
+            done < <(nix path-info --store /nix-volume --recursive "$STORE_PATH")
+            [ "$missing" -eq 0 ]
           '';
       };
 
