@@ -261,6 +261,9 @@ rec {
             { lib, ... }:
             {
               kubernetes.resources.nixkube.Deployment.nullprobe = {
+                # Labelled as ours, so this exercises the assertion rather
+                # than the warning for a neighbour's object.
+                metadata.labels."app.kubernetes.io/part-of" = "nixkube";
                 spec.template.spec.containers = lib.mkNamedList {
                   backend = {
                     image = "example/backend";
@@ -295,6 +298,43 @@ rec {
     in
     assert failed == [ ];
     pkgs.runCommand "assertions-null-shape" { } "echo ok > $out";
+
+  # A neighbour's object is reported and not refused.
+  #
+  # config.kubernetes.resources holds every object of the whole instance, not
+  # nixkube's, so an assertion that walks the lot lets a nixkube module veto a
+  # consumer's unrelated chart. That happened: the empty-string check refused
+  # to render a 448-object tree over two env vars in Rook's ceph-csi
+  # controller, where `WATCH_NAMESPACE: ""` is the ordinary idiom for "all
+  # namespaces". Nothing of nixkube's was wrong.
+  #
+  # This renders exactly that shape -- an empty env var on an object without
+  # nixkube's part-of label -- and must evaluate. The warning still names it.
+  assertionsNeighbourScope =
+    let
+      instance = kubenixInstance {
+        module.imports = [
+          (
+            { lib, ... }:
+            {
+              kubernetes.resources.nixkube.Deployment.neighbour = {
+                spec.template.spec.containers = lib.mkNamedList {
+                  manager = {
+                    image = "example/rook";
+                    env = lib.mkNamedList {
+                      WATCH_NAMESPACE.value = "";
+                    };
+                  };
+                };
+              };
+            }
+          )
+        ];
+      };
+      failed = lib.filter (entry: !entry.assertion) instance.config.assertions;
+    in
+    assert failed == [ ];
+    pkgs.runCommand "assertions-neighbour-scope" { } "echo ok > $out";
 
   # An operator can cap or disable builders through nixkube.pynixd.settings.
   #

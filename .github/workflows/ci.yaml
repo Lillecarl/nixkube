@@ -34,6 +34,8 @@ jobs:
       # nixkube's own resources never produce.
       - name: Check the assertion against a consumer-shaped render
         run: nix build --show-trace --file . assertionsNullShape
+      - name: Check that a neighbour's object is warned about, not refused
+        run: nix build --show-trace --file . assertionsNeighbourScope
       # Also evaluation-only. Both of these encode a shape a consumer reported
       # and this repository's own instances cannot produce.
       - name: Check that an operator can cap builders

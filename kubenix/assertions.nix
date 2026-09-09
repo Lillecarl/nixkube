@@ -126,21 +126,60 @@ let
       in
       lib.concatMap offending containers;
 
-  # Walk every rendered resource with one of the checks above.
+  /*
+    Whose object is this.
+
+    `config.kubernetes.resources` is every object of the whole instance, not
+    nixkube's. A consumer deploys nixkube beside its own charts, so an
+    assertion that walks the lot lets a nixkube module veto a neighbour.
+
+    That happened. The empty-string check refused to render a 448-object tree
+    over two env vars in Rook's ceph-csi controller, where `WATCH_NAMESPACE:
+    ""` is the ordinary idiom for "all namespaces". Nothing of nixkube's was
+    wrong. The subPath check has the same reach and escaped notice only
+    because pairing hostPath with subPath is rare.
+
+    So the assertion covers our objects, and a neighbour's gets a warning. A
+    finding in someone else's chart is worth saying and is not ours to refuse.
+
+    Every nixkube object carries this label -- measured over kubenixApply, 21
+    of 21 -- because nixkube.matchLabels sets it and every resource merges
+    those labels.
+  */
+  isOurs = resource: (resource.metadata.labels."app.kubernetes.io/part-of" or null) == "nixkube";
+
+  # Walk every rendered resource with one of the checks above, keeping ours
+  # and a neighbour's apart.
   walk =
-    check:
+    check: mine:
     lib.pipe config.kubernetes.resources [
       (lib.mapAttrsToList (
         _namespace: kinds:
         lib.mapAttrsToList (
-          kind: named: lib.mapAttrsToList (name: resource: check kind name resource) named
+          kind: named:
+          lib.mapAttrsToList (
+            name: resource: if isOurs resource == mine then check kind name resource else [ ]
+          ) named
         ) kinds
       ))
       lib.flatten
     ];
 
-  offenders = walk offendersIn;
-  emptyEnvOffenders = walk emptyEnvIn;
+  offenders = walk offendersIn true;
+  emptyEnvOffenders = walk emptyEnvIn true;
+
+  # A neighbour's objects, reported and not refused.
+  theirs = (walk offendersIn false) ++ (walk emptyEnvIn false);
+  note =
+    if theirs == [ ] then
+      lib.id
+    else
+      lib.warn (
+        "nixkube: these objects are not nixkube's, and carry a shape that does "
+        + "not survive the apiserver or a containerised kubelet. Reported, not "
+        + "refused.\n  "
+        + lib.concatStringsSep "\n  " theirs
+      );
 in
 {
   config = lib.mkIf cfg.enable {
@@ -156,7 +195,7 @@ in
           + lib.concatStringsSep "\n  " offenders;
       }
       {
-        assertion = emptyEnvOffenders == [ ];
+        assertion = note (emptyEnvOffenders == [ ]);
         message =
           "An env var is set to an empty string. EnvVar.Value is "
           + "`json:\"value,omitempty\"`, so the apiserver drops it and the live "
