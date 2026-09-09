@@ -31,11 +31,25 @@ self: pkgs: {
   #   python310 = pkgs.python3;
   # };
 
-  stdNix = pkgs.nix;
-  nix = pkgs.nix.overrideAttrs (oldAttrs: {
-    doCheck = false;
-    doInstallCheck = false;
-  });
+  # No override on `nix`.
+  #
+  # This used to be `pkgs.nix.overrideAttrs { doCheck = false;
+  # doInstallCheck = false; }`, to skip Nix's own test suite. It changed the
+  # derivation hash, so cache.nixos.org could never answer for it:
+  #
+  #   overridden  bq05h82hrbjar92g6fm64g56vj3msgy6-nix-2.34.8   404
+  #   stock       j02vvifyzjw52xqrvyj1bhd8s45yn1fl-nix-2.34.8   200
+  #
+  # Every CI runner then built Nix from source, on both architectures, and
+  # `build-amd64` and `build-arm64` both hit GitHub's six-hour job limit. That
+  # skipped `build-manifests`, which is what publishes the image manifest and
+  # pushes to cachix -- so nothing has published since, and a node cannot find
+  # `nodeEnv` to boot with. See issue #9.
+  #
+  # Skipping the test suite saves minutes on a build nobody should be doing.
+  # Paying for it with a source build of Nix, twice per run, is the wrong
+  # trade. Anything that wants to skip those checks locally has to do it
+  # without changing the hash of what CI publishes.
 
   grpclib-ttrpc = pkgs.python3Packages.callPackage ./grpclib-ttrpc {
     inherit (self) ttrpc-proto-python;
