@@ -56,14 +56,10 @@ class ZeroMQServer:
         self.context: zmq.asyncio.Context | None = None
         self.rep_socket: zmq.asyncio.Socket | None = None
         self.pub_socket: zmq.asyncio.Socket | None = None
-        self.build_status: TTLCache[str, dict[str, str]] = TTLCache(
-            maxsize=10000, ttl=3600
-        )
+        self.build_status = TTLCache[str, dict[str, str]](maxsize=10000, ttl=3600)
         self.pending_builds: set[str] = set()
         # Container metadata from nri-wait, TTL-evicted to avoid unbounded growth
-        self._container_info: TTLCache[str, ContainerInfo] = TTLCache(
-            maxsize=10000, ttl=3600
-        )
+        self._container_info = TTLCache[str, ContainerInfo](maxsize=10000, ttl=3600)
 
     async def initialize(self) -> None:
         """Create ZeroMQ context and bind sockets."""
@@ -189,7 +185,16 @@ class ZeroMQServer:
                         log.debug("zmq_rep_stored_pid", pid=pid, bundle=bundle)
                     log.info("zmq_rep_query", pid=pid, bundle=bundle)
 
-                    status = await self.query_build_status(container_id)
+                    # A query carrying no id can only ever be "unknown":
+                    # `query_build_status` looks the id up in two containers
+                    # and falls through. Answering it here says so, instead
+                    # of passing `None` into a `str` parameter and relying on
+                    # both lookups missing.
+                    status = (
+                        {"status": "unknown"}
+                        if container_id is None
+                        else await self.query_build_status(container_id)
+                    )
                     log.debug("zmq_rep_responding", status=status)
                     response = json.dumps(status)
                     await self.rep_socket.send(response.encode())

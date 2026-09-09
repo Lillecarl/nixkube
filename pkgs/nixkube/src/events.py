@@ -15,7 +15,7 @@ logger = structlog.get_logger("nixkube.events")
 # Cached nixkube pod instance for event reporting
 _nixkube_pod: Pod | None = None
 # Cache failure state for 15s so we don't hammer the API on every event report
-_nixkube_pod_fetch_failed: TTLCache[str, bool] = TTLCache(maxsize=1, ttl=15)
+_nixkube_pod_fetch_failed = TTLCache[str, bool](maxsize=1, ttl=15)
 
 
 async def get_nixkube_pod() -> Pod | None:
