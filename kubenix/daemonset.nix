@@ -140,6 +140,44 @@ in
                       failureThreshold = 5;
                     };
 
+                    /*
+                      Say so when the driver does not answer.
+
+                      The livenessProbe above restarts the container, and it
+                      works. It does not report anything. A container with no
+                      readinessProbe is Ready as soon as it runs, so
+                      `kubectl get pods` said 3/3 Running, ready=true, for
+                      every one of the six minutes its driver was dead.
+
+                      Measured on nixlab2: a directory left where
+                      /var/lib/kubelet/plugins/nixkube/csi.sock belongs makes
+                      the driver die at bind, every second. restartCount went
+                      3 -> 6 over that break, and nothing else moved. The
+                      node stayed Ready and kept attracting builders it could
+                      not serve, and a builder Pod on it sat in Pending with
+                      `connect: connection refused` on the socket.
+
+                      Same target as the livenessProbe, faster to fire:
+                      2 x 10s reports NotReady about 30 seconds before the
+                      5 x 10s restart. So the restart, when it comes, has a
+                      reason visible ahead of it.
+
+                      No Service selects these pods -- both Services select
+                      component=pynixd, and this is component=node -- so
+                      NotReady removes nothing from any endpoint list. It
+                      only makes the report true.
+                    */
+                    readinessProbe = {
+                      httpGet = {
+                        path = "/healthz";
+                        port = 9808;
+                      };
+                      initialDelaySeconds = 10;
+                      periodSeconds = 10;
+                      timeoutSeconds = 5;
+                      failureThreshold = 2;
+                    };
+
                     env = lib.mkNamedList {
                       PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
                       ENABLE_COMPAT_DRIVER.value = lib.boolToString cfg.node.compat;

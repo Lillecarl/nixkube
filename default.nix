@@ -450,6 +450,36 @@ rec {
       ));
     pkgs.runCommand "builder-settings-override" { } "echo ok > $out";
 
+  # nix-node reports whether its driver answers.
+  #
+  # The container had a livenessProbe and no readinessProbe. The liveness
+  # path works -- restartCount climbed 3 -> 6 on nixlab2 while the driver was
+  # dead -- but a container with no readinessProbe is Ready as soon as it
+  # runs. So `kubectl get pods` said ready=true for six minutes of a node
+  # that could not mount anything, and builders kept being sent to it.
+  #
+  # Asserted against the rendered container, not the option, and against the
+  # sidecar that serves the port. A probe pointing at a port nothing serves
+  # would pass an option-level check and fail on a cluster.
+  nodeDriverReadiness =
+    let
+      instance = kubenixInstance { };
+      podSpec = instance.config.kubernetes.resources.nixkube.DaemonSet.nix-node.spec.template.spec;
+      containerNamed = name: lib.head (lib.filter (c: c.name == name) podSpec.containers);
+      node = containerNamed "nix-node";
+      sidecar = containerNamed "livenessprobe-nixkube";
+      port = node.readinessProbe.httpGet.port;
+    in
+    assert node.readinessProbe.httpGet.path == "/healthz";
+    assert node.livenessProbe.httpGet.port == port;
+    # Something has to answer on that port.
+    assert lib.elem "--health-port=${toString port}" sidecar.args;
+    # NotReady has to be reported before the restart, or it says nothing new.
+    assert
+      node.readinessProbe.failureThreshold * node.readinessProbe.periodSeconds
+      < node.livenessProbe.failureThreshold * node.livenessProbe.periodSeconds;
+    pkgs.runCommand "node-driver-readiness" { } "echo ok > $out";
+
   # NixOS integration tests — spin up real kubeadm clusters in VMs
   nixosTests = {
     containerd = import ./tests/nixos/integration.nix {
