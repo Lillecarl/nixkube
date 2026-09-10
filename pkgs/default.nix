@@ -77,22 +77,23 @@ self: pkgs: {
   # ./csi-sidecars.
   csi-sidecars = pkgs.callPackage ./csi-sidecars { };
 
-  pynixd =
-    let
-      path =
-        if builtins.pathExists ../../pynixd then
-          ../../pynixd
-        else
-          fetchTree {
-            type = "github";
-            owner = "lillecarl";
-            repo = "pynixd";
-            ref = "develop";
-          }; # this must be updated to a "flake" locked input
-    in
-    (import path {
-      inherit pkgs;
-    }).library;
+  # From the umbrella's lock, like every other source.
+  #
+  # This resolved itself, and both of its arms were wrong. The sibling
+  # working copy `../../pynixd` was read as a directory, which is a different
+  # input from the tree CI fetches, so the two built different packages from
+  # the same commit. The fallback named branch `develop` with no revision, so
+  # CI built whatever that branch pointed at when the job ran -- two runs of
+  # one nixkube commit could disagree, and nothing recorded which pynixd went
+  # in.
+  #
+  # Downstream that is a different `cacheEnv`, a manifest naming it, and a
+  # node asking its substituters for a store path nobody built.
+  #
+  # `nix/sources.nix` answers both. It reads the revision from the lock and
+  # fetches it, in CI and in a working copy alike. The old comment here asked
+  # for exactly this.
+  pynixd = (import (import ../nix/sources.nix).pynixd { inherit pkgs; }).library;
   pynixd-nixkube = pkgs.python3Packages.callPackage ./pynixd-nixkube {
     inherit (self) pynixd kr8s;
     inherit (pkgs) dockerTools;
