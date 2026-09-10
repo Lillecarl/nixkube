@@ -73,6 +73,9 @@ jobs:
           git diff --exit-code
   build-amd64:
     runs-on: ubuntu-latest
+    # Same reason as build-arm64 below, lower bound: this one has never been
+    # the slow half.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@main
@@ -90,6 +93,20 @@ jobs:
           ./nix-nix/bin/push-nix-x86_64-linux
   build-arm64:
     runs-on: ubuntu-24.04-arm
+    # Fail rather than hang. Measured on 2026-09-10: this job sat in "Build
+    # and push environments" for three hours, and GitHub's default would have
+    # let it reach six. `build-manifests` needs it, so everything downstream
+    # -- both kind tests, the release -- waits behind a job that is not
+    # progressing, and the whole run publishes nothing.
+    #
+    # It is not building from source when this happens. Measured the same
+    # day: 3260 of 3265 paths in this job's aarch64 closure are already on a
+    # substituter, and the five that are not came from unpushed commits. The
+    # stall is in fetching, which is what issue #21 says.
+    #
+    # 90 minutes is well above a healthy run and well below the point where a
+    # stuck job costs a day of pipeline.
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@main
