@@ -99,10 +99,16 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
+      # --print-build-logs, because without it a stuck build is silent.
+      #
+      # Measured on run 34477979957: both builders printed their last line
+      # within 20 seconds of starting, then said nothing for 44 and 60
+      # minutes, until timeout-minutes killed them. `building '<drv>'...` was
+      # all either one gave, so nothing said which phase was stuck. See #21.
       - name: Build and push environments
         run: |
           unlink nix-envs || true
-          nix build --show-trace --file . push --out-link nix-envs
+          nix build --show-trace --print-build-logs --file . push --out-link nix-envs
           ./nix-envs/bin/push
       # Built on every branch, published from develop and tags only. The
       # image tag is named from versions, not from the commit, so a branch
@@ -111,7 +117,7 @@ jobs:
       - name: Build amd64 nix image
         run: |
           unlink nix-nix || true
-          nix build --show-trace --file . nixImage.pushArch.x86_64-linux --out-link nix-nix
+          nix build --show-trace --print-build-logs --file . nixImage.pushArch.x86_64-linux --out-link nix-nix
       - name: Push amd64 nix image
         if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
         run: ./nix-nix/bin/push-nix-x86_64-linux
@@ -151,14 +157,14 @@ jobs:
       - name: Build and push environments
         run: |
           unlink nix-envs || true
-          nix build --show-trace --max-jobs 1 --cores 4 --file . push --out-link nix-envs
+          nix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . push --out-link nix-envs
           ./nix-envs/bin/push
       # Built everywhere, published from develop and tags only. See the amd64
       # job above for why.
       - name: Build arm64 nix image
         run: |
           unlink nix-nix || true
-          nix build --show-trace --max-jobs 1 --cores 4 --file . nixImage.pushArch.aarch64-linux --out-link nix-nix
+          nix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . nixImage.pushArch.aarch64-linux --out-link nix-nix
       - name: Push arm64 nix image
         if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
         run: ./nix-nix/bin/push-nix-aarch64-linux
