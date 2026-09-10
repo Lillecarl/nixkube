@@ -458,17 +458,57 @@ class BuilderManager:
             if not job_name:
                 return
 
+            # One deadline for both halves of the wait.
+            #
+            # This was `for _ in range(30)` with a one-second sleep, so a
+            # probe gave a builder 30 seconds to register, and that is less
+            # than a builder takes to start. Measured on nixlab2: four nodes,
+            # `probe_node_started` at 08:36:12 and `probe_store_not_found` at
+            # 08:36:43 for every one of them, with the probe Pod still
+            # ContainerCreating and 11 seconds old when its Job was deleted.
+            # No node was ever labelled, so `_watch_nodes` saw it unlabelled
+            # and started again, four seconds later, for ever.
+            #
+            # A probe is a builder, so it gets the builder's budget:
+            # `startup_timeout`, the same knob `_expire_slow_starter` reads.
+            #
+            # The second wait had no bound at all. A store that registered
+            # and never answered held this coroutine open, so the `finally`
+            # never ran and the probe Job leaked, pinned to a node and
+            # excluded from the watchdog. `_pending_probes` then blocked
+            # every later probe of that node.
             store_id = f"builder-{job_name}"
-            for _ in range(30):
+            deadline = time.monotonic() + self.startup_timeout
+            store = None
+            while time.monotonic() < deadline:
                 store = self.server.stores.get(store_id)  # type: ignore[arg-type]
                 if store is not None:
                     break
                 await asyncio.sleep(1)
-            else:
-                log.warning("probe_store_not_found", job=job_name, node=node_name)
+
+            if store is None:
+                log.warning(
+                    "probe_store_not_found",
+                    job=job_name,
+                    node=node_name,
+                    waited_seconds=round(self.startup_timeout, 1),
+                )
                 return
 
-            await store._probe_event.wait()
+            try:
+                await asyncio.wait_for(
+                    store._probe_event.wait(),
+                    timeout=max(deadline - time.monotonic(), 0.0),
+                )
+            except TimeoutError:
+                log.warning(
+                    "probe_no_answer",
+                    job=job_name,
+                    node=node_name,
+                    waited_seconds=round(self.startup_timeout, 1),
+                )
+                return
+
             features = store.feature_matrix
             if features:
                 await self._label_node(node_name, next(iter(features)), features)

@@ -6,10 +6,12 @@ The arithmetic and the state transitions are pure, so they are testable on
 their own. Everything that talks to the API server is not tested here.
 """
 
+import asyncio
 import time
 from datetime import datetime, timezone
 
 import pytest
+from pynixd_nixkube import builder_manager
 from pynixd_nixkube.builder_manager import (
     _BACKOFF_BASE_SECONDS,
     BUILDER_KNOWN_HOSTS,
@@ -284,3 +286,112 @@ def test_the_known_hosts_file_is_the_mounted_configmap():
     has to change this too, or no builder verifies.
     """
     assert BUILDER_KNOWN_HOSTS == "/etc/ssh-dynauth/ssh_known_hosts"
+
+
+class _FakeStore:
+    """Just enough of an SSHSubprocessStore for the probe path."""
+
+    def __init__(self, features: dict | None = None) -> None:
+        self._probe_event = asyncio.Event()
+        self.feature_matrix = features or {}
+
+
+class _FakeServer:
+    def __init__(self, stores: dict | None = None) -> None:
+        self.stores = stores or {}
+
+
+async def _probe_run(m, monkeypatch, node="node-1"):
+    """Run _probe_node with the cluster calls stubbed out.
+
+    The `finally` fetches the Job to delete it. Without this the test would
+    depend on an API call failing, which is a slow way to be right.
+    """
+    created = []
+    deleted = []
+
+    async def fake_create(system, overrides=None):
+        created.append(overrides)
+        return "nixkube-builder-probe1"
+
+    async def fake_get(name, namespace=None):
+        return f"job:{name}"
+
+    async def fake_delete(job):
+        deleted.append(job)
+
+    async def fake_reconcile_systems():
+        return None
+
+    monkeypatch.setattr(builder_manager.Job, "get", staticmethod(fake_get))
+    m._create_builder_job = fake_create
+    m._delete_job = fake_delete
+    m._reconcile_systems = fake_reconcile_systems
+    m._pending_probes.add(node)
+    await m._probe_node(node, SYSTEM)
+    return created, deleted
+
+
+@pytest.mark.asyncio
+async def test_a_probe_waits_the_builder_budget_then_gives_up(monkeypatch):
+    """A probe gave a builder 30 seconds to register, and a builder takes longer.
+
+    On nixlab2 all four nodes logged `probe_store_not_found` 31 seconds after
+    `probe_node_started`, with the probe Pod still ContainerCreating and 11
+    seconds old. No node was ever labelled, so `_watch_nodes` saw it
+    unlabelled and started again four seconds later, for ever.
+    """
+    m = manager(startup_timeout=0.3)
+    m.server = _FakeServer()
+
+    started = time.monotonic()
+    created, deleted = await _probe_run(m, monkeypatch)
+    waited = time.monotonic() - started
+
+    # The budget, not a hardcoded 30 seconds.
+    assert waited >= 0.3
+    assert waited < 5.0
+    # It let go, and it cleaned up.
+    assert "node-1" not in m._pending_probes
+    assert deleted == ["job:nixkube-builder-probe1"]
+    # A probe Job is pinned to its node and labelled as a probe.
+    assert created[0]["spec"]["template"]["spec"]["nodeName"] == "node-1"
+    assert created[0]["metadata"]["labels"]["nixkube/probe"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_registers_but_never_answers_lets_go(monkeypatch):
+    """The `_probe_event.wait()` that had no timeout.
+
+    A store that registered and never answered held this coroutine open, so
+    the `finally` never ran, the probe Job leaked pinned to a node, and
+    `_pending_probes` blocked every later probe of that node.
+    """
+    m = manager(startup_timeout=0.3)
+    store = _FakeStore()
+    m.server = _FakeServer({"builder-nixkube-builder-probe1": store})
+
+    _created, deleted = await _probe_run(m, monkeypatch)
+
+    assert not store._probe_event.is_set()
+    assert "node-1" not in m._pending_probes
+    assert deleted == ["job:nixkube-builder-probe1"]
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_answers_labels_the_node(monkeypatch):
+    m = manager(startup_timeout=5.0)
+    store = _FakeStore(features={SYSTEM: {"big-parallel"}})
+    store._probe_event.set()
+    m.server = _FakeServer({"builder-nixkube-builder-probe1": store})
+
+    labelled = []
+
+    async def fake_label(node_name, system, features):
+        labelled.append((node_name, system, features))
+
+    m._label_node = fake_label
+    await _probe_run(m, monkeypatch)
+
+    assert labelled == [("node-1", SYSTEM, {SYSTEM: {"big-parallel"}})]
+    assert "node-1" not in m._pending_probes
