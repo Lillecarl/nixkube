@@ -7,6 +7,9 @@
   kr8s,
   dockerTools,
   asyncinotify,
+  pytest,
+  pytest-asyncio,
+  pytestCheckHook,
   lib,
 }:
 let
@@ -44,11 +47,16 @@ buildPythonApplication {
     kr8s
     asyncinotify
   ];
-  # Import every module, not just the package. There are no tests here, and
-  # __init__.py is a docstring, so nothing in this build ever executed an
-  # import statement. Four modules asked for `pynixd.types.ids`, which pynixd
-  # renamed, and the package built and shipped anyway. It failed on a cluster,
-  # at startup, with ModuleNotFoundError.
+  nativeCheckInputs = [
+    pytest
+    pytest-asyncio
+    pytestCheckHook
+  ];
+  # Import every module, not just the package. __init__.py is a docstring, so
+  # nothing in this build executed an import statement before the tests
+  # arrived. Four modules asked for `pynixd.types.ids`, which pynixd renamed,
+  # and the package built and shipped anyway. It failed on a cluster, at
+  # startup, with ModuleNotFoundError.
   #
   # setup.py reads FAKE_NSS and CA_CERTS at import time, and makeWrapperArgs
   # sets them on the console script. The check sets the same two, so it sees

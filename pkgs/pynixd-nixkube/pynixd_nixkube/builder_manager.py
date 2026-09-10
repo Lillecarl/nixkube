@@ -2,13 +2,16 @@
 
 import asyncio
 import contextlib
+import hashlib
+import socket
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 import kr8s.asyncio as k8s
 import structlog
-from kr8s.asyncio.objects import Job, PodTemplate
+from kr8s.asyncio.objects import Job, PodTemplate, new_class
 from pynixd.config import SSHSubprocessStoreSpec
 from pynixd.serde.ids import StoreId
 from pynixd.store import SSHSubprocessStore
@@ -37,6 +40,54 @@ _DEFAULT_FEATURES = {"nixos-test", "big-parallel", "benchmark"}
 _COOLDOWN_SECONDS = 60.0
 _RECONNECT_DELAY = 10.0
 
+# First delay after one failed builder. Each further consecutive failure
+# doubles it, up to `backoff_cap`.
+_BACKOFF_BASE_SECONDS = 30.0
+
+# How often the manager reconciles without a Job event.
+#
+# `_ensure_min_builders` used to run only from the Job watch. A system in
+# backoff produces no Job events while it waits, so nothing woke the manager
+# when the delay expired and the system stayed at zero builders until an
+# unrelated Job changed. The same tick drives the startup watchdog, because a
+# Pod that hangs in Pending produces no Job events either.
+_RECONCILE_INTERVAL = 30.0
+
+# Events reported against a builder Job, using the same API the node driver
+# uses for Pods.
+ModernEvent = new_class(kind="Event", version="events.k8s.io/v1", namespaced=True)
+EVENT_REASON_STARTUP_TIMEOUT = "NixBuilderStartupTimeout"
+
+
+def _pod_is_ready(pod_status: dict) -> bool:
+    """True when the Pod carries a Ready condition set to True."""
+    for condition in pod_status.get("conditions", []) or []:
+        if condition.get("type") == "Ready":
+            return condition.get("status") == "True"
+    return False
+
+
+def _job_age_seconds(job_raw: dict, now: datetime) -> float | None:
+    """Seconds since the Job started, or None when the API gives no timestamp.
+
+    `status.startTime` is when the Job controller began, and
+    `metadata.creationTimestamp` is the fallback for the moment before the
+    controller has written a status. Read from the object, not from a local
+    dict, so the age survives a pynixd restart.
+    """
+    raw = job_raw.get("status", {}).get("startTime") or job_raw.get("metadata", {}).get(
+        "creationTimestamp"
+    )
+    if not raw:
+        return None
+    try:
+        started = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (now - started).total_seconds()
+
 
 def deep_merge(base: dict, overrides: dict) -> dict:
     """Deep-merge overrides into base (Nix lib.recursiveUpdate style).
@@ -63,6 +114,8 @@ class BuilderManager:
         idle_timeout: int = 300,
         systems: list[str] | None = None,
         cooldown_seconds: float = _COOLDOWN_SECONDS,
+        backoff_cap: float = 600.0,
+        startup_timeout: float = 600.0,
     ) -> None:
         self.server = server
         self.namespace = namespace
@@ -71,6 +124,8 @@ class BuilderManager:
         self.idle_timeout = idle_timeout
         self.systems = systems or ["x86_64-linux"]
         self.cooldown_seconds = cooldown_seconds
+        self.backoff_cap = backoff_cap
+        self.startup_timeout = startup_timeout
         self._last_create_time: dict[str, float] = {}
         self._registered: dict[str, str] = {}
         self._idle_since: dict[str, float] = {}
@@ -78,6 +133,16 @@ class BuilderManager:
         self._available_systems: set[str] = set()
         self._pending_probes: set[str] = set()
         self._task: asyncio.Task | None = None
+        # Consecutive failed builders per system, and when that system may
+        # create another. A builder that reaches Ready clears both.
+        self._failures: dict[str, int] = {}
+        self._backoff_until: dict[str, float] = {}
+        # Job names already counted as a failure. A Job stays failed for its
+        # `ttlSecondsAfterFinished`, and every reconcile sees it again.
+        self._counted_failures: set[str] = set()
+        # Job names whose Pod has been Ready at least once. The startup
+        # watchdog only ends a builder that has never answered.
+        self._ever_ready: set[str] = set()
 
     async def start(self) -> None:
         await self._reap_orphaned_builder_pods()
@@ -106,7 +171,175 @@ class BuilderManager:
             self._watch_queue(),
             self._reap_idle(),
             self._watch_nodes(),
+            self._periodic_reconcile(),
         )
+
+    async def _periodic_reconcile(self) -> None:
+        while True:
+            await asyncio.sleep(_RECONCILE_INTERVAL)
+            try:
+                await self._resync_jobs()
+                await self._ensure_min_builders()
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                log.warning("builder_periodic_reconcile_error", exc_info=True)
+
+    # ---- Failure backoff ----
+
+    def _backoff_delay(self, failures: int) -> float:
+        """Delay after `failures` consecutive failed builders of one system."""
+        if failures <= 0:
+            return 0.0
+        return min(_BACKOFF_BASE_SECONDS * (2 ** (failures - 1)), self.backoff_cap)
+
+    def _backoff_remaining(self, system: str) -> float:
+        until = self._backoff_until.get(system)
+        if until is None:
+            return 0.0
+        return max(0.0, until - time.monotonic())
+
+    def _record_failure(self, system: str, job_name: str, reason: str) -> None:
+        """Count one failed builder and hold that system back.
+
+        `_ensure_min_builders` counts a Job as active only while it is neither
+        succeeded nor failed. So a builder that fails at once drops the count
+        at once and the next reconcile creates another, at the reconcile rate,
+        for as long as the cause lasts. Nothing recorded that the last one
+        failed. This is that record.
+        """
+        if job_name in self._counted_failures:
+            return
+        self._counted_failures.add(job_name)
+        failures = self._failures.get(system, 0) + 1
+        self._failures[system] = failures
+        delay = self._backoff_delay(failures)
+        self._backoff_until[system] = time.monotonic() + delay
+        log.warning(
+            "builder_failure_recorded",
+            system=system,
+            job=job_name,
+            reason=reason,
+            consecutive_failures=failures,
+            backoff_seconds=delay,
+        )
+
+    def _record_ready(self, system: str, job_name: str) -> None:
+        """Clear the backoff, because a builder of this system works.
+
+        Ready, not registered. `_reconcile_job` registers a builder as soon as
+        its Pod has an IP, which a Pod has before its container runs. A builder
+        that crashes at startup would register, clear the count and fail, over
+        and over, and the delay would never grow past the first step. The Pod's
+        Ready condition follows the readinessProbe on the ssh port, so it means
+        the builder answers.
+        """
+        if not self._failures.get(system) and system not in self._backoff_until:
+            return
+        log.info(
+            "builder_backoff_reset",
+            system=system,
+            job=job_name,
+            cleared_failures=self._failures.get(system, 0),
+        )
+        self._failures.pop(system, None)
+        self._backoff_until.pop(system, None)
+
+    def _forget_job(self, job_name: str) -> None:
+        self._counted_failures.discard(job_name)
+        self._ever_ready.discard(job_name)
+
+    # ---- Startup watchdog ----
+
+    def _startup_expired(self, job_raw: dict, job_name: str, now: datetime) -> bool:
+        """True when a builder that never answered has had long enough.
+
+        Not `activeDeadlineSeconds`. That field measures the whole life of a
+        Job, from `status.startTime`, and a builder Job runs for as long as it
+        serves builds -- one measured at three and a half hours on a live
+        cluster. Any deadline short enough to bound a Pod that hangs before it
+        starts would become the usual way a healthy builder dies, mid-build.
+        So the bound lives here, where "has it ever been Ready" is known.
+        """
+        if job_name in self._ever_ready:
+            return False
+        if job_name in self._counted_failures:
+            return False
+        age = _job_age_seconds(job_raw, now)
+        return age is not None and age > self.startup_timeout
+
+    async def _expire_slow_starter(self, job: Any, system: str) -> bool:
+        """End a builder that has never become Ready. True when it did."""
+        job_name = job.metadata.name
+        now = datetime.now(timezone.utc)
+        if not self._startup_expired(job.raw, job_name, now):
+            return False
+
+        age = _job_age_seconds(job.raw, now)
+        note = (
+            f"Builder for {system} was not Ready {round(age or 0.0)}s after it "
+            f"started, over the {round(self.startup_timeout)}s startup timeout. "
+            "Deleting it. A Pod that stays Pending usually cannot mount its "
+            "nixkube CSI volume; check the Pod events and nix-node on its node."
+        )
+        log.warning(
+            "builder_startup_timeout",
+            job=job_name,
+            system=system,
+            age_seconds=round(age or 0.0, 1),
+            startup_timeout=self.startup_timeout,
+        )
+        await self._report_job_event(
+            job, EVENT_REASON_STARTUP_TIMEOUT, note, event_type="Warning"
+        )
+        self._record_failure(system, job_name, reason="StartupTimeout")
+        store_id = f"builder-{job_name}"
+        if store_id in self._registered:
+            await self._unregister_builder(store_id)
+        await self._delete_job(job)
+        return True
+
+    async def _report_job_event(
+        self, job: Any, reason: str, note: str, event_type: str = "Normal"
+    ) -> None:
+        """Report a Kubernetes event against a builder Job.
+
+        An operator looks at events first. The symptom this watchdog acts on
+        is a Pod stuck in Pending with a FailedMount, and nothing there says
+        the controller has given up on it. Best effort -- a failure to report
+        must not stop the deletion.
+        """
+        try:
+            uid = getattr(job.metadata, "uid", "") or ""
+            digest = hashlib.md5(f"{uid}{reason}".encode()).hexdigest()[:8]
+            event = await ModernEvent(
+                {
+                    "metadata": {
+                        "name": f"{job.metadata.name}.{digest}",
+                        "namespace": self.namespace,
+                    },
+                    "type": event_type,
+                    "reason": reason,
+                    "action": "NixBuilderReap",
+                    "regarding": {
+                        "apiVersion": "batch/v1",
+                        "kind": "Job",
+                        "name": job.metadata.name,
+                        "namespace": self.namespace,
+                        "uid": uid,
+                    },
+                    "reportingController": "nixkube-builder-manager",
+                    "reportingInstance": socket.gethostname(),
+                    "note": note[:1000],
+                    "eventTime": datetime.now(timezone.utc).isoformat(),
+                },
+                namespace=self.namespace,
+            )
+            await event.create()
+        except Exception:
+            log.warning(
+                "builder_event_report_failed", job=job.metadata.name, exc_info=True
+            )
 
     # ---- Node probing ----
 
@@ -295,28 +528,40 @@ class BuilderManager:
 
     # ---- Job watching and reconciliation ----
 
+    async def _resync_jobs(self) -> None:
+        """List every builder Job and reconcile it.
+
+        Also drops state for Jobs that are gone, so `_counted_failures` does
+        not grow for the life of the process.
+        """
+        api = await k8s.api()
+
+        seen: set[str] = set()
+        async for job in api.get(
+            "jobs",
+            namespace=self.namespace,
+            label_selector={BUILDER_LABEL: BUILDER_LABEL_VALUE},
+        ):
+            job = cast(Any, job)
+            seen.add(job.metadata.name)
+            await self._reconcile_job(job)
+
+        for store_id in list(self._registered):
+            store_id_prefix = "builder-"
+            if store_id.startswith(store_id_prefix):
+                job_name = store_id[len(store_id_prefix) :]
+                if job_name not in seen:
+                    await self._unregister_builder(store_id)
+
+        self._counted_failures &= seen
+        self._ever_ready &= seen
+
     async def _watch_jobs(self) -> None:
         while True:
             try:
                 api = await k8s.api()
 
-                seen: set[str] = set()
-                async for job in api.get(
-                    "jobs",
-                    namespace=self.namespace,
-                    label_selector={BUILDER_LABEL: BUILDER_LABEL_VALUE},
-                ):
-                    job = cast(Any, job)
-                    seen.add(job.metadata.name)
-                    await self._reconcile_job(job)
-
-                for store_id in list(self._registered):
-                    store_id_prefix = "builder-"
-                    if store_id.startswith(store_id_prefix):
-                        job_name = store_id[len(store_id_prefix) :]
-                        if job_name not in seen:
-                            await self._unregister_builder(store_id)
-
+                await self._resync_jobs()
                 await self._ensure_min_builders()
 
                 async for event in api.watch(
@@ -332,6 +577,7 @@ class BuilderManager:
                         store_id = f"builder-{job.metadata.name}"
                         if store_id in self._registered:
                             await self._unregister_builder(store_id)
+                        self._forget_job(job.metadata.name)
                         await self._ensure_min_builders()
                     elif event_type in ("ADDED", "MODIFIED"):
                         await self._reconcile_job(job)
@@ -353,17 +599,28 @@ class BuilderManager:
             await self._delete_job(job)
             return
 
+        labels = getattr(job.metadata, "labels", {}) or {}
+        is_probe = labels.get(PROBE_LABEL) == "true"
+        system = labels.get(SYSTEM_LABEL, "unknown")
+
         status = job.raw.get("status", {})
         if status.get("succeeded") or status.get("failed"):
+            if status.get("failed") and not is_probe:
+                self._record_failure(system, job_name, reason="JobFailed")
             if store_id in self._registered:
                 await self._unregister_builder(store_id)
             return
 
-        labels = getattr(job.metadata, "labels", {}) or {}
-        is_probe = labels.get(PROBE_LABEL) == "true"
+        pod_ip, ready = await self._get_job_pod_state(job)
+
+        if ready:
+            self._ever_ready.add(job_name)
+            if not is_probe:
+                self._record_ready(system, job_name)
+        elif not is_probe and await self._expire_slow_starter(job, system):
+            return
 
         if store_id not in self._registered:
-            pod_ip = await self._get_job_pod_ip(job)
             if pod_ip:
                 await self._register_builder(store_id, pod_ip, job_name, probe=is_probe)
         else:
@@ -448,7 +705,14 @@ class BuilderManager:
                 return found
         return set()
 
-    async def _get_job_pod_ip(self, job: Any) -> str | None:
+    async def _get_job_pod_state(self, job: Any) -> tuple[str | None, bool]:
+        """Return the Job Pod's IP and whether it is Ready.
+
+        The two are not the same signal. A Pod has an IP once its sandbox is
+        up, before the container runs. Ready follows the readinessProbe on the
+        ssh port, so it means the builder answers. Registration uses the IP;
+        the failure backoff uses Ready.
+        """
         try:
             api = await k8s.api()
             async for pod in api.get(
@@ -457,12 +721,13 @@ class BuilderManager:
                 label_selector={"job-name": job.metadata.name},
             ):
                 pod = cast(Any, pod)
-                pod_ip = pod.raw.get("status", {}).get("podIP")
+                status = pod.raw.get("status", {})
+                pod_ip = status.get("podIP")
                 if pod_ip:
-                    return pod_ip
+                    return pod_ip, _pod_is_ready(status)
         except Exception:
             log.exception("job_pod_ip_fetch_failed", job=job.metadata.name)
-        return None
+        return None, False
 
     # ---- Builder min/max lifecycle ----
 
@@ -496,6 +761,17 @@ class BuilderManager:
             if total_active >= self.max_builders:
                 break
 
+            remaining = self._backoff_remaining(system)
+            if remaining > 0:
+                log.info(
+                    "builder_backoff_hold",
+                    system=system,
+                    active=active,
+                    consecutive_failures=self._failures.get(system, 0),
+                    retry_in_seconds=round(remaining, 1),
+                )
+                continue
+
             log.info(
                 "ensuring_min_builders",
                 system=system,
@@ -511,6 +787,16 @@ class BuilderManager:
         now = time.monotonic()
         last = self._last_create_time.get(system, 0.0)
         if now - last < self.cooldown_seconds:
+            return
+
+        remaining = self._backoff_remaining(system)
+        if remaining > 0:
+            log.info(
+                "builder_backoff_hold",
+                system=system,
+                consecutive_failures=self._failures.get(system, 0),
+                retry_in_seconds=round(remaining, 1),
+            )
             return
 
         try:
