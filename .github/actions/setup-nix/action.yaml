@@ -5,24 +5,43 @@ runs:
   using: "composite"
   steps:
     - name: Install Nix
-      uses: nixbuild/nix-quick-install-action@master
+      # cachix/install-nix-action, which installs a daemon, and not
+      # nixbuild/nix-quick-install-action, which does not.
+      #
+      # A daemon builds in its own sandbox, under /build. A single-user nix
+      # builds under the runner's TMPDIR, and everything a derivation touches
+      # then depends on where the checkout happens to be. That is not a
+      # theoretical difference: it hung both builders for a day. The nri-wait
+      # tests bind a unix socket, whose path holds 107 bytes, and the same
+      # socket came to 77 bytes in the sandbox and 125 on the runner. See #23.
+      #
+      # So the sandbox is the point of this step, not the installer. It costs
+      # roughly a minute more to install and buys a build that does not depend
+      # on the runner's filesystem layout.
+      uses: cachix/install-nix-action@master
       with:
         # TODO: When ready to migrate from nix-csi to nixkube module naming:
         # - Update trusted-public-keys: nix-csi.cachix.org-1 → nixkube.cachix.org-1
         # - Update substituters: https://nix-csi.cachix.org → https://nixkube.cachix.org
         # - Recreate/migrate Cachix cache from nix-csi to nixkube
+        #
+        # trusted-users, because a daemon ignores substituters and public keys
+        # a non-trusted user asks for. Without it every path would come from
+        # cache.nixos.org and everything of ours would build from source.
+        #
         # No `extra-platforms`. Each architecture is built on a runner of that
         # architecture -- `build-arm64` is `ubuntu-24.04-arm` -- so nothing
         # here needs emulation, and permitting it only means an accidental
         # cross-architecture build runs for hours under qemu instead of
         # failing at once.
-        # `keep-env-derivations` and `keep-outputs` are gone with the GitHub
-        # cache below. They existed to hold build-time outputs in the store so
-        # that cache had something to save; on a runner with no store cache
-        # they only make the store larger for no reader.
-        nix_conf: |
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          trusted-users = root runner
           trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nix-csi.cachix.org-1:i4w33gR4efO67jpz8U7g/MdvRQ6mQ3LEF9fB8tES60g=
           substituters = https://cache.nixos.org?priority=1 https://nix-csi.cachix.org?priority=2
+      # The install reaches the network, so it is the one step here that can
+      # hang without a build to blame.
+      timeout-minutes: 15
   # No GitHub store cache. cachix is the cache.
   #
   # `nix-community/cache-nix-action` restored a whole /nix/store from the
