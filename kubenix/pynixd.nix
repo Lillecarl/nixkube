@@ -419,6 +419,20 @@ in
 
       PodTemplate.nixkube-builder = {
         metadata.labels = builderLabels;
+        # Name the store paths, do not depend on them.
+        #
+        # This template's `nix-store` volume carries `storeVolumeAttributes`,
+        # a `cacheEnv` per enabled system. Without this annotation the
+        # transformer in `options.nix` keeps the string context, so rendering
+        # on x86_64 must *build* the aarch64 `cacheEnv` -- measured at 3120
+        # aarch64 derivations for `kubenixApply.manifestJSONFile`, which the
+        # `release` job renders on `ubuntu-latest`.
+        #
+        # It can never succeed there: `buildEnv` sets `allowSubstitutes =
+        # false`, and such a derivation is built, never fetched. Not a cache
+        # race. The StatefulSet beside it has always carried this; this
+        # template was missed.
+        metadata.annotations."nixkube/discard" = "true";
         template = {
           metadata.labels = builderLabels;
           spec = {
