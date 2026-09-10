@@ -54,6 +54,11 @@ jobs:
         run: nix build --show-trace --file . builderSettingsOverride
       - name: Check that nix-node reports a dead driver
         run: nix build --show-trace --file . nodeDriverReadiness
+      # A source read as a directory is a different input from the tree this
+      # runner fetches, so the same commit builds different packages in the
+      # two places and only a cluster finds out.
+      - name: Check that every source is a fetched tree
+        run: nix build --show-trace --file . sourcesAreLocked
       # A runner has no binfmt, so an attribute that needs the other
       # architecture cannot be built by any job here. A workstation with
       # extra-platforms emulates it and says nothing, which is how

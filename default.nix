@@ -450,6 +450,51 @@ rec {
       ));
     pkgs.runCommand "builder-settings-override" { } "echo ok > $out";
 
+  # Every source is a fetched tree, not a directory on somebody's disk.
+  #
+  # A source read as a directory is a different input from the tree CI
+  # fetches, so the same commit builds different packages in the two places.
+  # Nothing says so at the time: the build succeeds, and a node later asks its
+  # substituters for a store path that was never built anywhere.
+  #
+  # Three separate places had this. The umbrella read working copies as
+  # directories, this overlay resolved pynixd from a sibling directory or an
+  # unpinned branch, and Python's caches reached the package sources. All
+  # three produced one symptom, and the first two are invisible to any check
+  # that only looks at one checkout.
+  #
+  # `nixkube` is the exception and has to be. It is this repository, passed to
+  # the umbrella as `overrides.nixkube`, so it is the tree being built.
+  #
+  # UMBRELLA_DEV makes a source a directory on purpose, and this check fails
+  # then. That is the point rather than a limitation: a tree built that way is
+  # not the tree CI builds, and this is the thing that says so out loud.
+  sourcesAreLocked =
+    let
+      loose = lib.filterAttrs (
+        name: value: name != "nixkube" && !(lib.hasPrefix builtins.storeDir (toString value))
+      ) (import ./nix/sources.nix);
+      names = lib.attrNames loose;
+      asked = builtins.getEnv "UMBRELLA_DEV" != "";
+    in
+    assert lib.assertMsg (names == [ ]) ''
+      These sources are directories rather than fetched trees:
+
+      ${lib.concatMapStringsSep "\n" (n: "  ${n} -> ${toString loose.${n}}") names}
+
+      A build here and a build in CI disagree when that happens, and the
+      difference shows up on a cluster rather than here: a node asks its
+      substituters for a store path that was never built anywhere.
+
+      ${
+        if asked then
+          "UMBRELLA_DEV is set, so you asked for this. Unset it to build what CI builds."
+        else
+          "Nothing asked for this, so it is a bug. A source resolved to a path instead of a revision."
+      }
+    '';
+    pkgs.runCommand "sources-are-locked" { } "echo ok > $out";
+
   # nix-node reports whether its driver answers.
   #
   # The container had a livenessProbe and no readinessProbe. The liveness
