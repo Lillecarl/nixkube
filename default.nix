@@ -528,4 +528,20 @@ rec {
     manifest = umlManifest;
   };
   ci-debug = pkgs.callPackage ./pkgs/ci-debug { };
+
+  # Is every store path this manifest names actually fetchable?
+  #
+  # A nixkube CSI volume names an output path, so a node substitutes it and
+  # can never build it. A path on no substituter is a mount that fails, and
+  # the failure surfaces as `MountVolume.SetUp failed ... Failed to build
+  # store path`, on a node, well away from whatever forgot to push it.
+  #
+  # Ask before deploying, not after. The substituter list comes from the
+  # module, so this asks about the caches a node really carries.
+  assert-cached = pkgs.callPackage ./pkgs/assert-cached {
+    substituters = kubenixApply.config.nixkube.nixConfig.settings.substituters;
+  };
+
+  # Does this attribute build on the machine that is asked to build it?
+  arch-audit = pkgs.callPackage ./pkgs/arch-audit { };
 }

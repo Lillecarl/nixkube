@@ -52,6 +52,21 @@ jobs:
       # and this repository's own instances cannot produce.
       - name: Check that an operator can cap builders
         run: nix build --show-trace --file . builderSettingsOverride
+      - name: Check that nix-node reports a dead driver
+        run: nix build --show-trace --file . nodeDriverReadiness
+      # A runner has no binfmt, so an attribute that needs the other
+      # architecture cannot be built by any job here. A workstation with
+      # extra-platforms emulates it and says nothing, which is how
+      # kubenixApply came to need 3120 aarch64 derivations on x86_64.
+      - name: Check that every CI attribute builds natively
+        run: |
+          nix run --file . arch-audit -- \
+            push \
+            kubenixApply.manifestJSONFile \
+            kubenixApply.manifestYAMLFile \
+            kubenixCI1.deploymentScript \
+            kubenixCI2.deploymentScript \
+            kubenixCITest.deploymentScript
       - name: Check formatting
         run: |
           nix run --file . treefmt
@@ -110,6 +125,18 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
+      # Both build jobs have passed, so every store path the deployment names
+      # should now be fetchable. Assert it before assembling the index rather
+      # than after, because the index is what consumers pull.
+      #
+      # It walks the closure and unions the substituters. A per-path narinfo
+      # check passes on the shape that actually bit: cacheEnv present on
+      # cachix with a closure member only on cache.nixos.org, and issue #8's
+      # present-top-path-absent-member.
+      - name: Assert both architectures' closures are fetchable
+        run: |
+          nix build --show-trace --file . kubenixApply.manifestJSONFile --out-link manifest
+          nix run --file . assert-cached -- manifest
       - name: Create nix multi-arch manifest
         run: |
           unlink nix-manifest || true
@@ -257,10 +284,15 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
+      # A release YAML nobody has checked is deployable is how #3 and #4
+      # reached users. Every path it names has to be fetchable, because a
+      # node can only substitute them.
       - name: Render deployment manifest
         run: |
           nix build --show-trace --file . kubenixApply.manifestYAMLFile
           cp result nix-csi-deployment.yaml
+      - name: Assert the release manifest is deployable
+        run: nix run --file . assert-cached -- nix-csi-deployment.yaml
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
