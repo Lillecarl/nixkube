@@ -174,7 +174,22 @@ rec {
     runtimeInputs = [ pkgs.regctl ];
     text = # bash
       ''
+        set -euo pipefail
+
         regctl registry login -u="$REPO_USERNAME" -p="$REPO_TOKEN" ${server}
+
+        # The two tags come from two jobs on two runners. Say which one is
+        # missing, rather than letting `index create` fail against a name
+        # that reads like a typo.
+        for ref in ${imageRef "aarch64-linux"} ${imageRef "x86_64-linux"}; do
+          if ! regctl manifest head "$ref" >/dev/null 2>&1; then
+            echo "missing: $ref" >&2
+            echo "Its build job did not publish. An index over it would be wrong." >&2
+            exit 1
+          fi
+          echo "present: $ref"
+        done
+
         regctl index create ${repo}/nix:${pkgs.nix.version}-${nixkubeVersion} \
           --ref ${imageRef "aarch64-linux"} \
           --ref ${imageRef "x86_64-linux"}
