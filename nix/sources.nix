@@ -7,8 +7,9 @@
 # here and a build from the umbrella agree.
 #
 # A plain tarball is enough. The umbrella records every revision in
-# nix/sources.lock, a file in its own tree, so a fetch that leaves the
-# submodule directories empty still resolves all of them.
+# nix/sources.lock, a file in its own tree, and the working copies beside it
+# are ignored rather than committed, so a fetch that brings down none of them
+# still resolves all of them.
 #
 # `..` from a store path leaves the store root, and Nix refuses that rather
 # than answering false: "'nix' is too short to be a valid store path". So ask
