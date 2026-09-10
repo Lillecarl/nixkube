@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import pytest
 from pynixd_nixkube.builder_manager import (
     _BACKOFF_BASE_SECONDS,
+    BUILDER_KNOWN_HOSTS,
     BuilderManager,
     PodState,
     _job_age_seconds,
@@ -246,3 +247,40 @@ def test_a_failure_carries_the_node_but_does_not_count_by_it():
     m._record_failure(SYSTEM, "job-a", reason="StartupTimeout", node="node-1")
     m._record_failure(SYSTEM, "job-b", reason="StartupTimeout", node="node-2")
     assert m._failures[SYSTEM] == 2
+
+
+def test_the_builder_store_spec_validates():
+    """The spec pydantic actually accepts.
+
+    `known_hosts` has no default in pynixd, so a spec that omits it raises
+    ValidationError at construction. This call omitted it, and every builder
+    registration on a live cluster failed with:
+
+        ValidationError: 1 validation error for SSHSubprocessStoreSpec
+        known_hosts
+          Field required [type=missing, ...]
+
+    Constructing it here is the whole test: it fails the same way if the
+    field goes missing again.
+    """
+    spec = BuilderManager._builder_store_spec("builder-job-a", "10.0.0.1")
+    assert spec.known_hosts == BUILDER_KNOWN_HOSTS
+    assert spec.host == "10.0.0.1"
+    assert spec.username == "nix"
+    assert spec.no_schedule is False
+
+
+def test_a_probe_store_does_not_take_builds():
+    spec = BuilderManager._builder_store_spec("builder-job-a", "10.0.0.1", probe=True)
+    assert spec.no_schedule is True
+    assert spec.known_hosts == BUILDER_KNOWN_HOSTS
+
+
+def test_the_known_hosts_file_is_the_mounted_configmap():
+    """The path the deployment mounts, not an arbitrary one.
+
+    kubenix/pynixd.nix mounts the ssh-dynauth ConfigMap at /etc/ssh-dynauth,
+    and kubenix/secret.nix writes ssh_known_hosts into it. A change to either
+    has to change this too, or no builder verifies.
+    """
+    assert BUILDER_KNOWN_HOSTS == "/etc/ssh-dynauth/ssh_known_hosts"

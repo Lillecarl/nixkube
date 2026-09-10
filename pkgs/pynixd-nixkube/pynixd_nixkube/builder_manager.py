@@ -59,6 +59,13 @@ _RECONCILE_INTERVAL = 30.0
 ModernEvent = new_class(kind="Event", version="events.k8s.io/v1", namespaced=True)
 EVENT_REASON_STARTUP_TIMEOUT = "NixBuilderStartupTimeout"
 
+# The host keys a builder may present.
+#
+# `secret.nix` generates one ed25519 pair for the namespace and writes the
+# public half into the `ssh-dynauth` ConfigMap as `* <key>`. `pynixd.nix`
+# mounts that ConfigMap here.
+BUILDER_KNOWN_HOSTS = "/etc/ssh-dynauth/ssh_known_hosts"
+
 
 @dataclass
 class PodState:
@@ -689,21 +696,46 @@ class BuilderManager:
         else:
             self._job_names[store_id] = job_name
 
+    @staticmethod
+    def _builder_store_spec(
+        store_id: str, pod_ip: str, probe: bool = False
+    ) -> SSHSubprocessStoreSpec:
+        """The store spec for one builder Pod.
+
+        `known_hosts` has no default in pynixd, on purpose: a build store sees
+        every build a client pushes and returns the paths the client then
+        registers as valid, so the host key is what makes the far side the
+        machine the configuration named. This call did not answer the
+        question, so every registration raised a ValidationError and no
+        builder ever registered.
+
+        The answer is the file the deployment already writes. `secret.nix`
+        generates one ed25519 pair for the whole namespace and puts the public
+        half in the `ssh-dynauth` ConfigMap as `* <key>`. That ConfigMap is
+        mounted at `/etc/ssh-dynauth` in this Pod, and asyncssh matches a
+        known_hosts host pattern with `fnmatch`, so the wildcard covers every
+        builder IP.
+
+        `None` would have been one character shorter and would mean "accept
+        any host key". Builders are addressed by Pod IP, and a cluster reuses
+        those, so that is worth avoiding for the price.
+        """
+        return SSHSubprocessStoreSpec(
+            store_id=StoreId(store_id),
+            host=pod_ip,
+            port=22,
+            username="nix",
+            known_hosts=BUILDER_KNOWN_HOSTS,
+            client_keys=["/etc/ssh-key/id_ed25519"],
+            nix_bin="/nix/var/result/bin/nix",
+            monitor=False,
+            no_schedule=probe,
+        )
+
     async def _register_builder(
         self, store_id: str, pod_ip: str, job_name: str = "", probe: bool = False
     ) -> None:
-        store = SSHSubprocessStore(
-            SSHSubprocessStoreSpec(
-                store_id=StoreId(store_id),
-                host=pod_ip,
-                port=22,
-                username="nix",
-                client_keys=["/etc/ssh-key/id_ed25519"],
-                nix_bin="/nix/var/result/bin/nix",
-                monitor=False,
-                no_schedule=probe,
-            )
-        )
+        store = SSHSubprocessStore(self._builder_store_spec(store_id, pod_ip, probe))
         try:
             await self.server.add_store(store, dynamic=True)
             self._registered[store_id] = pod_ip
