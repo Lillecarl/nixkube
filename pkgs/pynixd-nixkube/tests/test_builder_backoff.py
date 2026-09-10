@@ -137,35 +137,63 @@ NOW = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
 
 def test_a_young_builder_is_left_alone():
     m = manager(startup_timeout=600.0)
-    assert not m._startup_expired(job_raw("2026-09-10T11:55:00Z"), "job-a", NOW)
+    assert not m._startup_expired(
+        job_raw("2026-09-10T11:55:00Z"), "job-a", "Pending", NOW
+    )
 
 
-def test_a_builder_that_never_answered_expires():
+def test_a_pod_that_never_left_pending_expires():
     m = manager(startup_timeout=600.0)
-    assert m._startup_expired(job_raw("2026-09-10T11:45:00Z"), "job-a", NOW)
+    assert m._startup_expired(job_raw("2026-09-10T11:45:00Z"), "job-a", "Pending", NOW)
 
 
-def test_a_builder_that_was_ready_never_expires():
+def test_a_job_with_no_pod_at_all_expires():
+    """No Pod and no phase is the unschedulable case."""
+    m = manager(startup_timeout=600.0)
+    assert m._startup_expired(job_raw("2026-09-10T11:45:00Z"), "job-a", None, NOW)
+
+
+def test_a_running_builder_never_expires():
     """The reason this is not activeDeadlineSeconds.
 
-    A healthy builder Job runs for hours. Age alone would end it.
+    A healthy builder Job runs for hours -- 3h36m measured on a live cluster.
+    Age alone would end it. The phase is what says it started, and it comes
+    from the API server, so it survives a restart of this process.
     """
     m = manager(startup_timeout=600.0)
+    assert not m._startup_expired(
+        job_raw("2026-09-10T08:00:00Z"), "job-a", "Running", NOW
+    )
+
+
+def test_a_running_builder_with_a_flaking_probe_never_expires():
+    """The restart case. `_ever_ready` is empty and the builder is four hours old."""
+    m = manager(startup_timeout=600.0)
+    assert not m._ever_ready
+    assert not m._startup_expired(
+        job_raw("2026-09-10T08:00:00Z"), "job-a", "Running", NOW
+    )
+
+
+def test_a_builder_seen_ready_never_expires():
+    m = manager(startup_timeout=600.0)
     m._ever_ready.add("job-a")
-    assert not m._startup_expired(job_raw("2026-09-10T08:00:00Z"), "job-a", NOW)
+    assert not m._startup_expired(
+        job_raw("2026-09-10T08:00:00Z"), "job-a", "Pending", NOW
+    )
 
 
 def test_an_expired_builder_is_not_acted_on_twice():
     m = manager(startup_timeout=600.0)
     old = job_raw("2026-09-10T11:00:00Z")
-    assert m._startup_expired(old, "job-a", NOW)
+    assert m._startup_expired(old, "job-a", "Pending", NOW)
     m._record_failure(SYSTEM, "job-a", reason="StartupTimeout")
-    assert not m._startup_expired(old, "job-a", NOW)
+    assert not m._startup_expired(old, "job-a", "Pending", NOW)
 
 
 def test_a_builder_with_no_timestamp_is_left_alone():
     m = manager(startup_timeout=600.0)
-    assert not m._startup_expired({"metadata": {}}, "job-a", NOW)
+    assert not m._startup_expired({"metadata": {}}, "job-a", "Pending", NOW)
 
 
 def test_the_job_carries_no_deadline():

@@ -141,8 +141,18 @@ class BuilderManager:
         # `ttlSecondsAfterFinished`, and every reconcile sees it again.
         self._counted_failures: set[str] = set()
         # Job names whose Pod has been Ready at least once. The startup
-        # watchdog only ends a builder that has never answered.
+        # watchdog only ends a builder that has never answered. In memory, so
+        # it is empty after a restart -- the Pod phase is the guard that does
+        # not forget.
         self._ever_ready: set[str] = set()
+        # One reconcile at a time.
+        #
+        # `_reconcile_job` awaits three times, and the periodic tick reconciles
+        # the same Jobs as the watch. Two calls on one Job would both find it
+        # unregistered, both fetch the Pod and both add the same store. A Job
+        # MODIFIED event fires exactly when a new builder's Pod gets an IP,
+        # which is when the tick is most likely to be looking at it.
+        self._reconcile_lock = asyncio.Lock()
 
     async def start(self) -> None:
         await self._reap_orphaned_builder_pods()
@@ -178,8 +188,9 @@ class BuilderManager:
         while True:
             await asyncio.sleep(_RECONCILE_INTERVAL)
             try:
-                await self._resync_jobs()
-                await self._ensure_min_builders()
+                async with self._reconcile_lock:
+                    await self._resync_jobs()
+                    await self._ensure_min_builders()
             except asyncio.CancelledError:
                 return
             except Exception:
@@ -251,16 +262,28 @@ class BuilderManager:
 
     # ---- Startup watchdog ----
 
-    def _startup_expired(self, job_raw: dict, job_name: str, now: datetime) -> bool:
-        """True when a builder that never answered has had long enough.
+    def _startup_expired(
+        self, job_raw: dict, job_name: str, phase: str | None, now: datetime
+    ) -> bool:
+        """True when a builder that never started has had long enough.
 
         Not `activeDeadlineSeconds`. That field measures the whole life of a
         Job, from `status.startTime`, and a builder Job runs for as long as it
         serves builds -- one measured at three and a half hours on a live
         cluster. Any deadline short enough to bound a Pod that hangs before it
         starts would become the usual way a healthy builder dies, mid-build.
-        So the bound lives here, where "has it ever been Ready" is known.
+
+        The phase is the guard, not `_ever_ready`. `_ever_ready` is in memory,
+        so a restart empties it, and a three-hour builder whose ssh probe was
+        failing at that moment would look like a builder that never started.
+        `Pending` is the case the issue describes: the kubelet fails the CSI
+        mount before it creates a sandbox, so the Pod has no IP and no
+        container. A `Running` Pod that is not Ready is left alone, and a
+        container that crashes at startup is covered by `backoffLimit: 0`,
+        which fails the Job.
         """
+        if phase is not None and phase != "Pending":
+            return False
         if job_name in self._ever_ready:
             return False
         if job_name in self._counted_failures:
@@ -268,24 +291,28 @@ class BuilderManager:
         age = _job_age_seconds(job_raw, now)
         return age is not None and age > self.startup_timeout
 
-    async def _expire_slow_starter(self, job: Any, system: str) -> bool:
-        """End a builder that has never become Ready. True when it did."""
+    async def _expire_slow_starter(
+        self, job: Any, system: str, phase: str | None
+    ) -> bool:
+        """End a builder whose Pod never started. True when it did."""
         job_name = job.metadata.name
         now = datetime.now(timezone.utc)
-        if not self._startup_expired(job.raw, job_name, now):
+        if not self._startup_expired(job.raw, job_name, phase, now):
             return False
 
         age = _job_age_seconds(job.raw, now)
         note = (
-            f"Builder for {system} was not Ready {round(age or 0.0)}s after it "
-            f"started, over the {round(self.startup_timeout)}s startup timeout. "
-            "Deleting it. A Pod that stays Pending usually cannot mount its "
-            "nixkube CSI volume; check the Pod events and nix-node on its node."
+            f"Builder for {system} never started. Its Pod was still "
+            f"{phase or 'absent'} {round(age or 0.0)}s after the Job began, over "
+            f"the {round(self.startup_timeout)}s startup timeout. Deleting it. "
+            "A Pod that stays Pending usually cannot mount its nixkube CSI "
+            "volume; check the Pod events and nix-node on its node."
         )
         log.warning(
             "builder_startup_timeout",
             job=job_name,
             system=system,
+            phase=phase,
             age_seconds=round(age or 0.0, 1),
             startup_timeout=self.startup_timeout,
         )
@@ -561,8 +588,9 @@ class BuilderManager:
             try:
                 api = await k8s.api()
 
-                await self._resync_jobs()
-                await self._ensure_min_builders()
+                async with self._reconcile_lock:
+                    await self._resync_jobs()
+                    await self._ensure_min_builders()
 
                 async for event in api.watch(
                     "jobs",
@@ -573,15 +601,16 @@ class BuilderManager:
                     if job is None:
                         continue
 
-                    if event_type == "DELETED":
-                        store_id = f"builder-{job.metadata.name}"
-                        if store_id in self._registered:
-                            await self._unregister_builder(store_id)
-                        self._forget_job(job.metadata.name)
-                        await self._ensure_min_builders()
-                    elif event_type in ("ADDED", "MODIFIED"):
-                        await self._reconcile_job(job)
-                        await self._ensure_min_builders()
+                    async with self._reconcile_lock:
+                        if event_type == "DELETED":
+                            store_id = f"builder-{job.metadata.name}"
+                            if store_id in self._registered:
+                                await self._unregister_builder(store_id)
+                            self._forget_job(job.metadata.name)
+                            await self._ensure_min_builders()
+                        elif event_type in ("ADDED", "MODIFIED"):
+                            await self._reconcile_job(job)
+                            await self._ensure_min_builders()
             except asyncio.CancelledError:
                 return
             except Exception as e:  # noqa: BLE001 -- watch loop: any failure is retried after _RECONNECT_DELAY
@@ -611,13 +640,13 @@ class BuilderManager:
                 await self._unregister_builder(store_id)
             return
 
-        pod_ip, ready = await self._get_job_pod_state(job)
+        pod_ip, ready, phase = await self._get_job_pod_state(job)
 
         if ready:
             self._ever_ready.add(job_name)
             if not is_probe:
                 self._record_ready(system, job_name)
-        elif not is_probe and await self._expire_slow_starter(job, system):
+        elif not is_probe and await self._expire_slow_starter(job, system, phase):
             return
 
         if store_id not in self._registered:
@@ -705,14 +734,19 @@ class BuilderManager:
                 return found
         return set()
 
-    async def _get_job_pod_state(self, job: Any) -> tuple[str | None, bool]:
-        """Return the Job Pod's IP and whether it is Ready.
+    async def _get_job_pod_state(self, job: Any) -> tuple[str | None, bool, str | None]:
+        """Return the Job Pod's IP, whether it is Ready, and its phase.
 
-        The two are not the same signal. A Pod has an IP once its sandbox is
-        up, before the container runs. Ready follows the readinessProbe on the
-        ssh port, so it means the builder answers. Registration uses the IP;
-        the failure backoff uses Ready.
+        Three signals, three uses. A Pod has an IP once its sandbox is up,
+        before the container runs, and registration uses that. Ready follows
+        the readinessProbe on the ssh port, so it means the builder answers,
+        and the failure backoff uses that. The phase is what the startup
+        watchdog acts on, because it is the one of the three the API server
+        holds rather than this process.
         """
+        pod_ip: str | None = None
+        ready = False
+        phase: str | None = None
         try:
             api = await k8s.api()
             async for pod in api.get(
@@ -722,12 +756,13 @@ class BuilderManager:
             ):
                 pod = cast(Any, pod)
                 status = pod.raw.get("status", {})
+                phase = status.get("phase")
                 pod_ip = status.get("podIP")
                 if pod_ip:
-                    return pod_ip, _pod_is_ready(status)
+                    return pod_ip, _pod_is_ready(status), phase
         except Exception:
             log.exception("job_pod_ip_fetch_failed", job=job.metadata.name)
-        return None, False
+        return pod_ip, ready, phase
 
     # ---- Builder min/max lifecycle ----
 
