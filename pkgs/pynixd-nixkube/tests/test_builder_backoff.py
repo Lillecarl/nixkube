@@ -166,3 +166,31 @@ def test_an_expired_builder_is_not_acted_on_twice():
 def test_a_builder_with_no_timestamp_is_left_alone():
     m = manager(startup_timeout=600.0)
     assert not m._startup_expired({"metadata": {}}, "job-a", NOW)
+
+
+def test_the_job_carries_no_deadline():
+    """The rendered Job, not the option that feeds it.
+
+    activeDeadlineSeconds would cap a healthy builder's life, so it is absent
+    from both the Job spec and the Pod spec. The Nix side asserts the same
+    thing about the PodTemplate it renders.
+    """
+    m = manager()
+    job = m._build_job_resource(SYSTEM, {"spec": {"containers": []}})
+    assert "activeDeadlineSeconds" not in job["spec"]
+    assert "activeDeadlineSeconds" not in job["spec"]["template"]["spec"]
+    assert job["spec"]["backoffLimit"] == 0
+    assert job["spec"]["ttlSecondsAfterFinished"] == 300
+    assert job["metadata"]["labels"]["nixkube/system"] == SYSTEM
+    assert job["metadata"]["name"].startswith("nixkube-builder-")
+
+
+def test_overrides_still_merge():
+    m = manager()
+    job = m._build_job_resource(
+        SYSTEM,
+        {"spec": {}},
+        overrides={"spec": {"template": {"spec": {"nodeName": "n1"}}}},
+    )
+    assert job["spec"]["template"]["spec"]["nodeName"] == "n1"
+    assert job["spec"]["backoffLimit"] == 0

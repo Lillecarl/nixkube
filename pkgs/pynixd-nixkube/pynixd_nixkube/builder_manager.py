@@ -951,6 +951,45 @@ class BuilderManager:
 
     # ---- Job creation ----
 
+    def _build_job_resource(
+        self, system: str, pod_spec: dict, overrides: dict | None = None
+    ) -> dict:
+        """The Job a builder is created from.
+
+        `activeDeadlineSeconds` is deliberately absent. It measures a Job's
+        whole active time, from `status.startTime`, and cannot tell a Pod that
+        hangs in Pending from a builder that is serving builds. A builder Job
+        is long-lived by design -- one measured at 3h36m, still Running -- so
+        any value short enough to bound the hung case would be the usual way a
+        healthy builder dies, mid-build. `_expire_slow_starter` is the bound,
+        because it knows whether the builder has ever been Ready.
+
+        `backoffLimit: 0` means a failed Job is not retried in place, and
+        `ttlSecondsAfterFinished` reaps it. Neither helps a Job that never
+        finishes.
+        """
+        job_id = str(uuid.uuid4())[:8]
+        job_resource = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {
+                "name": f"nixkube-builder-{job_id}",
+                "namespace": self.namespace,
+                "labels": {
+                    BUILDER_LABEL: BUILDER_LABEL_VALUE,
+                    SYSTEM_LABEL: system,
+                },
+            },
+            "spec": {
+                "ttlSecondsAfterFinished": 300,
+                "backoffLimit": 0,
+                "template": pod_spec,
+            },
+        }
+        if overrides:
+            job_resource = deep_merge(job_resource, overrides)
+        return job_resource
+
     async def _create_builder_job(
         self, system: str, overrides: dict | None = None
     ) -> str | None:
@@ -970,29 +1009,7 @@ class BuilderManager:
             node_selector = spec.setdefault("nodeSelector", {})
             node_selector["kubernetes.io/arch"] = kube_arch
 
-        job_id = str(uuid.uuid4())[:8]
-
-        job_resource = {
-            "apiVersion": "batch/v1",
-            "kind": "Job",
-            "metadata": {
-                "name": f"nixkube-builder-{job_id}",
-                "namespace": self.namespace,
-                "labels": {
-                    BUILDER_LABEL: BUILDER_LABEL_VALUE,
-                    SYSTEM_LABEL: system,
-                },
-            },
-            "spec": {
-                "ttlSecondsAfterFinished": 300,
-                "backoffLimit": 0,
-                "template": pod_spec,
-            },
-        }
-
-        if overrides:
-            job_resource = deep_merge(job_resource, overrides)
-
+        job_resource = self._build_job_resource(system, pod_spec, overrides)
         job_name = job_resource["metadata"]["name"]
 
         try:

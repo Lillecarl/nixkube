@@ -159,6 +159,23 @@ in
         builder-max = 3;
         builder-min = 1;
         idle-timeout = 300;
+        # A builder that never becomes Ready is deleted after this many
+        # seconds, and counts as a failure.
+        #
+        # Not activeDeadlineSeconds on the Job. That field measures a Job's
+        # whole life, and a healthy builder Job runs for hours -- one measured
+        # at 3h36m on a live cluster. Any value small enough to bound a Pod
+        # that hangs before it starts would kill working builders mid-build.
+        # The bound is in the manager, which knows whether a builder has ever
+        # answered.
+        #
+        # 10 minutes. A warm node reaches Ready in 20 to 30 seconds, so this
+        # leaves room for a cold image pull on a slow node.
+        builder-startup-timeout = 600;
+        # Longest delay between retries after builders of one system fail one
+        # after another. The delay doubles from 30 seconds up to this, and a
+        # builder that reaches Ready clears it.
+        builder-backoff-cap = 600;
         # Listen on every interface, and carried in config.json rather than in
         # an env var.
         #
@@ -256,6 +273,8 @@ in
                     PYNIXD_BUILDER_MAX.value = toString cfg.pynixd.controller.settings.builder-max;
                     PYNIXD_BUILDER_MIN.value = toString cfg.pynixd.controller.settings.builder-min;
                     PYNIXD_IDLE_TIMEOUT.value = toString cfg.pynixd.controller.settings.idle-timeout;
+                    PYNIXD_BUILDER_STARTUP_TIMEOUT.value = toString cfg.pynixd.controller.settings.builder-startup-timeout;
+                    PYNIXD_BUILDER_BACKOFF_CAP.value = toString cfg.pynixd.controller.settings.builder-backoff-cap;
                     PYNIXD_SCHEDULE_MODE.value = "scheduler";
                     PYNIXD_SYSTEMS.value = lib.concatStringsSep "," (builtins.attrNames enabledSystems);
                     PYNIXD_CONFIG.value = "/etc/pynixd-config/config.json";

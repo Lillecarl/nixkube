@@ -403,6 +403,8 @@ rec {
         module.config.nixkube.pynixd.settings = {
           builder-min = 0;
           builder-max = 0;
+          builder-startup-timeout = 120;
+          builder-backoff-cap = 60;
         };
       };
       stock = kubenixInstance { };
@@ -432,6 +434,20 @@ rec {
     assert envOf capped "PYNIXD_BUILDER_MIN" == "0";
     assert envOf stock "PYNIXD_BUILDER_MAX" == "3";
     assert envOf stock "PYNIXD_BUILDER_MIN" == "1";
+    # The startup watchdog and the failure backoff read the environment the
+    # same way, so they need the same assertion.
+    assert envOf capped "PYNIXD_BUILDER_STARTUP_TIMEOUT" == "120";
+    assert envOf capped "PYNIXD_BUILDER_BACKOFF_CAP" == "60";
+    assert envOf stock "PYNIXD_BUILDER_STARTUP_TIMEOUT" == "600";
+    assert envOf stock "PYNIXD_BUILDER_BACKOFF_CAP" == "600";
+    # activeDeadlineSeconds is deliberately absent from the builder Job. It
+    # measures a Job's whole life, and a builder Job runs for hours, so any
+    # value that bounds a Pod hung before startup kills working builders
+    # mid-build. The bound is `builder-startup-timeout`, in the manager.
+    assert
+      !(builtins.hasAttr "activeDeadlineSeconds" (
+        stock.config.kubernetes.resources.nixkube.PodTemplate.nixkube-builder.template.spec
+      ));
     pkgs.runCommand "builder-settings-override" { } "echo ok > $out";
 
   # NixOS integration tests — spin up real kubeadm clusters in VMs

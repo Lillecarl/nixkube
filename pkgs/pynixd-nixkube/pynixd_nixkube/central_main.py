@@ -57,6 +57,8 @@ async def _main() -> None:
                 min_builders=settings.builder_min,
                 idle_timeout=settings.idle_timeout,
                 systems=[s.strip() for s in settings.systems.split(",") if s.strip()],
+                startup_timeout=settings.builder_startup_timeout,
+                backoff_cap=settings.builder_backoff_cap,
             )
             await builder_manager.start()
 
