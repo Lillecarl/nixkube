@@ -99,11 +99,17 @@ jobs:
           unlink nix-envs || true
           nix build --show-trace --file . push --out-link nix-envs
           ./nix-envs/bin/push
-      - name: Build and push amd64 nix image
+      # Built on every branch, published from develop and tags only. The
+      # image tag is named from versions, not from the commit, so a branch
+      # that changes neither would overwrite develop's tag with its own
+      # content under the same name. Building still proves it builds.
+      - name: Build amd64 nix image
         run: |
           unlink nix-nix || true
           nix build --show-trace --file . nixImage.pushArch.x86_64-linux --out-link nix-nix
-          ./nix-nix/bin/push-nix-x86_64-linux
+      - name: Push amd64 nix image
+        if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
+        run: ./nix-nix/bin/push-nix-x86_64-linux
   build-arm64:
     runs-on: ubuntu-24.04-arm
     # Fail rather than hang. Measured on 2026-09-10: this job sat in "Build
@@ -142,11 +148,15 @@ jobs:
           unlink nix-envs || true
           nix build --show-trace --max-jobs 1 --cores 4 --file . push --out-link nix-envs
           ./nix-envs/bin/push
-      - name: Build and push arm64 nix image
+      # Built everywhere, published from develop and tags only. See the amd64
+      # job above for why.
+      - name: Build arm64 nix image
         run: |
           unlink nix-nix || true
           nix build --show-trace --max-jobs 1 --cores 4 --file . nixImage.pushArch.aarch64-linux --out-link nix-nix
-          ./nix-nix/bin/push-nix-aarch64-linux
+      - name: Push arm64 nix image
+        if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
+        run: ./nix-nix/bin/push-nix-aarch64-linux
   build-manifests:
     needs: [build-amd64, build-arm64]
     runs-on: ubuntu-latest
@@ -167,16 +177,31 @@ jobs:
         run: |
           nix build --show-trace --file . kubenixApply.manifestJSONFile --out-link manifest
           nix run --file . assert-cached -- manifest
-      - name: Create nix multi-arch manifest
+      # Publish from develop and tags only.
+      #
+      # These write floating tags -- `nix:latest`, `scratch:latest` and the
+      # version tags -- and nothing here was branch-guarded, so a push to any
+      # branch republished what consumers pull. It has not bitten only
+      # because `build-arm64` stalls before this job runs.
+      #
+      # The image tags are named from versions, not from the commit, so a
+      # branch that changes neither version overwrites develop's tag with its
+      # own content under the same name.
+      #
+      # A branch still builds and still asserts. It just does not publish, so
+      # the kind tests below run against the images develop published.
+      - name: Build the index and scratch publishers
         run: |
           unlink nix-manifest || true
-          nix build --show-trace --file . nixImage.pushManifest --out-link nix-manifest
-          ./nix-manifest/bin/push-nix-manifest
-      - name: Build and push scratch image
-        run: |
           unlink nix-scratches || true
+          nix build --show-trace --file . nixImage.pushManifest --out-link nix-manifest
           nix build --show-trace --file . scratchImage.push --out-link nix-scratches
-          ./nix-scratches/bin/push
+      - name: Create nix multi-arch manifest
+        if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
+        run: ./nix-manifest/bin/push-nix-manifest
+      - name: Push scratch image
+        if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
+        run: ./nix-scratches/bin/push
       # Let this fail the job. The cache is load-bearing, not an optimisation:
       # a node cannot bring itself up without nodeEnv, and a node with no local
       # store cannot build one. A push that silently does nothing shows up days
