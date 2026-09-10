@@ -58,15 +58,28 @@ jobs:
       # architecture cannot be built by any job here. A workstation with
       # extra-platforms emulates it and says nothing, which is how
       # kubenixApply came to need 3120 aarch64 derivations on x86_64.
+      #
+      # Every attribute a job builds is here except `pushArch.aarch64-linux`,
+      # which is foreign here on purpose and native on the runner that builds
+      # it.
+      #
+      # `pushManifest` is the one most likely to regress. It names the two
+      # architectures' images as plain strings today, so it costs nothing;
+      # interpolating the derivations instead would read as a tidy-up and
+      # would make `build-manifests` need an aarch64 machine.
       - name: Check that every CI attribute builds natively
         run: |
           nix run --file . arch-audit -- \
             push \
+            push-ci2 \
             kubenixApply.manifestJSONFile \
             kubenixApply.manifestYAMLFile \
             kubenixCI1.deploymentScript \
             kubenixCI2.deploymentScript \
-            kubenixCITest.deploymentScript
+            kubenixCITest.deploymentScript \
+            nixImage.pushArch.x86_64-linux \
+            nixImage.pushManifest \
+            scratchImage.push
       - name: Check formatting
         run: |
           nix run --file . treefmt
