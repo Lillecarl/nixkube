@@ -27,7 +27,7 @@ buildPythonPackage {
   inherit version;
   pname = "csi-proto-python";
 
-  src = lib.cleanSource ./.;
+  src = lib.cleanPythonSource ./.;
 
   build-system = [ hatchling ];
   nativeBuildInputs = [

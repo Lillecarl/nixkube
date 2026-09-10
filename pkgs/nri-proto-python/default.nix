@@ -24,7 +24,7 @@ buildPythonPackage {
   inherit version;
   pname = "nri-proto-python";
 
-  src = lib.cleanSource ./.;
+  src = lib.cleanPythonSource ./.;
 
   build-system = [ hatchling ];
   nativeBuildInputs = [

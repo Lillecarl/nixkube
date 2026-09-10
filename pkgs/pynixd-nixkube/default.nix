@@ -39,7 +39,7 @@ in
 buildPythonApplication {
   pname = pyproject.project.name;
   version = pyproject.project.version;
-  src = lib.cleanSource ./.;
+  src = lib.cleanPythonSource ./.;
   pyproject = true;
   build-system = [ hatchling ];
   dependencies = [

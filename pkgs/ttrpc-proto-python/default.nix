@@ -24,7 +24,7 @@ buildPythonPackage {
   inherit version;
   pname = "ttrpc-proto-python";
 
-  src = lib.cleanSource ./.;
+  src = lib.cleanPythonSource ./.;
 
   build-system = [ hatchling ];
   nativeBuildInputs = [
