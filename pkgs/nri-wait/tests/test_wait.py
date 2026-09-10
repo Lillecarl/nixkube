@@ -9,9 +9,12 @@ absolute deadline of the same length ran beside the resettable one and
 nothing reset it, so no build could last longer than NRI_TIMEOUT.
 """
 
+import contextlib
 import json
+import tempfile
 import threading
 import time
+from pathlib import Path
 
 import pytest
 import zmq
@@ -24,16 +27,74 @@ CONTAINER = "0123456789abcdef"
 TIMEOUT = 1
 
 
+def _socket_dir():
+    """A directory short enough to hold a unix socket path.
+
+    A unix socket path cannot exceed 107 bytes, and pytest's `tmp_path` is
+    nowhere near short enough on its own: it carries the test name and a
+    session number under TMPDIR.
+
+    That is how this suite hung CI for a day. Nix's daemon builds in `/build`,
+    so the path came to 77 bytes and everything passed. The CI runner installs
+    nix single-user with no daemon, so a build happens under
+
+        /home/runner/work/_temp/nix-build-nri-wait-0.1.0.drv-0/
+
+    and the same socket came to 125 bytes. bind() then raised, the fixture
+    never reached its teardown, and the leaked context wedged the interpreter
+    at exit -- after pytest had already reported. Both builders sat there until
+    the job timeout killed them.
+
+    So the socket goes in a directory of its own, named as briefly as
+    tempfile will, and never under `tmp_path`. TMPDIR is tried first, because
+    that is the one place a sandboxed build may write. `/tmp` is the fallback
+    for a TMPDIR too long to hold a socket at all, which no sandbox has and a
+    deep checkout can.
+    """
+    for base in (None, "/tmp"):
+        made = tempfile.mkdtemp(prefix="nw", dir=base)
+        if len(made) + len("/p.sock") < zmq.IPC_PATH_MAX_LEN:
+            return made
+    return made
+
+
 @pytest.fixture
-def pub(tmp_path):
-    """A PUB socket standing in for the build daemon, and its path."""
+def pub():
+    """A PUB socket standing in for the build daemon, and its path.
+
+    try/finally, not a bare yield. A fixture that raises before it yields runs
+    no teardown, so a failing bind used to leak the socket and the context --
+    and `zmq_ctx_term` blocks for ever on a context whose sockets are still
+    open. destroy(linger=0) closes them first, so a failure here is a failure
+    and never a hang.
+    """
     context = zmq.Context()
-    socket = context.socket(zmq.PUB)
-    path = tmp_path / "wait-pub.sock"
-    socket.bind(f"ipc://{path}")
-    yield socket, str(path)
-    socket.close()
-    context.term()
+    try:
+        socket = context.socket(zmq.PUB)
+        path = Path(_socket_dir()) / "p.sock"
+        assert len(str(path)) < zmq.IPC_PATH_MAX_LEN, (
+            f"{path} is {len(str(path))} bytes, and a unix socket path holds "
+            f"{zmq.IPC_PATH_MAX_LEN}"
+        )
+        socket.bind(f"ipc://{path}")
+        yield socket, str(path)
+    finally:
+        context.destroy(linger=0)
+
+
+@contextlib.contextmanager
+def subscriber(path):
+    """A SUB socket joined to `path`, and a context that always goes away.
+
+    Every test used to build these by hand and end with `context.term()`. That
+    line is unreachable whenever the body above it raises, and a context with
+    a live socket makes `term` block for ever. See the `pub` fixture.
+    """
+    context = zmq.Context()
+    try:
+        yield connect_updates(context, path)
+    finally:
+        context.destroy(linger=0)
 
 
 def message(status: str, container_id: str = CONTAINER) -> bytes:
@@ -68,12 +129,10 @@ class TestHeartbeat:
         thread = threading.Thread(target=daemon)
         thread.start()
         try:
-            context = zmq.Context()
-            sub = connect_updates(context, path)
-            started = time.time()
-            wait_for_completion(sub, CONTAINER, TIMEOUT, never)
-            waited = time.time() - started
-            context.term()
+            with subscriber(path) as sub:
+                started = time.time()
+                wait_for_completion(sub, CONTAINER, TIMEOUT, never)
+                waited = time.time() - started
         finally:
             stop.set()
             thread.join()
@@ -93,11 +152,9 @@ class TestHeartbeat:
         thread = threading.Thread(target=daemon)
         thread.start()
         try:
-            context = zmq.Context()
-            sub = connect_updates(context, path)
-            with pytest.raises(SystemExit) as exit_info:
-                wait_for_completion(sub, CONTAINER, TIMEOUT, never)
-            context.term()
+            with subscriber(path) as sub:
+                with pytest.raises(SystemExit) as exit_info:
+                    wait_for_completion(sub, CONTAINER, TIMEOUT, never)
         finally:
             stop.set()
             thread.join()
@@ -110,11 +167,9 @@ class TestSilence:
 
     def test_silence_fails(self, pub):
         _, path = pub
-        context = zmq.Context()
-        sub = connect_updates(context, path)
-        with pytest.raises(SystemExit) as exit_info:
-            wait_for_completion(sub, CONTAINER, TIMEOUT, never)
-        context.term()
+        with subscriber(path) as sub:
+            with pytest.raises(SystemExit) as exit_info:
+                wait_for_completion(sub, CONTAINER, TIMEOUT, never)
         assert exit_info.value.code == 1
 
     def test_the_query_socket_has_the_last_word(self, pub):
@@ -124,7 +179,5 @@ class TestSilence:
         more before it gives up.
         """
         _, path = pub
-        context = zmq.Context()
-        sub = connect_updates(context, path)
-        wait_for_completion(sub, CONTAINER, TIMEOUT, lambda: True)
-        context.term()
+        with subscriber(path) as sub:
+            wait_for_completion(sub, CONTAINER, TIMEOUT, lambda: True)
