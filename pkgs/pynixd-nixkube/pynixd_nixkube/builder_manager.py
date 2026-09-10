@@ -6,6 +6,7 @@ import hashlib
 import socket
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
@@ -57,6 +58,16 @@ _RECONCILE_INTERVAL = 30.0
 # uses for Pods.
 ModernEvent = new_class(kind="Event", version="events.k8s.io/v1", namespaced=True)
 EVENT_REASON_STARTUP_TIMEOUT = "NixBuilderStartupTimeout"
+
+
+@dataclass
+class PodState:
+    """What a builder Job's Pod says about itself."""
+
+    ip: str | None = None
+    ready: bool = False
+    phase: str | None = None
+    node: str | None = None
 
 
 def _pod_is_ready(pod_status: dict) -> bool:
@@ -210,7 +221,9 @@ class BuilderManager:
             return 0.0
         return max(0.0, until - time.monotonic())
 
-    def _record_failure(self, system: str, job_name: str, reason: str) -> None:
+    def _record_failure(
+        self, system: str, job_name: str, reason: str, node: str | None = None
+    ) -> None:
         """Count one failed builder and hold that system back.
 
         `_ensure_min_builders` counts a Job as active only while it is neither
@@ -218,6 +231,12 @@ class BuilderManager:
         at once and the next reconcile creates another, at the reconcile rate,
         for as long as the cause lasts. Nothing recorded that the last one
         failed. This is that record.
+
+        The count is per system, and the node is logged but not counted. One
+        broken node makes every builder for its system back off, so the log
+        line is what separates "the cluster is slow" from "this node is
+        broken". Per-node state is not wanted -- the scheduler places
+        builders, and the bound is right either way.
         """
         if job_name in self._counted_failures:
             return
@@ -230,6 +249,7 @@ class BuilderManager:
             "builder_failure_recorded",
             system=system,
             job=job_name,
+            node=node,
             reason=reason,
             consecutive_failures=failures,
             backoff_seconds=delay,
@@ -291,35 +311,40 @@ class BuilderManager:
         age = _job_age_seconds(job_raw, now)
         return age is not None and age > self.startup_timeout
 
-    async def _expire_slow_starter(
-        self, job: Any, system: str, phase: str | None
-    ) -> bool:
+    async def _expire_slow_starter(self, job: Any, system: str, pod: PodState) -> bool:
         """End a builder whose Pod never started. True when it did."""
         job_name = job.metadata.name
         now = datetime.now(timezone.utc)
-        if not self._startup_expired(job.raw, job_name, phase, now):
+        if not self._startup_expired(job.raw, job_name, pod.phase, now):
             return False
 
         age = _job_age_seconds(job.raw, now)
+        # Name the node. The backoff counts per system, and a startup failure
+        # is almost always per node -- one broken nix-node makes every system
+        # on the cluster look slow. The node is what turns "builds are slow"
+        # into "this node" in one kubectl get events.
+        where = f"on node {pod.node}" if pod.node else "with no node assigned"
         note = (
-            f"Builder for {system} never started. Its Pod was still "
-            f"{phase or 'absent'} {round(age or 0.0)}s after the Job began, over "
-            f"the {round(self.startup_timeout)}s startup timeout. Deleting it. "
-            "A Pod that stays Pending usually cannot mount its nixkube CSI "
-            "volume; check the Pod events and nix-node on its node."
+            f"Builder for {system} never started {where}. Its Pod was still "
+            f"{pod.phase or 'absent'} {round(age or 0.0)}s after the Job began, "
+            f"over the {round(self.startup_timeout)}s startup timeout. Deleting "
+            "it. A Pod that stays Pending usually cannot mount its nixkube CSI "
+            "volume; check that Pod's events and nix-node on that node. An "
+            "unassigned Pod is unschedulable instead."
         )
         log.warning(
             "builder_startup_timeout",
             job=job_name,
             system=system,
-            phase=phase,
+            node=pod.node,
+            phase=pod.phase,
             age_seconds=round(age or 0.0, 1),
             startup_timeout=self.startup_timeout,
         )
         await self._report_job_event(
             job, EVENT_REASON_STARTUP_TIMEOUT, note, event_type="Warning"
         )
-        self._record_failure(system, job_name, reason="StartupTimeout")
+        self._record_failure(system, job_name, reason="StartupTimeout", node=pod.node)
         store_id = f"builder-{job_name}"
         if store_id in self._registered:
             await self._unregister_builder(store_id)
@@ -634,24 +659,33 @@ class BuilderManager:
 
         status = job.raw.get("status", {})
         if status.get("succeeded") or status.get("failed"):
-            if status.get("failed") and not is_probe:
-                self._record_failure(system, job_name, reason="JobFailed")
+            if (
+                status.get("failed")
+                and not is_probe
+                # The Pod is fetched only for its node name, and only once.
+                # A failed Job is reconciled again until its TTL reaps it.
+                and job_name not in self._counted_failures
+            ):
+                failed_on = (await self._get_job_pod_state(job)).node
+                self._record_failure(
+                    system, job_name, reason="JobFailed", node=failed_on
+                )
             if store_id in self._registered:
                 await self._unregister_builder(store_id)
             return
 
-        pod_ip, ready, phase = await self._get_job_pod_state(job)
+        pod = await self._get_job_pod_state(job)
 
-        if ready:
+        if pod.ready:
             self._ever_ready.add(job_name)
             if not is_probe:
                 self._record_ready(system, job_name)
-        elif not is_probe and await self._expire_slow_starter(job, system, phase):
+        elif not is_probe and await self._expire_slow_starter(job, system, pod):
             return
 
         if store_id not in self._registered:
-            if pod_ip:
-                await self._register_builder(store_id, pod_ip, job_name, probe=is_probe)
+            if pod.ip:
+                await self._register_builder(store_id, pod.ip, job_name, probe=is_probe)
         else:
             self._job_names[store_id] = job_name
 
@@ -734,19 +768,18 @@ class BuilderManager:
                 return found
         return set()
 
-    async def _get_job_pod_state(self, job: Any) -> tuple[str | None, bool, str | None]:
-        """Return the Job Pod's IP, whether it is Ready, and its phase.
+    async def _get_job_pod_state(self, job: Any) -> "PodState":
+        """Return what the Job's Pod says about itself.
 
-        Three signals, three uses. A Pod has an IP once its sandbox is up,
+        Four signals, four uses. A Pod has an IP once its sandbox is up,
         before the container runs, and registration uses that. Ready follows
         the readinessProbe on the ssh port, so it means the builder answers,
         and the failure backoff uses that. The phase is what the startup
-        watchdog acts on, because it is the one of the three the API server
-        holds rather than this process.
+        watchdog acts on, because it is the one signal the API server holds
+        rather than this process. The node is for the operator: the backoff is
+        per system, and a failure is usually per node.
         """
-        pod_ip: str | None = None
-        ready = False
-        phase: str | None = None
+        state = PodState()
         try:
             api = await k8s.api()
             async for pod in api.get(
@@ -756,13 +789,15 @@ class BuilderManager:
             ):
                 pod = cast(Any, pod)
                 status = pod.raw.get("status", {})
-                phase = status.get("phase")
-                pod_ip = status.get("podIP")
-                if pod_ip:
-                    return pod_ip, _pod_is_ready(status), phase
+                state.phase = status.get("phase")
+                state.node = pod.raw.get("spec", {}).get("nodeName")
+                state.ip = status.get("podIP")
+                if state.ip:
+                    state.ready = _pod_is_ready(status)
+                    return state
         except Exception:
             log.exception("job_pod_ip_fetch_failed", job=job.metadata.name)
-        return pod_ip, ready, phase
+        return state
 
     # ---- Builder min/max lifecycle ----
 

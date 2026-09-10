@@ -13,6 +13,7 @@ import pytest
 from pynixd_nixkube.builder_manager import (
     _BACKOFF_BASE_SECONDS,
     BuilderManager,
+    PodState,
     _job_age_seconds,
     _pod_is_ready,
 )
@@ -222,3 +223,26 @@ def test_overrides_still_merge():
     )
     assert job["spec"]["template"]["spec"]["nodeName"] == "n1"
     assert job["spec"]["backoffLimit"] == 0
+
+
+def test_pod_state_defaults_are_empty():
+    """An absent Pod reads as absent, not as a started one."""
+    state = PodState()
+    assert state.ip is None
+    assert state.ready is False
+    assert state.phase is None
+    assert state.node is None
+
+
+def test_a_failure_carries_the_node_but_does_not_count_by_it():
+    """The node is for the operator, not for the arithmetic.
+
+    One broken node makes every builder for its system back off. The count
+    stays per system -- the scheduler places builders, so per-node state would
+    not stop a retry landing on the same node -- and the node goes in the log
+    line so "the cluster is slow" can be told from "this node is broken".
+    """
+    m = manager()
+    m._record_failure(SYSTEM, "job-a", reason="StartupTimeout", node="node-1")
+    m._record_failure(SYSTEM, "job-b", reason="StartupTimeout", node="node-2")
+    assert m._failures[SYSTEM] == 2
