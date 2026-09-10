@@ -106,6 +106,22 @@ def never() -> bool:
     return False
 
 
+def test_the_socket_directory_stays_short_under_a_long_tmpdir(monkeypatch, tmp_path):
+    """The regression this suite hung CI for a day without.
+
+    tempfile caches the answer in `tempfile.tempdir`, so setting TMPDIR in the
+    environment after the first call changes nothing. The attribute is what
+    has to move.
+    """
+    deep = tmp_path / ("d" * 120)
+    deep.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(deep))
+
+    made = _socket_dir()
+
+    assert len(made) + len("/p.sock") < zmq.IPC_PATH_MAX_LEN
+
+
 class TestHeartbeat:
     """The daemon says it is alive. The hook keeps waiting."""
 
@@ -152,9 +168,11 @@ class TestHeartbeat:
         thread = threading.Thread(target=daemon)
         thread.start()
         try:
-            with subscriber(path) as sub:
-                with pytest.raises(SystemExit) as exit_info:
-                    wait_for_completion(sub, CONTAINER, TIMEOUT, never)
+            with (
+                subscriber(path) as sub,
+                pytest.raises(SystemExit) as exit_info,
+            ):
+                wait_for_completion(sub, CONTAINER, TIMEOUT, never)
         finally:
             stop.set()
             thread.join()
@@ -167,9 +185,8 @@ class TestSilence:
 
     def test_silence_fails(self, pub):
         _, path = pub
-        with subscriber(path) as sub:
-            with pytest.raises(SystemExit) as exit_info:
-                wait_for_completion(sub, CONTAINER, TIMEOUT, never)
+        with subscriber(path) as sub, pytest.raises(SystemExit) as exit_info:
+            wait_for_completion(sub, CONTAINER, TIMEOUT, never)
         assert exit_info.value.code == 1
 
     def test_the_query_socket_has_the_last_word(self, pub):
