@@ -75,22 +75,8 @@ jobs:
         uses: ./.github/actions/setup-nix
       - name: Run type checker
         run: nix develop --file shell.nix --command pyright pkgs/nixkube/src
-      - name: Check the assertion against a consumer-shaped render
-        run: nix build --show-trace --file . assertionsNullShape
-      - name: Check that a neighbour's object is warned about, not refused
-        run: nix build --show-trace --file . assertionsNeighbourScope
-      - name: Check that an operator can cap builders
-        run: nix build --show-trace --file . builderSettingsOverride
-      - name: Check that nix-node reports a dead driver
-        run: nix build --show-trace --file . nodeDriverReadiness
-      - name: Check that a builder presents the host key the controller pins
-        run: nix build --show-trace --file . builderPresentsPinnedHostKey
-      - name: Check that no private key reaches the store
-        run: nix build --show-trace --file . noPrivateKeysInManifest
-      - name: Check that every source is a fetched tree
-        run: nix build --show-trace --file . sourcesAreLocked
-      - name: Check that the committed workflow matches ci/workflows
-        run: nix build --show-trace --file . ciWorkflowCheck
+      - name: Run the checks
+        run: nix build --show-trace --file ./checks.nix all
       - name: Check that every CI attribute builds natively
         run: "nix run --file . arch-audit -- \\\n  push \\\n  push-ci2 \\\n  push-citest \\\n  kubenixApply.manifestJSONFile \\\n  kubenixApply.manifestYAMLFile \\\n  kubenixCI1.deploymentScript \\\n  kubenixCI2.deploymentScript \\\n  kubenixCITest.deploymentScript \\\n  nixImage.pushArch.x86_64-linux \\\n  nixImage.pushManifest \\\n  scratchImage.push\n"
       - name: Check formatting
@@ -187,7 +173,7 @@ jobs:
           DS_API: ${{ secrets.DS_API }}
         if: failure()
         name: Debug on failure
-        run: nix run --file . ci-debug 2>/dev/null || true
+        run: nix run --file . ci-debug || true
     timeout-minutes: 45
   test-kind-nocache:
     needs: build-manifests
@@ -215,7 +201,7 @@ jobs:
           DS_API: ${{ secrets.DS_API }}
         if: failure()
         name: Debug on failure
-        run: nix run --file . ci-debug 2>/dev/null || true
+        run: nix run --file . ci-debug || true
     timeout-minutes: 45
 'on':
   pull_request: null

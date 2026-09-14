@@ -144,11 +144,15 @@ let
               kubectl wait --for=delete pod -l "job-name in (${lib.concatStringsSep "," deployedJobs})" -n nixkube --timeout=120s
             '';
           }
+          # `|| true` so a debug step never replaces the real failure. No
+          # `2>/dev/null` beside it: that hid why ci-debug itself failed, and
+          # a debug tool that fails silently is worse than none. Issue #12
+          # was this exact shape on push-ci2. See #32.
           {
             name = "Debug on failure";
             "if" = "failure()";
             env.DS_API = "\${{ secrets.DS_API }}";
-            run = "nix run --file . ci-debug 2>/dev/null || true";
+            run = "nix run --file . ci-debug || true";
           }
         ];
     };
@@ -226,50 +230,20 @@ ghalib.evalWorkflow {
           name = "Run type checker";
           run = "nix develop --file shell.nix --command pyright pkgs/nixkube/src";
         }
-        # Evaluation-only, and its closure is empty, so this costs seconds. It
-        # renders a container with no volumeMounts to keep the
-        # hostPath+subPath assertion working against easykubenix's submodule
-        # defaults, which nixkube's own resources never produce.
+        # One step, and `nix build --file ./checks.nix all` is the same one a
+        # contributor runs. Eight gates were eight steps here, which meant
+        # the only list of what CI checks lived in this file -- so running it
+        # locally meant reading the YAML and copying commands.
+        #
+        # `default.nix` says what each gate is for, beside the gate. Adding
+        # one there and forgetting this file is now impossible, which is the
+        # point. See issue #32.
+        #
+        # They are evaluation-only and their closures are almost empty, so
+        # this costs seconds.
         {
-          name = "Check the assertion against a consumer-shaped render";
-          run = "nix build --show-trace --file . assertionsNullShape";
-        }
-        {
-          name = "Check that a neighbour's object is warned about, not refused";
-          run = "nix build --show-trace --file . assertionsNeighbourScope";
-        }
-        # Also evaluation-only. Both of these encode a shape a consumer
-        # reported and this repository's own instances cannot produce.
-        {
-          name = "Check that an operator can cap builders";
-          run = "nix build --show-trace --file . builderSettingsOverride";
-        }
-        {
-          name = "Check that nix-node reports a dead driver";
-          run = "nix build --show-trace --file . nodeDriverReadiness";
-        }
-        {
-          name = "Check that a builder presents the host key the controller pins";
-          run = "nix build --show-trace --file . builderPresentsPinnedHostKey";
-        }
-        # /nix/store is world readable, so a key that reaches a render is
-        # published to every user of every machine that builds it.
-        {
-          name = "Check that no private key reaches the store";
-          run = "nix build --show-trace --file . noPrivateKeysInManifest";
-        }
-        # A source read as a directory is a different input from the tree this
-        # runner fetches, so the same commit builds different packages in the
-        # two places and only a cluster finds out.
-        {
-          name = "Check that every source is a fetched tree";
-          run = "nix build --show-trace --file . sourcesAreLocked";
-        }
-        # This file renders the workflow the runner is executing. A change
-        # here that was never rendered would run the old one and say nothing.
-        {
-          name = "Check that the committed workflow matches ci/workflows";
-          run = "nix build --show-trace --file . ciWorkflowCheck";
+          name = "Run the checks";
+          run = "nix build --show-trace --file ./checks.nix all";
         }
         # A runner has no binfmt, so an attribute that needs the other
         # architecture cannot be built by any job here. A workstation with
