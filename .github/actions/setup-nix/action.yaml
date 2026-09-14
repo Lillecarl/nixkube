@@ -31,10 +31,9 @@ runs:
       # Every caller carries `timeout-minutes` at the job level instead.
       uses: cachix/install-nix-action@master
       with:
-        # TODO: When ready to migrate from nix-csi to nixkube module naming:
-        # - Update trusted-public-keys: nix-csi.cachix.org-1 → nixkube.cachix.org-1
-        # - Update substituters: https://nix-csi.cachix.org → https://nixkube.cachix.org
-        # - Recreate/migrate Cachix cache from nix-csi to nixkube
+        # nixkube is the cache this repository owns and the only one it
+        # reads. It replaced nix-csi, which was the name before the module
+        # was renamed.
         #
         # trusted-users, because a daemon ignores substituters and public keys
         # a non-trusted user asks for. Without it every path would come from
@@ -48,8 +47,8 @@ runs:
         extra_nix_config: |
           experimental-features = nix-command flakes
           trusted-users = root runner
-          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nix-csi.cachix.org-1:i4w33gR4efO67jpz8U7g/MdvRQ6mQ3LEF9fB8tES60g=
-          substituters = https://cache.nixos.org?priority=1 https://nix-csi.cachix.org?priority=2
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M=
+          substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2
   # No GitHub store cache. cachix is the cache.
   #
   # `nix-community/cache-nix-action` restored a whole /nix/store from the

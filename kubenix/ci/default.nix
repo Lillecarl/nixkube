@@ -38,7 +38,7 @@ in
     # It now lives on kubenixCI2, which is the instance the NixOS test uses.
     # See issue #30.
     nixkube.node.nixConfig.settings.substituters = [
-      "https://nix-csi.cachix.org"
+      "https://nixkube.cachix.org"
       "https://cache.nixos.org"
     ];
   };

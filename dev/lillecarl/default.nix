@@ -36,7 +36,7 @@ rec {
                       fi
                   fi
 
-                  ${lib.getExe pkgs.cachix} push nix-csi ${config.kluctl.projectDir} || true
+                  ${lib.getExe pkgs.cachix} push nixkube ${config.kluctl.projectDir} || true
                   nix copy \
                     --substitute-on-destination \
                     --no-check-sigs \

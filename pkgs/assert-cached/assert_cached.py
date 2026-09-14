@@ -8,7 +8,7 @@ never build it. A path no substituter serves is a mount that fails.
 Three properties, each measured against a case that breaks without it:
 
 - Walks the closure. A present top path with an absent member is issue #8.
-- Unions the substituters. `cacheEnv` is on nix-csi.cachix.org; its member
+- Unions the substituters. `cacheEnv` is on nixkube.cachix.org; its member
   `python3.14-httpx` is only on cache.nixos.org. Either alone reports a
   false failure.
 - Asks the caches, never the local store, so a path this machine happens to

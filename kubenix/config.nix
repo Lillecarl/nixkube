@@ -14,11 +14,15 @@ in
     nixkube = {
       nixConfig.settings = {
         allowed-users = [ "*" ];
+        # A node substitutes and cannot build, so this list is the whole of
+        # what a node can get. A store path on no cache here is a mount that
+        # never succeeds, and the failure surfaces on a node rather than
+        # wherever forgot to push it. `assert-cached` asks this exact list.
         trusted-public-keys = [
-          "nix-csi.cachix.org-1:i4w33gR4efO67jpz8U7g/MdvRQ6mQ3LEF9fB8tES60g="
+          "nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M="
         ];
         substituters = [
-          "https://nix-csi.cachix.org"
+          "https://nixkube.cachix.org"
         ];
         experimental-features = [
           "nix-command"

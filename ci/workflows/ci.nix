@@ -491,17 +491,16 @@ ghalib.evalWorkflow {
         #
         # A bare installer swap would have been wrong here. A daemon ignores
         # substituters and public keys that an untrusted user asks for, so
-        # `trusted-users = root runner` is what keeps nix-csi readable at all
-        # -- and that setting lives in the action.
+        # `trusted-users = root runner` is what keeps the caches readable at
+        # all -- and that setting lives in the action.
         setupNix
-        # nix-csi is the cache this repository owns, and the one every other
-        # job pushes to. The token can push to it. A push to `lillecarl`
-        # answered 403 "You're not authorized to access binary cache
-        # lillecarl."
+        # nixkube is the cache this repository owns, and the one every other
+        # job pushes to. A push to `lillecarl` answered 403 "You're not
+        # authorized to access binary cache lillecarl."
         {
           uses = "cachix/cachix-action@v15";
           "with" = {
-            name = "nix-csi";
+            name = "nixkube";
             authToken = "\${{ secrets.CACHIX_AUTH_TOKEN }}";
           };
         }

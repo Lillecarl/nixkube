@@ -42,7 +42,7 @@ rec {
           kluctl.preDeployScript = # bash
             ''
               export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
-              cachix push nix-csi ${config.internal.manifestJSONFile}
+              cachix push nixkube ${config.internal.manifestJSONFile}
             '';
           nixkube.pynixd.enable = false;
           # Keeping string context on the DaemonSet's store paths makes them
@@ -59,7 +59,7 @@ rec {
           # test, and only there, which is why this is here rather than in
           # ./kubenix/ci beside the substituters every variant shares.
           nixkube.node.nixConfig.settings.substituters = [
-            "https://nix-csi.cachix.org"
+            "https://nixkube.cachix.org"
             "https://cache.nixos.org"
             "http://10.113.37.1:5000?trusted=1"
           ];
@@ -103,7 +103,7 @@ rec {
                       exit 1
                   fi
               fi
-              cachix push nix-csi ${config.internal.manifestJSONFile}
+              cachix push nixkube ${config.internal.manifestJSONFile}
             '';
           nixkube.pynixd.enable = true;
           nixkube.discardStringContext = false;
@@ -181,7 +181,7 @@ rec {
         # like, and build-arm64 died that way twice. amd64 never did, because
         # its build-time outputs went to cachix over months of runs and were
         # skipped. See issue #21.
-        nix-store -qR ${kubenixPush.deploymentScript} | cachix push nix-csi
+        nix-store -qR ${kubenixPush.deploymentScript} | cachix push nixkube
       '';
 
   # Push kubenixCI2 (nocache variant) store paths to cachix.
@@ -197,7 +197,7 @@ rec {
         # to stderr, and both threw it away. See issue #12.
         # The runtime closure, for the reason given on `push` above.
         OUT=$(nix build --no-link --print-out-paths --file ${builtins.toString ./.} kubenixCI2.deploymentScript)
-        nix-store -qR "$OUT" | cachix push nix-csi
+        nix-store -qR "$OUT" | cachix push nixkube
       '';
 
   # Push the test workloads' store paths to cachix.
@@ -225,7 +225,7 @@ rec {
         set -euo pipefail
         # No 2>/dev/null, for the reason given on `push-ci2`.
         OUT=$(nix build --no-link --print-out-paths --file ${builtins.toString ./.} kubenixCITest.config.internal.manifestJSONFile)
-        nix-store -qR "$OUT" | cachix push nix-csi
+        nix-store -qR "$OUT" | cachix push nixkube
       '';
 
   # Push environments for both x86_64-linux and aarch64-linux to cachix.
@@ -241,7 +241,7 @@ rec {
         export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
         # ${lib.concatStrings (lib.attrValues sources)}
         # The runtime closure, for the reason given on `push` above.
-        nix-store -qR ${kubenixPushBoth.deploymentScript} | cachix push nix-csi
+        nix-store -qR ${kubenixPushBoth.deploymentScript} | cachix push nixkube
       '';
 
   # Publish both `nix:` images and the multi-arch manifest, by hand.

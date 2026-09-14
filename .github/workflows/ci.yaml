@@ -106,7 +106,7 @@ jobs:
       - uses: cachix/cachix-action@v15
         with:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          name: nix-csi
+          name: nixkube
       - name: Build documentation
         run: nix build --file . nixkube-docs --out-link result --print-build-logs --print-out-paths
       - name: Verify docs closure

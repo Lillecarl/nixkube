@@ -217,7 +217,7 @@ rec {
         ''
           skopeo login -u="$REPO_USERNAME" -p="$REPO_TOKEN" ${server}
           ${image} | gzip --fast | skopeo copy docker-archive:/dev/stdin docker://${imageRef system}
-          cachix push nix-csi ${image}
+          cachix push nixkube ${image}
         '';
     }
   ) images;
