@@ -560,6 +560,59 @@ rec {
       < node.livenessProbe.failureThreshold * node.livenessProbe.periodSeconds;
     pkgs.runCommand "node-driver-readiness" { } "echo ok > $out";
 
+  # Does a builder present the host key the controller pins?
+  #
+  # `ssh_known_hosts` names one ed25519 key for `*`, and asyncssh derives the
+  # acceptable server-host-key algorithms from that entry. A builder with no
+  # `PYNIXD_SSH_HOST_KEY` generates a fresh ssh-rsa key instead, the
+  # intersection is empty, and the exchange dies before authentication:
+  #
+  #   asyncssh.misc.KeyExchangeFailed: Unable to find compatible server host key
+  #
+  # Measured on nixlab2: 82 builders registered, 82 ssh_connect_failed, none
+  # ever reachable. The builders were healthy. Nothing else reports this --
+  # the Job runs, the pod is Ready, and only the controller's own traceback
+  # says why -- so it is asserted here.
+  #
+  # Against the rendered template and the rendered StatefulSet, and against
+  # the volume rather than the string. A path that matches no mount would
+  # pass a string comparison and fail on a cluster.
+  builderPresentsPinnedHostKey =
+    let
+      res = kubenixApply.config.kubernetes.resources.nixkube;
+      hostKeyOf =
+        spec:
+        let
+          container = lib.head (lib.filter (c: c.name == "pynixd") spec.containers);
+          env = lib.filter (e: e.name == "PYNIXD_SSH_HOST_KEY") (container.env or [ ]);
+        in
+        assert lib.assertMsg (env != [ ]) "pynixd container has no PYNIXD_SSH_HOST_KEY";
+        rec {
+          path = (lib.head env).value;
+          # `mountPath + "/"`, because these are path prefixes and not string
+          # prefixes. The controller mounts ssh-config at /etc/ssh, which is a
+          # string prefix of /etc/ssh-key/id_ed25519 and not a path one, and
+          # sorts first -- so a plain hasPrefix picks the ConfigMap and asks
+          # it for a secretName it does not have.
+          matches = lib.filter (m: lib.hasPrefix (m.mountPath + "/") path) (container.volumeMounts or [ ]);
+          mount =
+            assert lib.assertMsg (
+              lib.length matches == 1
+            ) "PYNIXD_SSH_HOST_KEY ${path} is under ${toString (lib.length matches)} mounts";
+            lib.head matches;
+          secret = (lib.head (lib.filter (v: v.name == mount.name) spec.volumes)).secret.secretName;
+        };
+      builder = hostKeyOf res.PodTemplate.nixkube-builder.template.spec;
+      controller = hostKeyOf res.StatefulSet.pynixd.spec.template.spec;
+    in
+    # Both sides of the connection have to name one keypair, or the pin the
+    # controller carries cannot match what the builder offers.
+    assert builder.secret == controller.secret;
+    # ed25519, because the known_hosts entry is. A key of another type is the
+    # defect this check exists for.
+    assert lib.hasInfix "ed25519" builder.path;
+    pkgs.runCommand "builder-presents-pinned-host-key" { } "echo ok > $out";
+
   # NixOS integration tests — spin up real kubeadm clusters in VMs
   nixosTests = {
     containerd = import ./tests/nixos/integration.nix {

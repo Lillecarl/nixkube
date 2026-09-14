@@ -248,6 +248,10 @@ ghalib.evalWorkflow {
           name = "Check that nix-node reports a dead driver";
           run = "nix build --show-trace --file . nodeDriverReadiness";
         }
+        {
+          name = "Check that a builder presents the host key the controller pins";
+          run = "nix build --show-trace --file . builderPresentsPinnedHostKey";
+        }
         # A source read as a directory is a different input from the tree this
         # runner fetches, so the same commit builds different packages in the
         # two places and only a cluster finds out.

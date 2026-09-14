@@ -83,6 +83,8 @@ jobs:
         run: nix build --show-trace --file . builderSettingsOverride
       - name: Check that nix-node reports a dead driver
         run: nix build --show-trace --file . nodeDriverReadiness
+      - name: Check that a builder presents the host key the controller pins
+        run: nix build --show-trace --file . builderPresentsPinnedHostKey
       - name: Check that every source is a fetched tree
         run: nix build --show-trace --file . sourcesAreLocked
       - name: Check that the committed workflow matches ci/workflows
