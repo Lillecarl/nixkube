@@ -725,6 +725,46 @@ rec {
   # Does this attribute build on the machine that is asked to build it?
   arch-audit = pkgs.callPackage ./pkgs/arch-audit { };
 
+  # Every gate CI builds, as one attribute.
+  #
+  # `nix build --file ./checks.nix all` is the answer to "does this pass
+  # CI", and before this it was "read ci.yaml and copy six commands". A gate
+  # that is not in here is a gate nobody runs by hand, so adding one to the
+  # workflow and not to this set is the mistake to avoid -- which is why the
+  # `check` job builds this attribute rather than listing them again.
+  #
+  # It holds exactly what the workflow held, so this is a refactor and not a
+  # widening. Two things stay outside it, both because they need something a
+  # derivation does not have: pyright wants the dev shell, and treefmt is
+  # checked with `git diff` against a working tree.
+  #
+  # `umlImagesMatch` is the obvious candidate to add next. It is a real gate
+  # and CI has never run it.
+  checks = {
+    inherit
+      assertionsNullShape
+      assertionsNeighbourScope
+      builderSettingsOverride
+      nodeDriverReadiness
+      sourcesAreLocked
+      ciWorkflowCheck
+      builderPresentsPinnedHostKey
+      noPrivateKeysInManifest
+      ;
+    all = pkgs.runCommand "nixkube-checks" {
+      checks = [
+        assertionsNullShape
+        assertionsNeighbourScope
+        builderSettingsOverride
+        nodeDriverReadiness
+        sourcesAreLocked
+        ciWorkflowCheck
+        builderPresentsPinnedHostKey
+        noPrivateKeysInManifest
+      ];
+    } "printf '%s\\n' $checks > $out";
+  };
+
   # Every GitHub Actions workflow as a value, beside the file it renders to.
   # ci/workflows/*.nix hold them and say why.
   ciWorkflows =
