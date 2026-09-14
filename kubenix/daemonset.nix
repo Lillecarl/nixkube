@@ -111,6 +111,11 @@ in
                       securityContext.privileged = true; # chroot store
                       env = lib.mkNamedList {
                         NODE_ENV.value = builtins.toJSON (lib.mapAttrs (_: sysPkgs: "${sysPkgs.nixkube-node-env}") csiPkgs);
+                        # `nix-node` has had this and initcopy has not, so
+                        # initcopy could not tell a pynixd that is off by
+                        # choice from one that is down. It reported the same
+                        # failure for both. See issue #27.
+                        PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
                       };
                       volumeMounts = lib.mkNamedList {
                         nix-store.mountPath = "/nix-volume";

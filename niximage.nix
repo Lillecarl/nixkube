@@ -51,13 +51,37 @@ rec {
             STORE_PATH=$(nix eval --store dummy:// --raw --impure --expr \
               '(builtins.fromJSON (builtins.getEnv "NODE_ENV")).${system}')
 
-            # Check if we can SSH to pynixd
+            # pynixd is the fallback here, not the source. nodeEnv is a plain
+            # buildEnv over nixkube and generic tools, with nothing from a
+            # consumer's configuration in it, so the substituters in /etc/nix
+            # are what normally serve it. This block is for the case where
+            # they do not have it yet.
+            PYNIXD_STATE="disabled"
             EXTRA_SUBSTITUTERS="local?trusted=true"
-            if nix store ping --store ssh-ng://nix@pynixd; then
-              EXTRA_SUBSTITUTERS="$EXTRA_SUBSTITUTERS ssh-ng://nix@pynixd?trusted=true"
+            if [ "''${PYNIXD_ENABLED:-false}" = "true" ]; then
+              if nix store ping --store ssh-ng://nix@pynixd; then
+                EXTRA_SUBSTITUTERS="$EXTRA_SUBSTITUTERS ssh-ng://nix@pynixd?trusted=true"
+                PYNIXD_STATE="answered"
+              else
+                PYNIXD_STATE="unreachable"
+              fi
             fi
 
-            nix \
+            # Carrying on without pynixd is right, and the silence is not.
+            #
+            # `nix build` fails with "no substituter that can build it"
+            # whether pynixd was unreachable, or answered and did not have the
+            # path, or was never enabled. Those are three different problems
+            # with one sentence between them. Both of the first two happened on
+            # nixlab2 in one day and could not be told apart from the error.
+            #
+            # The retry is only for `unreachable`. pynixd may be starting
+            # elsewhere in the cluster, and this node may be what it is waiting
+            # for -- see issue #27, where that is a cycle rather than a race.
+            # Nothing else here gets better by being asked twice.
+            attempt=1
+            max_attempts=5
+            until nix \
               build \
                 --extra-substituters "$EXTRA_SUBSTITUTERS" \
                 --max-jobs auto \
@@ -65,7 +89,37 @@ rec {
                 --store /nix-volume \
                 --out-link /nix-volume/nix/var/result \
                 --fallback \
-                "$STORE_PATH"
+                "$STORE_PATH"; do
+              if [ "$PYNIXD_STATE" = "unreachable" ] && [ "$attempt" -lt "$max_attempts" ]; then
+                delay=$(( attempt * 10 ))
+                echo "pynixd did not answer; retry $attempt of $max_attempts in ''${delay}s" >&2
+                sleep "$delay"
+                attempt=$(( attempt + 1 ))
+                continue
+              fi
+              {
+                echo "cannot get $STORE_PATH"
+                echo "  pynixd:       $PYNIXD_STATE"
+                echo "  substituters: $EXTRA_SUBSTITUTERS"
+                echo "  and whatever /etc/nix/nix.conf adds:"
+                sed -n 's/^substituters *= */    /p' /etc/nix/nix.conf || true
+                case "$PYNIXD_STATE" in
+                  unreachable)
+                    echo "  pynixd was asked and did not answer, so it served nothing here."
+                    echo "  This path should come from a binary cache. If it does not, the"
+                    echo "  cache is behind: nothing published it. See nixkube issue #27."
+                    ;;
+                  answered)
+                    echo "  pynixd answered and does not have this path. It is not a"
+                    echo "  connectivity problem."
+                    ;;
+                  disabled)
+                    echo "  pynixd is disabled, so a binary cache is the only source."
+                    ;;
+                esac
+              } >&2
+              exit 1
+            done
 
             # Is every reference actually here?
             #
