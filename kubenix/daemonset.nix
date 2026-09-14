@@ -33,12 +33,10 @@ in
 
         This used to be an unconditional toleration of
         `node-role.kubernetes.io/control-plane:NoSchedule`, which is right on
-        a cluster that runs workloads on its control plane and wrong as a
-        default. On a cluster that respects the taint it put a nix-node pod on
-        a control-plane node that was never meant to run one -- and the pod
-        cannot work there, because a node's closure is built per node and
-        nothing builds the control plane's. The result was a permanent
-        CrashLoopBackOff that read as `Synced / Progressing` from above.
+        a cluster that runs workloads on its control plane -- where nixkube
+        was developed -- and wrong as a default. Shipped that way it assumes
+        every cluster does that, and on one that respects the taint it puts a
+        nix-node pod where an ordinary workload would not go.
 
         Set it to restore the old behaviour where that is what you want:
 
