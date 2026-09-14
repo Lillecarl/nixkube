@@ -679,6 +679,11 @@ rec {
   # yq reads YAML 1.2, where a bare `on:` key is the string "on". A YAML 1.1
   # parser answers the boolean `true` for it, which would compare a boolean
   # key against a string one and fail every run.
+  #
+  # It renders with the ghanix the umbrella locks, not a working copy. So a
+  # ghanix change reaches this check only after the umbrella lock moves, and
+  # UMBRELLA_DEV=ghanix can pass here while a runner fails. That is the same
+  # asymmetry as issue #28 and not a separate bug.
   ciWorkflowCheck =
     pkgs.runCommand "ci-workflow-check"
       {
