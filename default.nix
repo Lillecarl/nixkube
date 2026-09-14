@@ -738,8 +738,12 @@ rec {
   # derivation does not have: pyright wants the dev shell, and treefmt is
   # checked with `git diff` against a working tree.
   #
-  # `umlImagesMatch` is the obvious candidate to add next. It is a real gate
-  # and CI has never run it.
+  # `umlImagesMatch` is the one member that builds rather than evaluates: it
+  # writes two image tarballs, so on a cold store it also fetches the nix
+  # image closure. Measured warm on this machine at 7.8s, four derivations.
+  # It earns that because the failure it catches -- a tarball that does not
+  # carry the tag the DaemonSet asks for -- otherwise appears as ErrImagePull
+  # after twenty minutes of cluster.
   checks = {
     inherit
       assertionsNullShape
@@ -750,6 +754,7 @@ rec {
       ciWorkflowCheck
       builderPresentsPinnedHostKey
       noPrivateKeysInManifest
+      umlImagesMatch
       ;
     all = pkgs.runCommand "nixkube-checks" {
       checks = [
@@ -761,6 +766,7 @@ rec {
         ciWorkflowCheck
         builderPresentsPinnedHostKey
         noPrivateKeysInManifest
+        umlImagesMatch
       ];
     } "printf '%s\\n' $checks > $out";
   };
