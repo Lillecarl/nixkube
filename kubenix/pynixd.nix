@@ -464,6 +464,26 @@ in
                   # controller. builder.settings carries it into config.json.
                   PYNIXD_SSH_PORT.value = "22";
                   PYNIXD_HTTP_PORT.value = "8080";
+                  # The key the controller already pins. Without this,
+                  # `start_ssh_server` falls through to
+                  # `generate_private_key("ssh-rsa", ...)` and a builder
+                  # presents a fresh random RSA host key every start.
+                  #
+                  # `ssh_known_hosts` names one ed25519 key for `*`, and
+                  # asyncssh derives the acceptable server-host-key algorithms
+                  # from that entry. ed25519 against rsa is an empty
+                  # intersection, so the exchange dies before authentication:
+                  #
+                  #   asyncssh.misc.KeyExchangeFailed:
+                  #     Unable to find compatible server host key
+                  #
+                  # Measured on nixlab2: 82 builders registered, 82
+                  # ssh_connect_failed, zero reachable, ever. The builders were
+                  # healthy -- a builder's own local store probes clean -- so
+                  # this is the whole of why no node has ever been labelled.
+                  # The controller StatefulSet has always set this; this
+                  # template was missed.
+                  PYNIXD_SSH_HOST_KEY.value = "/etc/ssh-key/id_ed25519";
                   PYNIXD_IDLE_TIMEOUT.value = toString cfg.pynixd.controller.settings.idle-timeout;
                   HOME.value = "/nix/var/nix-csi/root";
                   PYNIXD_CONFIG.value = "/nix/etc/builder-config/config.json";
@@ -480,6 +500,7 @@ in
                     subPath = "nix";
                   };
                   builder-config.mountPath = "/nix/etc/builder-config";
+                  ssh-key.mountPath = "/etc/ssh-key";
                 };
                 resources = {
                   requests = {
@@ -497,6 +518,10 @@ in
                 volumeAttributes = storeVolumeAttributes;
               };
               builder-config.configMap.name = "builder-config";
+              ssh-key.secret = {
+                secretName = "ssh-key";
+                defaultMode = 256; # 400
+              };
             };
           };
         };
