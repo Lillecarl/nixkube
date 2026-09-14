@@ -54,8 +54,15 @@ rec {
             x86_64-linux = true;
             aarch64-linux = false;
           };
-          # 10.113.37.1 is the PTP CNI gateway — the host-side veth IP reachable
-          # from all pods.  nix-serve runs there during the NixOS test.
+          # 10.113.37.1 is the PTP CNI gateway — the host-side veth IP
+          # reachable from all pods. nix-serve runs there during the NixOS
+          # test, and only there, which is why this is here rather than in
+          # ./kubenix/ci beside the substituters every variant shares.
+          nixkube.node.nixConfig.settings.substituters = [
+            "https://nix-csi.cachix.org"
+            "https://cache.nixos.org"
+            "http://10.113.37.1:5000?trusted=1"
+          ];
         }
       )
     ];
