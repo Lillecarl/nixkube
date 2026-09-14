@@ -452,9 +452,27 @@ class BuilderManager:
         fire never and probe nothing. Measured on nixlab2 -- five ADDED
         events in twenty seconds with nothing changing.
 
+        THERE IS NO OTHER PATH BACK TO PROBING, which matters when one fails.
+        `_probe_node` discards the node from `_pending_probes` in its
+        `finally`, so the node is eligible again -- but nothing fires.
+        `_periodic_reconcile` does not probe, and the CSINode has not
+        changed, because CSINodes do not change. The only thing that can
+        probe it again is another replay, when this watch re-establishes.
+
+        Whether that amounts to failure recovery is NOT measured, and is a
+        property of the apiserver rather than of this code: it depends on
+        whether kube-apiserver closes an idle watch and how long it waits.
+        nixlab2 does not set `--min-request-timeout`, so nothing at the
+        cluster level has chosen that number either. Treat recovery as
+        unknown until someone measures it. Giving probe failure a retry that
+        this file owns, rather than one inherited from a watch timeout, is
+        solid-kubernetes git-bug d0b5385.
+
         So do not pass `since=` to make this resumable. It would look like an
-        improvement and would mean no node is probed after a restart, with
-        nothing in the log.
+        improvement. Startup would break visibly, on the next restart. Any
+        recovery that the replay does provide would go with it, and that
+        failure is silent: a node whose probe failed once stays unlabelled
+        and unusable as a build target, with nothing tying it to the change.
 
         A KNOWN COMPROMISE, and the reason matters more than the fact.
         Nothing structurally binds a builder to the host's shared store: the
