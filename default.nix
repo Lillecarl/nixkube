@@ -625,13 +625,22 @@ rec {
   # Does this attribute build on the machine that is asked to build it?
   arch-audit = pkgs.callPackage ./pkgs/arch-audit { };
 
-  # The CI workflow as a value. ci/workflows/ci.nix holds it and says why.
-  ciWorkflow = import ./ci/workflows/ci.nix {
-    inherit lib;
-    ghalib = import sources.ghanix { inherit lib; };
-  };
+  # Every GitHub Actions workflow as a value, beside the file it renders to.
+  # ci/workflows/*.nix hold them and say why.
+  ciWorkflows =
+    let
+      ghalib = import sources.ghanix { inherit lib; };
+      workflow = module: committed: {
+        inherit committed;
+        value = import module { inherit lib ghalib; };
+      };
+    in
+    {
+      ci = workflow ./ci/workflows/ci.nix ./.github/workflows/ci.yaml;
+      test-nixos = workflow ./ci/workflows/test-nixos.nix ./.github/workflows/test-nixos.yaml;
+    };
 
-  # That value as the file GitHub reads.
+  # Those values as the files GitHub reads.
   #
   # `pkgs.formats.yaml` emits a `%YAML 1.1` directive and a `---` marker that
   # no workflow carries, so the first two lines go. It quotes `'on'` for the
@@ -645,24 +654,26 @@ rec {
   #
   # Key order is alphabetical and nothing depends on it: GitHub does not, and
   # ciWorkflowCheck compares parsed documents rather than text.
-  ciWorkflowFile =
+  ciWorkflowFiles = lib.mapAttrs (
+    name: wf:
     let
       header = ''
         # SPDX-License-Identifier: MIT
         # GENERATED FILE -- do not edit by hand.
-        # Edit ci/workflows/ci.nix, then run: nix run --file . ci-workflow-update
+        # Edit ci/workflows/${name}.nix, then run: nix run --file . ci-workflow-update
       '';
     in
-    pkgs.runCommand "ci.yaml" { nativeBuildInputs = [ pkgs.yamlfmt ]; } ''
+    pkgs.runCommand "${name}.yaml" { nativeBuildInputs = [ pkgs.yamlfmt ]; } ''
       {
         printf '%s\n' ${lib.escapeShellArg header}
-        tail --lines=+3 ${(pkgs.formats.yaml { }).generate "ci.yaml" ciWorkflow}
-      } > ci.yaml
-      HOME=$PWD yamlfmt ci.yaml
-      mv ci.yaml $out
-    '';
+        tail --lines=+3 ${(pkgs.formats.yaml { }).generate "${name}.yaml" wf.value}
+      } > out.yaml
+      HOME=$PWD yamlfmt out.yaml
+      mv out.yaml $out
+    ''
+  ) ciWorkflows;
 
-  # Does the committed workflow still say what ci/workflows/ci.nix says?
+  # Does each committed workflow still say what its ci/workflows/*.nix says?
   #
   # Parsed, not compared as text, so key order and quoting cannot fail this.
   # yq reads YAML 1.2, where a bare `on:` key is the string "on". A YAML 1.1
@@ -675,24 +686,30 @@ rec {
           pkgs.yq-go
           pkgs.jq
         ];
-        rendered = builtins.toJSON ciWorkflow;
-        passAsFile = [ "rendered" ];
       }
-      ''
-        yq --output-format=json '.' ${./.github/workflows/ci.yaml} | jq --sort-keys . > committed.json
-        jq --sort-keys . < "$renderedPath" > rendered.json
-        if ! diff --unified committed.json rendered.json; then
-          echo >&2
-          echo "The committed workflow and ci/workflows/ci.nix disagree." >&2
-          echo "Run: nix run --file . ci-workflow-update" >&2
-          exit 1
-        fi
-        touch $out
-      '';
+      (
+        lib.concatStrings (
+          lib.mapAttrsToList (name: wf: ''
+            yq --output-format=json '.' ${wf.committed} | jq --sort-keys . > committed.json
+            jq --sort-keys . < ${pkgs.writeText "${name}-rendered.json" (builtins.toJSON wf.value)} > rendered.json
+            if ! diff --unified committed.json rendered.json; then
+              echo >&2
+              echo ".github/workflows/${name}.yaml and ci/workflows/${name}.nix disagree." >&2
+              echo "Run: nix run --file . ci-workflow-update" >&2
+              exit 1
+            fi
+          '') ciWorkflows
+        )
+        + "touch $out\n"
+      );
 
   ci-workflow-update = pkgs.writeScriptBin "ci-workflow-update" ''
     #! ${pkgs.runtimeShell}
     set -euo pipefail
-    cp --no-preserve=mode ${ciWorkflowFile} .github/workflows/ci.yaml
+    ${lib.concatStrings (
+      lib.mapAttrsToList (
+        name: file: "cp --no-preserve=mode ${file} .github/workflows/${name}.yaml\n"
+      ) ciWorkflowFiles
+    )}
   '';
 }
