@@ -354,8 +354,30 @@ async def test_a_probe_waits_the_builder_budget_then_gives_up(monkeypatch):
     # It let go, and it cleaned up.
     assert "node-1" not in m._pending_probes
     assert deleted == ["job:nixkube-builder-probe1"]
-    # A probe Job is pinned to its node and labelled as a probe.
-    assert created[0]["spec"]["template"]["spec"]["nodeName"] == "node-1"
+    # A probe Job asks the scheduler for its node, and is labelled a probe.
+    #
+    # `nodeName` would skip the scheduler: the Pod is placed rather than
+    # scheduled, so taints, cordons and resources never enter the decision.
+    # That is how a probe reached a control-plane node and sat in
+    # ContainerCreating for three and a half hours. Asserted as an absence as
+    # well as a presence, because putting `nodeName` back would otherwise
+    # pass -- both keys can coexist and `nodeName` wins.
+    probe_spec = created[0]["spec"]["template"]["spec"]
+    assert "nodeName" not in probe_spec
+    terms = probe_spec["affinity"]["nodeAffinity"][
+        "requiredDuringSchedulingIgnoredDuringExecution"
+    ]["nodeSelectorTerms"]
+    assert terms == [
+        {
+            "matchExpressions": [
+                {
+                    "key": "kubernetes.io/hostname",
+                    "operator": "In",
+                    "values": ["node-1"],
+                }
+            ]
+        }
+    ]
     assert created[0]["metadata"]["labels"]["nixkube/probe"] == "true"
 
 

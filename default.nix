@@ -806,6 +806,14 @@ rec {
       probeWatchHasRbac
       umlImagesMatch
       ;
+    # The Python suite, which runs in this derivation's checkPhase.
+    #
+    # It was missing, and that cost a red CI: a test asserting the probe Job
+    # carries `nodeName` failed after the probe moved to a nodeAffinity, and
+    # `checks.all` passed locally the whole time because it never ran pytest.
+    # The suite only ran inside `build-amd64`, so the feedback came after a
+    # full environment build rather than in seconds.
+    pynixd-nixkube-tests = pkgs.pynixd-nixkube;
     all = pkgs.runCommand "nixkube-checks" {
       checks = [
         assertionsNullShape
@@ -818,6 +826,7 @@ rec {
         noPrivateKeysInManifest
         probeWatchHasRbac
         umlImagesMatch
+        pkgs.pynixd-nixkube
       ];
     } "printf '%s\\n' $checks > $out";
   };
