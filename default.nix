@@ -607,6 +607,45 @@ rec {
         touch $out
       '';
 
+  # Can the builder manager watch what it decides on?
+  #
+  # It watches CSINode to find nodes where the nixkube CSI driver is
+  # registered, and patches the Node with the result. A missing grant does
+  # not crash it: `_watch_nodes` catches, logs `node_watch_error` and sleeps
+  # ten seconds, for ever. So the cluster looks healthy, no node is ever
+  # probed, and the only evidence is one line in a log nobody reads.
+  #
+  # Against the rendered manifest, because the ClusterRole is what the
+  # apiserver reads.
+  probeWatchHasRbac = pkgs.runCommand "probe-watch-has-rbac" { nativeBuildInputs = [ pkgs.jq ]; } ''
+    # `$rules` is bound before the map, because inside `map` the input is
+    # the triple being tested and not the document.
+    missing=$(jq -r '
+      [ (.items // [.])[] | select(.kind == "ClusterRole") | .rules[] ] as $rules
+      | def granted($group; $resource; $verb):
+          [ $rules[]
+            | select(.apiGroups | index($group))
+            | select(.resources | index($resource))
+            | select((.verbs | index($verb)) or (.verbs | index("*")))
+          ] | length > 0;
+
+        [ ["storage.k8s.io", "csinodes", "watch"],
+          ["storage.k8s.io", "csinodes", "list"],
+          ["", "nodes", "get"],
+          ["", "nodes", "patch"]
+        ]
+        | map(select(granted(.[0]; .[1]; .[2]) | not) | join(" "))
+        | join("; ")
+    ' ${kubenixApply.manifestJSONFile})
+
+    if [ -n "$missing" ]; then
+      echo "The ClusterRole does not grant: $missing" >&2
+      echo "Node probing fails silently without these. See kubenix/rbac.nix." >&2
+      exit 1
+    fi
+    touch $out
+  '';
+
   # Does a builder present the host key the controller pins?
   #
   # `ssh_known_hosts` names one ed25519 key for `*`, and asyncssh derives the
@@ -764,6 +803,7 @@ rec {
       ciWorkflowCheck
       builderPresentsPinnedHostKey
       noPrivateKeysInManifest
+      probeWatchHasRbac
       umlImagesMatch
       ;
     all = pkgs.runCommand "nixkube-checks" {
@@ -776,6 +816,7 @@ rec {
         ciWorkflowCheck
         builderPresentsPinnedHostKey
         noPrivateKeysInManifest
+        probeWatchHasRbac
         umlImagesMatch
       ];
     } "printf '%s\\n' $checks > $out";
