@@ -13,6 +13,10 @@ jobs:
   test-nixos:
     runs-on: ubuntu-latest
     continue-on-error: true
+    # `continue-on-error` does not bound anything. Without this the job still
+    # holds a runner for GitHub's default 360 minutes before it gives up, and
+    # a nixos test that hangs in a VM is exactly the shape that does.
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@main
