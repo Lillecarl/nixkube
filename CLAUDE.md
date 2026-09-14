@@ -110,19 +110,33 @@ just lint
 just test
 ```
 
-The integration test (runs in CI via `.github/workflows/integration-test.yaml`):
-- Checks `/nix/store` is accessible in test pods
-- Validates CSI driver registration
-- Confirms cache and node pods are operational
+### CI
 
-**Build job** (runs once, pushes to cachix and container registry):
-1. Builds and pushes Nix image
-2. Builds and pushes cache/node environments
-3. Builds and pushes scratch image
+**The workflows under `.github/workflows/` are generated. Do not edit them.**
+`ci/workflows/*.nix` are the source, and `nix run --file . ci-workflow-update`
+writes the YAML again. The `check` job runs `ciWorkflowCheck`, which parses
+the committed YAML and compares it against the rendered value, so an edit to
+either one alone fails the build.
 
-**Test jobs** (can run in parallel, pull from caches):
-- `test-kind`: Tests deployment on Kind cluster using `kubenixApply` with `local="true"`
-- Future test jobs can be added for different deployment scenarios (e.g., different K8s versions, configurations)
+`ci.yaml` runs on every branch and tag. Its jobs:
+
+- `check` — type check, the evaluation-only assertions, `arch-audit`,
+  treefmt. Everything here is seconds to minutes.
+- `build-amd64` and `build-arm64` — build the node and cache environments
+  and the per-architecture nix image, then push both to cachix. Each runs on
+  a runner of its own architecture; there is no emulation anywhere in CI.
+- `build-manifests` — asserts every store path the deployment names is
+  fetchable, then assembles the multi-arch index. Publishes from `develop`
+  and tags only.
+- `test-kind-cache` and `test-kind-nocache` — deploy `kubenixCI1` and
+  `kubenixCI2` to a Kind cluster and run the test workloads from
+  `kubenix/ci/test-workloads.nix`. The two differ in whether pynixd is
+  enabled, which is what makes them worth running both.
+- `docs-build`, `docs-deploy`, `release`.
+
+`test-nixos.yaml` runs the NixOS VM integration test, on the `cidev` branch
+only. `ci.yaml` excludes that branch, so a push there runs one or the other
+and never both.
 
 ### Building
 
