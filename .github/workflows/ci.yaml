@@ -96,6 +96,7 @@ jobs:
           nix run --file . arch-audit -- \
             push \
             push-ci2 \
+            push-citest \
             kubenixApply.manifestJSONFile \
             kubenixApply.manifestYAMLFile \
             kubenixCI1.deploymentScript \
@@ -243,6 +244,13 @@ jobs:
       - name: Push nocache variant store paths
         if: env.CACHIX_AUTH_TOKEN != ''
         run: nix run --file . push-ci2
+      # The test workloads, for the same reason and with the same exception.
+      # `env-ssl` runs a derivation built on this runner, and a node cannot
+      # fetch what nothing published: it failed with "don't know how to build
+      # these paths: ...-printer" on every kind run. See issue #30.
+      - name: Push test workload store paths
+        if: env.CACHIX_AUTH_TOKEN != ''
+        run: nix run --file . push-citest
   test-kind-cache:
     needs: build-manifests
     runs-on: ubuntu-latest

@@ -200,6 +200,34 @@ rec {
         nix-store -qR "$OUT" | cachix push nix-csi
       '';
 
+  # Push the test workloads' store paths to cachix.
+  #
+  # The workloads are not all substitutable by accident. `env-ssl` runs a
+  # `writeShellApplication` built on the runner, and the node discovers it
+  # from the container's `command` because that volume carries no
+  # `volumeAttributes`. Nothing published it, so the node asked for a path
+  # that existed in one store on earth:
+  #
+  #   don't know how to build these paths:
+  #     /nix/store/2imfy8cd7s3cxv4swmh3xx3izwchglbf-printer
+  #
+  # The manifest and not the deployment script, and it has to be the
+  # manifest: `kubenixCITest` sets `nixkube.enable = false`, so the discard
+  # transformer never runs and the manifest keeps the string context that
+  # makes these paths part of its closure. 29 paths, `printer` among them.
+  #
+  # See issue #30.
+  push-citest =
+    pkgs.writeScriptBin "push-citest" # bash
+      ''
+        #! ${pkgs.runtimeShell}
+        export PATH=${lib.makeBinPath [ pkgs.cachix ]}:$PATH
+        set -euo pipefail
+        # No 2>/dev/null, for the reason given on `push-ci2`.
+        OUT=$(nix build --no-link --print-out-paths --file ${builtins.toString ./.} kubenixCITest.config.internal.manifestJSONFile)
+        nix-store -qR "$OUT" | cachix push nix-csi
+      '';
+
   # Push environments for both x86_64-linux and aarch64-linux to cachix.
   #
   # Needs a machine that can build both, so it is a hand-run script and not a
