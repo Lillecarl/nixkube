@@ -30,6 +30,10 @@ PROBED_LABEL = "nixkube/probed"
 PROBE_LABEL = "nixkube/probe"
 FEATURES_ANNOTATION = "nixkube/features"
 
+# The CSI driver a builder's `nix-store` volume names. A node whose CSINode
+# does not list it cannot mount that volume, so a builder cannot run there.
+CSI_DRIVER_NAME = "nixkube"
+
 KUBE_ARCH_TO_NIX_SYSTEM = {
     "amd64": "x86_64-linux",
     "arm64": "aarch64-linux",
@@ -415,20 +419,61 @@ class BuilderManager:
     # ---- Node probing ----
 
     async def _watch_nodes(self) -> None:
-        """Watch for unprobed nodes and probe them automatically."""
+        """Probe nodes where the nixkube CSI driver is registered.
+
+        Watches CSINode, not Node, and both halves of that matter.
+
+        As a GATE, it is the fact rather than a proxy for it. A builder gets
+        /nix through a `nix-store` volume served by this CSI driver, and
+        kubelet writes `CSINode.spec.drivers` on plugin registration. So this
+        asks the same question the mount asks. A taint only correlates: on
+        nixlab2 cp-0 carries `node-role.kubernetes.io/control-plane:NoSchedule`
+        and has no driver, but a node can equally be untainted, running a
+        healthy nix-node, and not registered *yet*.
+
+        As a TRIGGER, it is quiet. Measured on nixlab2 at cluster head
+        resourceVersion ~149763: cp-0's CSINode was last written at 14245 --
+        static for about 135,000 revisions -- while every Node sat between
+        148388 and 149763, because kubelet rewrites node status constantly.
+        Watching Node meant every heartbeat re-fired this, which is the fuel
+        the retry loop ran on. A CSINode wakes on driver registration only:
+        a node joins, nix-node starts, nix-node stops.
+
+        The RESULT still goes on the Node. `nixkube/probed` and the features
+        annotation are what pod nodeSelectors and affinities match against,
+        and a label on a CSINode is not selectable. So this watches one
+        object and writes another on purpose.
+
+        A KNOWN COMPROMISE, and the reason matters more than the fact.
+        Nothing structurally binds a builder to the host's shared store: the
+        builder gets /nix through this CSI driver *today*, which is what
+        makes CSINode the right question today. Give a builder its own store
+        -- an emptyDir, a PVC, a layer in its own image -- and this gate
+        becomes wrong while continuing to look correct, because a node could
+        then run a builder without the driver. If that changes, this is the
+        line to revisit.
+        """
         while True:
             try:
                 api = await k8s.api()
-                async for event in api.watch(
-                    "nodes",
-                    label_selector=f"!{PROBED_LABEL}",
-                ):
+                async for event in api.watch("csinodes"):
                     event_type, resource = cast(Any, event)
                     if event_type not in {"ADDED", "MODIFIED"}:
                         continue
-                    labels = getattr(resource.metadata, "labels", {}) or {}
                     node_name = getattr(resource.metadata, "name", "")
                     if not node_name or node_name in self._pending_probes:
+                        continue
+                    drivers = {
+                        d.get("name")
+                        for d in (resource.raw.get("spec", {}).get("drivers") or [])
+                    }
+                    if CSI_DRIVER_NAME not in drivers:
+                        continue
+                    node = await self._get_node(node_name)
+                    if node is None:
+                        continue
+                    labels = node.raw.get("metadata", {}).get("labels", {}) or {}
+                    if PROBED_LABEL in labels:
                         continue
                     kube_arch = labels.get("kubernetes.io/arch", "")
                     nix_system = KUBE_ARCH_TO_NIX_SYSTEM.get(kube_arch)
@@ -444,6 +489,15 @@ class BuilderManager:
             except Exception:
                 log.warning("node_watch_error", exc_info=True)
                 await asyncio.sleep(10)
+
+    async def _get_node(self, node_name: str) -> Any | None:
+        try:
+            api = await k8s.api()
+            async for node in api.get("nodes", node_name):
+                return cast(Any, node)
+        except Exception:
+            log.warning("probe_node_read_failed", node=node_name, exc_info=True)
+        return None
 
     async def _probe_node(self, node_name: str, system: str) -> None:
         """Probe one node: create builder, wait for probe, label, cleanup."""

@@ -28,7 +28,8 @@ in
             resources = [ "nodes/proxy" ];
             verbs = [ "get" ];
           }
-          # Builder manager discovers cluster node architectures
+          # Builder manager discovers cluster node architectures, and writes
+          # the probe result back as a label and an annotation.
           {
             apiGroups = [ "" ];
             resources = [ "nodes" ];
@@ -37,6 +38,19 @@ in
               "list"
               "watch"
               "patch"
+            ];
+          }
+          # Which nodes have the nixkube CSI driver registered. kubelet writes
+          # this on plugin registration, so it is the fact a builder's volume
+          # depends on rather than a proxy for it. Read-only: nothing here
+          # ever writes a CSINode.
+          {
+            apiGroups = [ "storage.k8s.io" ];
+            resources = [ "csinodes" ];
+            verbs = [
+              "get"
+              "list"
+              "watch"
             ];
           }
           # Report events using events.k8s.io/v1 API across all namespaces
