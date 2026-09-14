@@ -75,6 +75,15 @@ in
           nixkube.csi = {
             driver = "nixkube";
             readOnly = true;
+            # Pinned by `rev`, not floating on `nixos-unstable`.
+            #
+            # The node evaluates this string and builds the result, so without
+            # a rev the test asks for whatever nixos-unstable is that morning.
+            # It then fails for reasons that have nothing to do with nixkube,
+            # and it cannot fail the same way twice.
+            #
+            # This is the revision the umbrella pins, so a node that has built
+            # anything else of ours already holds most of the closure.
             volumeAttributes.nixExpr = # nix
               ''
                 let
@@ -82,7 +91,7 @@ in
                     type = "github";
                     owner = "nixos";
                     repo = "nixpkgs";
-                    ref = "nixos-unstable";
+                    rev = "07e1d92cdc0ed416cfa11ff3ca40d17e61cfba7a";
                   };
                   pkgs = import nixpkgs { config = { allowUnfree = true; }; };
                 in
