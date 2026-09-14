@@ -560,6 +560,53 @@ rec {
       < node.livenessProbe.failureThreshold * node.livenessProbe.periodSeconds;
     pkgs.runCommand "node-driver-readiness" { } "echo ok > $out";
 
+  # Does any private key reach the Nix store?
+  #
+  # /nix/store is world readable, and a manifest rendered here is a store
+  # path. So a private key that reaches this render is readable by every user
+  # on every machine that builds or substitutes it, and it stays readable --
+  # a store path is immutable and lives until it is garbage collected.
+  #
+  # nixkube never generates a keypair at evaluation time. `kubenix/secret.nix`
+  # runs `ssh-keygen` in the cluster, at deploy time, and hands the result to
+  # `kubectl create secret`. What this repository renders is the script, the
+  # secret's name, and a mount path. `keys/*.pub` are public halves and are
+  # filtered by suffix.
+  #
+  # That is an invariant, not an observation, so it is checked rather than
+  # documented. Adding a `Secret` with `data` to the module would be an
+  # ordinary-looking change and this is what says no.
+  noPrivateKeysInManifest =
+    pkgs.runCommand "no-private-keys-in-manifest" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        manifest=${kubenixApply.manifestJSONFile}
+
+        # A rendered Secret carrying material. `nixkube/discard` does not help
+        # here: the key would be in the JSON itself, not in a store path it
+        # names.
+        carriers=$(jq -r '
+          [ (.items // [.])[]
+            | select(.kind == "Secret")
+            | select((.data // .stringData) != null)
+            | .metadata.name ] | join(", ")
+        ' "$manifest")
+        if [ -n "$carriers" ]; then
+          echo "Secret objects rendered with inline material: $carriers" >&2
+          echo "Generate them in the cluster instead. See kubenix/secret.nix." >&2
+          exit 1
+        fi
+
+        # And the shape a key takes when it arrives some other way -- read from
+        # a path with builtins.readFile, or pasted into an option.
+        if grep -qE 'PRIVATE KEY|BEGIN OPENSSH' "$manifest"; then
+          echo "The rendered manifest contains private key material." >&2
+          echo "/nix/store is world readable, so this publishes it." >&2
+          exit 1
+        fi
+
+        touch $out
+      '';
+
   # Does a builder present the host key the controller pins?
   #
   # `ssh_known_hosts` names one ed25519 key for `*`, and asyncssh derives the

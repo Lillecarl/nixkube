@@ -252,6 +252,12 @@ ghalib.evalWorkflow {
           name = "Check that a builder presents the host key the controller pins";
           run = "nix build --show-trace --file . builderPresentsPinnedHostKey";
         }
+        # /nix/store is world readable, so a key that reaches a render is
+        # published to every user of every machine that builds it.
+        {
+          name = "Check that no private key reaches the store";
+          run = "nix build --show-trace --file . noPrivateKeysInManifest";
+        }
         # A source read as a directory is a different input from the tree this
         # runner fetches, so the same commit builds different packages in the
         # two places and only a cluster finds out.

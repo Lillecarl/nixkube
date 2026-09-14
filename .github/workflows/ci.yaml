@@ -85,6 +85,8 @@ jobs:
         run: nix build --show-trace --file . nodeDriverReadiness
       - name: Check that a builder presents the host key the controller pins
         run: nix build --show-trace --file . builderPresentsPinnedHostKey
+      - name: Check that no private key reaches the store
+        run: nix build --show-trace --file . noPrivateKeysInManifest
       - name: Check that every source is a fetched tree
         run: nix build --show-trace --file . sourcesAreLocked
       - name: Check that the committed workflow matches ci/workflows
