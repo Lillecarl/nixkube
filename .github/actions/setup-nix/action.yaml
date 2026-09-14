@@ -39,9 +39,16 @@ runs:
           trusted-users = root runner
           trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nix-csi.cachix.org-1:i4w33gR4efO67jpz8U7g/MdvRQ6mQ3LEF9fB8tES60g=
           substituters = https://cache.nixos.org?priority=1 https://nix-csi.cachix.org?priority=2
-      # The install reaches the network, so it is the one step here that can
-      # hang without a build to blame.
-      timeout-minutes: 15
+      # No timeout on this step. A composite action's steps take only a
+      # subset of the workflow step keys, and `timeout-minutes` is not in it:
+      # the runner rejects the whole file at load, before any job starts.
+      #
+      #   Unexpected value 'timeout-minutes'
+      #   Failed to load .github/actions/setup-nix/action.yaml
+      #
+      # That is every job, not only the one that wanted the bound, and it
+      # costs about a minute per run rather than failing visibly in a build.
+      # Every caller carries `timeout-minutes` at the job level instead.
   # No GitHub store cache. cachix is the cache.
   #
   # `nix-community/cache-nix-action` restored a whole /nix/store from the
