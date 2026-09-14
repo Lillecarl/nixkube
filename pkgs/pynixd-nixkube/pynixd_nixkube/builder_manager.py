@@ -522,10 +522,43 @@ class BuilderManager:
                         PROBE_LABEL: "true",
                     },
                 },
+                # Ask the scheduler for this node. Do not assign it.
+                #
+                # `nodeName` skips the scheduler entirely: the Pod is placed,
+                # not scheduled, so taints, cordons and resources never enter
+                # the decision. That is how a probe reached a control plane
+                # node and sat in ContainerCreating for three and a half
+                # hours.
+                #
+                # The CSINode gate in `_watch_nodes` already means we only ask
+                # about nodes that can mount the volume. This is the other
+                # half: everything else that makes a node unusable is the
+                # scheduler's to know, and an unplaceable probe is then
+                # Pending/Unschedulable -- which names the reason -- instead
+                # of Pending/ContainerCreating, which does not.
+                #
+                # `affinity` merges rather than replaces, so the template's
+                # own podAntiAffinity survives. See `deep_merge`.
                 "spec": {
                     "template": {
                         "spec": {
-                            "nodeName": node_name,
+                            "affinity": {
+                                "nodeAffinity": {
+                                    "requiredDuringSchedulingIgnoredDuringExecution": {
+                                        "nodeSelectorTerms": [
+                                            {
+                                                "matchExpressions": [
+                                                    {
+                                                        "key": "kubernetes.io/hostname",
+                                                        "operator": "In",
+                                                        "values": [node_name],
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
                         },
                     },
                 },
