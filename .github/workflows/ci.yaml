@@ -33,6 +33,10 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # A job with no `timeout-minutes` gets GitHub's default of 360, and a
+    # build that hangs then holds a runner for six hours. That is what issue
+    # #9 cost, twice per run. Every job here carries a bound for that reason.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@main
@@ -171,6 +175,7 @@ jobs:
   build-manifests:
     needs: [build-amd64, build-arm64]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@main
@@ -226,6 +231,7 @@ jobs:
   test-kind-cache:
     needs: build-manifests
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@main
@@ -266,6 +272,7 @@ jobs:
   test-kind-nocache:
     needs: build-manifests
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@main
@@ -302,6 +309,7 @@ jobs:
   docs-build:
     if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: nixbuild/nix-quick-install-action@v35
@@ -328,6 +336,7 @@ jobs:
     if: github.ref == 'refs/heads/develop'
     needs: docs-build
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       pages: write
       id-token: write
@@ -345,6 +354,7 @@ jobs:
     needs: [check, build-manifests, test-kind-cache, test-kind-nocache]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@main
