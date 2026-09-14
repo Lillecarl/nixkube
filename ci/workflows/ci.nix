@@ -429,6 +429,48 @@ ghalib.evalWorkflow {
       ];
     };
 
+    /*
+      The node test, as a virtual machine, on the runner itself.
+
+      The same test and the same script a developer runs on a laptop:
+
+          nix run --file . umlTest.qemu.run
+
+      There is no Kind cluster and no registry here. The guest's /nix/store
+      is the runner's, over virtiofs, so everything the node needs is
+      already on the machine that built it -- which is what lets this job
+      run with no `needs` and no published image.
+
+      `ubuntu-latest` because it is x64. GitHub's ARM runners have no
+      /dev/kvm at all, and this backend asks for `accel=kvm` and never
+      `accel=kvm:tcg`: a silent fall back to emulation would turn a
+      twenty-minute cluster test into a timeout nobody could explain.
+
+      /dev/kvm exists on x64 runners but the runner user is not in the
+      `kvm` group, so the udev rule below is not optional. Without it QEMU
+      exits with "Could not access KVM kernel module: Permission denied".
+    */
+    test-qemu = {
+      runs-on = "ubuntu-latest";
+      timeout-minutes = 60;
+      steps = bootstrap ++ [
+        {
+          name = "Let the runner user open /dev/kvm";
+          run = ''
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+              | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            ls -l /dev/kvm
+          '';
+        }
+        {
+          name = "Run the node test as a virtual machine";
+          run = "nix run --file . umlTest.qemu.run";
+        }
+      ];
+    };
+
     test-kind-cache = testKind {
       instance = "kubenixCI1";
       cleanRunner = ''
