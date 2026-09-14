@@ -16,11 +16,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@main
+      # cachix/install-nix-action, which installs a daemon. A single-user nix
+      # builds under the runner's TMPDIR, so what a derivation can do depends
+      # on where the checkout happens to be. See nixkube issue #23.
+      #
+      # Not the shared setup-nix action: this workflow needs `access-tokens`
+      # and `sandbox = relaxed`, which that action does not take. It does need
+      # `trusted-users`, because a daemon ignores substituters and public keys
+      # an untrusted user asks for -- without it every path here would come
+      # from cache.nixos.org and nix-csi would go unread.
       - name: Install Nix
-        uses: nixbuild/nix-quick-install-action@master
+        uses: cachix/install-nix-action@master
         with:
-          nix_conf: |
+          extra_nix_config: |
             experimental-features = nix-command flakes
+            trusted-users = root runner
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
             trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nix-csi.cachix.org-1:i4w33gR4efO67jpz8U7g/MdvRQ6mQ3LEF9fB8tES60g=
             substituters = https://cache.nixos.org?priority=1 https://nix-csi.cachix.org?priority=2
