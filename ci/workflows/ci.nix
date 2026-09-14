@@ -57,30 +57,11 @@ let
   ];
 
   # Every test workload the kind jobs deploy, and the ones they wait for.
-  #
-  # The two lists differ, and the difference is issue #31: `commandpath-hello`
-  # and the three `invalid-*` jobs are deployed and deleted but never
-  # asserted, so a regression in any of them passes CI.
-  deployedJobs = [
-    "flake-hello"
-    "expr-hello"
-    "path-hello"
-    "commandpath-hello"
-    "env-ssl"
-    "invalid-storepath-hello"
-    "invalid-flake-hello"
-    "invalid-expr-hello"
-    "nri-hello-ro"
-    "nri-hello-rw"
-  ];
-  assertedJobs = [
-    "flake-hello"
-    "expr-hello"
-    "path-hello"
-    "env-ssl"
-    "nri-hello-ro"
-    "nri-hello-rw"
-  ];
+  # ../test-jobs.nix says what the difference between the two means; it is
+  # a file because nix/uml/ci.nix reads the same lists.
+  testJobs = import ../test-jobs.nix;
+  deployedJobs = testJobs.deployed;
+  assertedJobs = testJobs.asserted;
 
   # The two kind jobs run the same test against two deployments: one with the
   # pynixd cache, one without. Only the instance and the readiness waits
