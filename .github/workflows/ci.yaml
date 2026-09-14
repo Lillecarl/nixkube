@@ -52,7 +52,11 @@ jobs:
       #
       # The derivation still came from shell.nix, so the type check was
       # correct, but the shell around it was the runner's rather than a
-      # pinned one. This repository takes only pinned inputs.
+      # pinned one.
+      #
+      # Pinned inputs are the rule here. One input still breaks it, and it is
+      # not this one: nix/sources.nix fetches the umbrella with no rev when
+      # nixkube is built standalone, which is how CI builds it. See issue #28.
       - name: Run type checker
         run: nix develop --file shell.nix --command pyright pkgs/nixkube/src
       # Evaluation-only, and its closure is empty, so this costs seconds. It
