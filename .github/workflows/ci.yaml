@@ -42,8 +42,19 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
+      # `nix develop`, not `nix-shell --run`. To run a command, nix-shell needs
+      # an interactive bash, and it gets one by evaluating its own built-in
+      # `(import <nixpkgs> {}).bashInteractive`. Nothing in this repository
+      # asks for that; nix-shell does. With no `nixpkgs` in NIX_PATH it fails:
+      #
+      #   error: file 'nixpkgs' was not found in the Nix search path
+      #   uses bash from your environment
+      #
+      # The derivation still came from shell.nix, so the type check was
+      # correct, but the shell around it was the runner's rather than a
+      # pinned one. This repository takes only pinned inputs.
       - name: Run type checker
-        run: nix-shell --run "pyright pkgs/nixkube/src"
+        run: nix develop --file shell.nix --command pyright pkgs/nixkube/src
       # Evaluation-only, and its closure is empty, so this costs seconds. It
       # renders a container with no volumeMounts to keep the hostPath+subPath
       # assertion working against easykubenix's submodule defaults, which
