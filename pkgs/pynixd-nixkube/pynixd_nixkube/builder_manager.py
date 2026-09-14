@@ -444,6 +444,18 @@ class BuilderManager:
         and a label on a CSINode is not selectable. So this watches one
         object and writes another on purpose.
 
+        STARTUP DEPENDS ON THE WATCH REPLAYING. A watch with no
+        `resourceVersion` gets synthetic ADDED events for everything that
+        already exists, then the stream. That is what probes the cluster
+        after a restart, and it matters more here than it did for Nodes:
+        every CSINode is static, so a watch that only carried changes would
+        fire never and probe nothing. Measured on nixlab2 -- five ADDED
+        events in twenty seconds with nothing changing.
+
+        So do not pass `since=` to make this resumable. It would look like an
+        improvement and would mean no node is probed after a restart, with
+        nothing in the log.
+
         A KNOWN COMPROMISE, and the reason matters more than the fact.
         Nothing structurally binds a builder to the host's shared store: the
         builder gets /nix through this CSI driver *today*, which is what
