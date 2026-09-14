@@ -45,11 +45,11 @@ rec {
               cachix push nix-csi ${config.internal.manifestJSONFile}
             '';
           nixkube.pynixd.enable = false;
-          # push = true retains Nix string context on DaemonSet store paths so
-          # they become part of the manifest's closure.  The NixOS test VM then
-          # has every path in /nix/store, where nix-serve makes them available
-          # as a substituter for nixkube's separate /var/lib/nix-csi store.
-          nixkube.push = true;
+          # Keeping string context on the DaemonSet's store paths makes them
+          # part of the manifest's closure. The NixOS test VM then has every
+          # path in /nix/store, where nix-serve makes them available as a
+          # substituter for nixkube's separate /var/lib/nix-csi store.
+          nixkube.discardStringContext = false;
           nixkube.systems = {
             x86_64-linux = true;
             aarch64-linux = false;
@@ -99,14 +99,14 @@ rec {
               cachix push nix-csi ${config.internal.manifestJSONFile}
             '';
           nixkube.pynixd.enable = true;
-          nixkube.push = true;
+          nixkube.discardStringContext = false;
         }
       )
     ];
   };
   kubenixPush = kubenixInstance {
     module.config = {
-      nixkube.push = true;
+      nixkube.discardStringContext = false;
       nixkube.systems = {
         ${builtins.currentSystem} = true;
       };
@@ -114,7 +114,7 @@ rec {
   };
   kubenixPushBoth = kubenixInstance {
     module.config = {
-      nixkube.push = true;
+      nixkube.discardStringContext = false;
       nixkube.systems = {
         x86_64-linux = true;
         aarch64-linux = true;

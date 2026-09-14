@@ -230,10 +230,53 @@ in
       default = sources.nixpkgs;
       internal = true;
     };
-    push = lib.mkOption {
+    discardStringContext = lib.mkOption {
       type = lib.types.bool;
-      internal = true;
-      default = false;
+      default = true;
+      description = ''
+        Strip Nix string context from every resource annotated
+        `nixkube/discard`, so rendering a manifest does not make the deployer
+        realise the store paths it names.
+
+        On by default, and it is an optimisation rather than a correctness
+        choice. The node and pynixd environments are `buildEnv` outputs, one
+        per enabled system, and `buildEnv` sets `allowSubstitutes = false`.
+        Keeping their context therefore makes a deployer *build* each of
+        them, never fetch them. Measured on an x86_64 machine with binfmt
+        off:
+
+          error: Cannot build '...-nodeEnv.drv'
+                 Reason: platform mismatch
+                 Required system: 'aarch64-linux'
+
+        Its aarch64 dependencies substituted normally; only the `buildEnv`
+        output refused. So a deployer who has not arranged foreign-platform
+        builds cannot render a manifest for a cluster with a second
+        architecture. That is what this avoids, and it is why the default
+        holds even though the paths are on cachix: the cache cannot serve a
+        derivation that declines to be substituted.
+
+        What it costs. `ekn.cachePackage` defaults to the manifest and finds
+        referenced paths through string context, so with this on it finds
+        none of these:
+
+          store paths named as text in manifest.json   4
+          paths in its closure                         1   (itself)
+
+        `ekn deploy` then reports a successful cache push and seeds none of
+        the paths a node needs to boot. A cluster that relies on that push
+        must name the environments itself, through the `csiPkgs` module
+        argument -- `ekn.cachePackage`'s own documentation carries the
+        fragment.
+
+        Turning this off is reasonable when every enabled system is one the
+        deployer can realise, or when `always-allow-substitutes = true` is
+        set, which lets the fetch happen despite `allowSubstitutes = false`
+        and needs no derivation change. nixkube's own CI instances turn it
+        off for exactly that reason.
+
+        See issue #29.
+      '';
     };
     dinix = lib.mkOption {
       type = lib.types.path;
@@ -301,7 +344,7 @@ in
         "app.kubernetes.io/version" = cfg.version;
       };
 
-      kubernetes.transformers = lib.optional (!cfg.push) (
+      kubernetes.transformers = lib.optional cfg.discardStringContext (
         resource:
         let
           mapRecursive =

@@ -26,9 +26,9 @@ let
 
   # The rendered manifest, and the root of everything the node needs.
   #
-  # `nixkube.push = true` (see ./manifest.nix) keeps the string context on the
-  # DaemonSet's store paths, so the node environment is in this file's
-  # closure. Naming it in `settings` is what pulls that closure into the
+  # `nixkube.discardStringContext = false` (see ./manifest.nix) keeps the
+  # string context on the DaemonSet's store paths, so the node environment is
+  # in this file's closure. Naming it in `settings` is what pulls it into the
   # sandbox; naming it in `nixDatabase.extraRoots` is what makes Nix inside
   # the guest agree the paths are real.
   manifestFile = manifest.manifestYAMLFile;
@@ -112,8 +112,8 @@ uml.mkTest {
           The manifest, and what a workload will ask the driver to mount.
 
           The manifest's own closure carries the node environment, because
-          `nixkube.push = true` keeps the string context on it. Registering
-          that closure is what lets the init container's
+          `nixkube.discardStringContext = false` keeps the string context on
+          it. Registering that closure is what lets the init container's
           `nix build --store /nix-volume` see the environment as a valid path
           rather than something it has to go and fetch.
         */

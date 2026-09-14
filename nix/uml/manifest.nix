@@ -63,7 +63,7 @@ in
     # environment is part of the manifest's closure. That is what carries it
     # into the sandbox at all, and `boot.uml.nixDatabase.extraRoots` in
     # ./default.nix registers that same closure inside the guest.
-    push = true;
+    discardStringContext = false;
 
     /*
       A directory of the node's own, on the node's own filesystem.

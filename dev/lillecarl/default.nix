@@ -48,7 +48,7 @@ rec {
               enable = true;
               node.compat = false;
               cache.enable = true;
-              push = true;
+              discardStringContext = false;
               systems = {
                 "x86_64-linux" = true;
                 "aarch64-linux" = false;
