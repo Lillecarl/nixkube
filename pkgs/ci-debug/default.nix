@@ -80,7 +80,8 @@ writeShellApplication {
       - Init container CrashLoopBackOff with exit code 1 in initcopy → nix build failure (check initcopy logs for the exact error)
       - Init container CrashLoopBackOff with exit code 143 in main container → SIGTERM from resource limits or liveness probe
       - \"driver name nixkube not found\" in FailedMount events → CSI driver not registered, check csinode
-      - \"no substituter that can build it\" in initcopy logs → store path not in any configured cache, check nix.conf
+      - \"cannot get /nix/store/...\" in initcopy logs → read the \`pynixd:\` line under it. \`unreachable\` means pynixd never answered and served nothing, so the path had to come from a cache and did not; \`answered\` means pynixd is reachable and lacks the path, which is not a connectivity problem; \`disabled\` means a cache is the only source. See issue #27
+      - \"no substituter that can build it\" with no \`cannot get\` line → an older node image, before initcopy said which of those three it was. Same three causes, no way to tell them apart from the log
       - Test jobs in Pending state → CSI volume can't be published, check node events
       - pynixd pod not ready → check init-store CSI volume mount, PVC status
       - \"Operation not permitted\" on SSH → network policy or Cilium blocking, check CiliumNetworkPolicy
