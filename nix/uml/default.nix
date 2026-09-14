@@ -65,6 +65,22 @@ uml.mkTest {
   name = "nixkube";
   script = ./test.py;
 
+  /*
+    QEMU by default, so `nix build --file . umlTest` is the machine CI
+    runs and the one a developer runs.
+
+    A UML guest is one process and one CPU whatever `cpus` says, which is
+    what makes it work inside a build sandbox and what makes it slow here:
+    this test is a control plane, a CSI driver, an NRI plugin and nine
+    chaos scenarios. Measured under QEMU at four processors: 13.4 minutes
+    for all nine, and the guest boots in 8.5s.
+
+    `umlTest.uml` is still the same test on the other machine, and it is
+    the one to reach for when there is no /dev/kvm -- a builder without
+    one refuses to build the QEMU variant rather than failing it.
+  */
+  backend = "qemu";
+
   # A function, so the guest can size itself from the backend it got.
   nodes.cp =
     { config, ... }:

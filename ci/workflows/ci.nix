@@ -434,7 +434,7 @@ ghalib.evalWorkflow {
 
       The same test and the same script a developer runs on a laptop:
 
-          nix run --file . umlTest.qemu.run
+          nix run --file . umlTest.run
 
       There is no Kind cluster and no registry here. The guest's /nix/store
       is the runner's, over virtiofs, so everything the node needs is
@@ -466,7 +466,7 @@ ghalib.evalWorkflow {
         }
         {
           name = "Run the node test as a virtual machine";
-          run = "nix run --file . umlTest.qemu.run";
+          run = "nix run --file . umlTest.run";
         }
       ];
     };
