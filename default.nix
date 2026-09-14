@@ -740,10 +740,20 @@ rec {
   #
   # `umlImagesMatch` is the one member that builds rather than evaluates: it
   # writes two image tarballs, so on a cold store it also fetches the nix
-  # image closure. Measured warm on this machine at 7.8s, four derivations.
-  # It earns that because the failure it catches -- a tarball that does not
-  # carry the tag the DaemonSet asks for -- otherwise appears as ErrImagePull
-  # after twenty minutes of cluster.
+  # image closure. That is the whole cost of this set.
+  #
+  #   this step, without it   69s    check job  3m25s
+  #   this step, with it     168s    check job  5m13s
+  #
+  # Measured on runs 34856944613 and 34857619341, cold runners both. So it
+  # costs about 100s against a 30 minute bound, and it earns that: the
+  # failure it catches -- a tarball that does not carry the tag the DaemonSet
+  # asks for -- otherwise appears as ErrImagePull, on a cluster, twenty
+  # minutes after the change that caused it.
+  #
+  # If it ever stops being worth 100s, move it to `build-amd64`, which builds
+  # the same image and so already holds the closure. Dropping it is the wrong
+  # answer; nothing else asks this question.
   checks = {
     inherit
       assertionsNullShape
