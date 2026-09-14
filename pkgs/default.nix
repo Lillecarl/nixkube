@@ -42,9 +42,15 @@ self: pkgs: {
   #
   # Every CI runner then built Nix from source, on both architectures, and
   # `build-amd64` and `build-arm64` both hit GitHub's six-hour job limit. That
-  # skipped `build-manifests`, which is what publishes the image manifest and
-  # pushes to cachix -- so nothing has published since, and a node cannot find
-  # `nodeEnv` to boot with. See issue #9.
+  # skipped `build-manifests`, which publishes the image manifest and pushes
+  # to cachix, so nodes could not find `nodeEnv` to boot with. Issue #9, now
+  # closed.
+  #
+  # Read the paragraph above as the trap, not as the current state. It said
+  # "nothing has published since", which stayed true for a later and
+  # unrelated CI break and sent someone to a fixed issue. An outage of this
+  # shape looks the same whatever stopped the publish, so diagnose it from
+  # the run list rather than from here.
   #
   # Skipping the test suite saves minutes on a build nobody should be doing.
   # Paying for it with a source build of Nix, twice per run, is the wrong
