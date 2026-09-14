@@ -140,6 +140,18 @@ class BuilderManager:
         self.max_builders = max_builders
         self.min_builders = min_builders
         self.idle_timeout = idle_timeout
+        # A default, and deliberately not the local store's probe result.
+        #
+        # Deriving this from the local probe reads as the obvious tidy-up and
+        # is a trap. pynixd mounts its own store read-only over the CSI
+        # driver, so its local probe fails -- `creating directory
+        # "/nix/var/nix/userpool": Read-only file system` -- and records
+        # `systems: []` as a successful probe of an empty store. Node probing
+        # reads this attribute, so deriving it would turn that into "no node
+        # is ever probed", with no error, no probe and nothing in the log.
+        #
+        # The two defects are independent by accident rather than by design.
+        # Keep it that way. See solid-kubernetes git-bug 66ddf78.
         self.systems = systems or ["x86_64-linux"]
         self.cooldown_seconds = cooldown_seconds
         self.backoff_cap = backoff_cap
