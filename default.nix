@@ -746,6 +746,29 @@ rec {
     inherit sources umlImages;
     manifest = umlManifest;
   };
+
+  /*
+    The kind jobs, on a guest instead of on a container.
+
+    `umlTest` breaks a node nine ways to see whether the driver comes back.
+    This one asks what the kind jobs ask: that `kubenixDeploy` works, that
+    the DaemonSet rolls out, that the test workloads complete, and that
+    deleting them cleans up -- on a node that pulls its own images and has
+    had nothing done to it.
+
+    Not a check and not in CI's sandbox: the node pulls from
+    registry.k8s.io and what it deploys comes from ghcr.io.
+
+        nix run --file . ciTest.run          # no pynixd, kubenixCI2
+  */
+  ciTest = pkgs.callPackage ./nix/uml/ci.nix {
+    inherit sources;
+    name = "nixkube-ci";
+    instance = kubenixCI2;
+    workloads = kubenixCITest;
+    deployedJobs = (import ./ci/test-jobs.nix).deployed;
+    assertedJobs = (import ./ci/test-jobs.nix).asserted;
+  };
   ci-debug = pkgs.callPackage ./pkgs/ci-debug { };
 
   # Is every store path this manifest names actually fetchable?
