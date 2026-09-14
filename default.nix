@@ -624,4 +624,75 @@ rec {
 
   # Does this attribute build on the machine that is asked to build it?
   arch-audit = pkgs.callPackage ./pkgs/arch-audit { };
+
+  # The CI workflow as a value. ci/workflows/ci.nix holds it and says why.
+  ciWorkflow = import ./ci/workflows/ci.nix {
+    inherit lib;
+    ghalib = import sources.ghanix { inherit lib; };
+  };
+
+  # That value as the file GitHub reads.
+  #
+  # `pkgs.formats.yaml` emits a `%YAML 1.1` directive and a `---` marker that
+  # no workflow carries, so the first two lines go. It quotes `'on'` for the
+  # same YAML 1.1 reason that makes the directive appear, which is what a
+  # workflow needs: unquoted, `on` is the boolean `true` to a 1.1 parser.
+  #
+  # Then yamlfmt, because treefmt runs yamlfmt over this file and the `check`
+  # job ends in `git diff --exit-code`. A render in any other style is a
+  # failing job on every run. Running the same formatter here makes the two
+  # agree by construction rather than by taste.
+  #
+  # Key order is alphabetical and nothing depends on it: GitHub does not, and
+  # ciWorkflowCheck compares parsed documents rather than text.
+  ciWorkflowFile =
+    let
+      header = ''
+        # SPDX-License-Identifier: MIT
+        # GENERATED FILE -- do not edit by hand.
+        # Edit ci/workflows/ci.nix, then run: nix run --file . ci-workflow-update
+      '';
+    in
+    pkgs.runCommand "ci.yaml" { nativeBuildInputs = [ pkgs.yamlfmt ]; } ''
+      {
+        printf '%s\n' ${lib.escapeShellArg header}
+        tail --lines=+3 ${(pkgs.formats.yaml { }).generate "ci.yaml" ciWorkflow}
+      } > ci.yaml
+      HOME=$PWD yamlfmt ci.yaml
+      mv ci.yaml $out
+    '';
+
+  # Does the committed workflow still say what ci/workflows/ci.nix says?
+  #
+  # Parsed, not compared as text, so key order and quoting cannot fail this.
+  # yq reads YAML 1.2, where a bare `on:` key is the string "on". A YAML 1.1
+  # parser answers the boolean `true` for it, which would compare a boolean
+  # key against a string one and fail every run.
+  ciWorkflowCheck =
+    pkgs.runCommand "ci-workflow-check"
+      {
+        nativeBuildInputs = [
+          pkgs.yq-go
+          pkgs.jq
+        ];
+        rendered = builtins.toJSON ciWorkflow;
+        passAsFile = [ "rendered" ];
+      }
+      ''
+        yq --output-format=json '.' ${./.github/workflows/ci.yaml} | jq --sort-keys . > committed.json
+        jq --sort-keys . < "$renderedPath" > rendered.json
+        if ! diff --unified committed.json rendered.json; then
+          echo >&2
+          echo "The committed workflow and ci/workflows/ci.nix disagree." >&2
+          echo "Run: nix run --file . ci-workflow-update" >&2
+          exit 1
+        fi
+        touch $out
+      '';
+
+  ci-workflow-update = pkgs.writeScriptBin "ci-workflow-update" ''
+    #! ${pkgs.runtimeShell}
+    set -euo pipefail
+    cp --no-preserve=mode ${ciWorkflowFile} .github/workflows/ci.yaml
+  '';
 }

@@ -1,0 +1,583 @@
+# The CI workflow, as a value rather than as text.
+#
+# `.github/workflows/ci.yaml` is rendered from this file. Edit this one; the
+# `check` job compares the render against what is committed and fails when
+# they differ. `nix run --file . ci-workflow-update` writes the new render.
+#
+# ghanix is the schema. It takes `lib` and nothing else, which is what lets
+# this repository use it while pinning its own nixpkgs. See issue #13.
+#
+# Every step here is written out. ghanix ships `steps.checkout` and
+# `steps.installNix` constructors, and neither fits: this repository installs
+# Nix through its own composite action, which carries the substituters and
+# the `trusted-users` setting that a bare installer would not.
+{ lib, ghalib }:
+let
+  checkout = {
+    name = "Checkout";
+    uses = "actions/checkout@main";
+  };
+
+  setupNix = {
+    name = "Setup Nix environment";
+    uses = "./.github/actions/setup-nix";
+  };
+
+  bootstrap = [
+    checkout
+    setupNix
+  ];
+
+  # Publish from develop and tags only. The image tags are named from
+  # versions, not from the commit, so a branch that changes neither version
+  # would overwrite develop's tag with its own content under the same name.
+  publishRef = "github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')";
+
+  # Every attribute a job builds, checked for the architecture it is built on.
+  #
+  # `pushArch.aarch64-linux` is missing on purpose: it is foreign here and
+  # native on the runner that builds it.
+  #
+  # `pushManifest` is the one most likely to regress. It names the two
+  # architectures' images as plain strings today, so it costs nothing;
+  # interpolating the derivations instead would read as a tidy-up and would
+  # make `build-manifests` need an aarch64 machine.
+  archAudited = [
+    "push"
+    "push-ci2"
+    "push-citest"
+    "kubenixApply.manifestJSONFile"
+    "kubenixApply.manifestYAMLFile"
+    "kubenixCI1.deploymentScript"
+    "kubenixCI2.deploymentScript"
+    "kubenixCITest.deploymentScript"
+    "nixImage.pushArch.x86_64-linux"
+    "nixImage.pushManifest"
+    "scratchImage.push"
+  ];
+
+  # Every test workload the kind jobs deploy, and the ones they wait for.
+  #
+  # The two lists differ, and the difference is issue #31: `commandpath-hello`
+  # and the three `invalid-*` jobs are deployed and deleted but never
+  # asserted, so a regression in any of them passes CI.
+  deployedJobs = [
+    "flake-hello"
+    "expr-hello"
+    "path-hello"
+    "commandpath-hello"
+    "env-ssl"
+    "invalid-storepath-hello"
+    "invalid-flake-hello"
+    "invalid-expr-hello"
+    "nri-hello-ro"
+    "nri-hello-rw"
+  ];
+  assertedJobs = [
+    "flake-hello"
+    "expr-hello"
+    "path-hello"
+    "env-ssl"
+    "nri-hello-ro"
+    "nri-hello-rw"
+  ];
+
+  # The two kind jobs run the same test against two deployments: one with the
+  # pynixd cache, one without. Only the instance and the readiness waits
+  # differ.
+  testKind =
+    {
+      instance,
+      extraWaits ? [ ],
+      cleanRunner,
+    }:
+    {
+      needs = "build-manifests";
+      runs-on = "ubuntu-latest";
+      timeout-minutes = 45;
+      steps =
+        bootstrap
+        ++ [
+          {
+            name = "Create Kind cluster";
+            uses = "helm/kind-action@main";
+          }
+          {
+            name = "Clean runner";
+            run = cleanRunner;
+          }
+          {
+            name = "Deploy nix-csi";
+            run = ''
+              nix build --show-trace --file . ${instance}.deploymentScript
+              ./result/bin/kubenixDeploy --yes
+            '';
+          }
+          {
+            name = "Wait for nix-csi node daemonset";
+            run = ''
+              kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s
+            '';
+          }
+        ]
+        ++ extraWaits
+        ++ [
+          {
+            name = "Deploy test workloads";
+            run = ''
+              nix build --show-trace --file . kubenixCITest.deploymentScript
+              ./result/bin/kubenixDeploy --yes
+            '';
+          }
+          {
+            name = "Wait for test workload";
+            run = ''
+              kubectl wait --for=condition=complete ${
+                lib.concatMapStringsSep " " (j: "job/${j}") assertedJobs
+              } -n nixkube --timeout=300s
+            '';
+          }
+          {
+            name = "Delete jobs and verify CSI cleanup";
+            run = ''
+              kubectl delete job ${lib.concatStringsSep " " deployedJobs} -n nixkube
+              kubectl wait --for=delete pod -l "job-name in (${lib.concatStringsSep "," deployedJobs})" -n nixkube --timeout=120s
+            '';
+          }
+          {
+            name = "Debug on failure";
+            "if" = "failure()";
+            env.DS_API = "\${{ secrets.DS_API }}";
+            run = "nix run --file . ci-debug 2>/dev/null || true";
+          }
+        ];
+    };
+in
+# No `name`. GitHub shows the file path instead, which is what this workflow
+# has always done, and `${{ github.workflow }}` in the concurrency group below
+# is that path. Naming it would change the group.
+ghalib.evalWorkflow {
+  on = {
+    pull_request = null;
+    push = {
+      branches = [
+        "*"
+        "!cidev"
+      ];
+      tags = [ "v*" ];
+    };
+    workflow_dispatch = null;
+  };
+
+  # One run per ref. A push to a branch cancels the run the previous push
+  # started, because that run is testing a commit nobody will deploy.
+  #
+  # Measured on 2026-09-09, after a day of small commits to develop: 22 runs
+  # unfinished at once and 18 concurrent build-arm64 jobs, each rebuilding the
+  # same 954 MiB aarch64 closure from source. None could help another, because
+  # `push` only runs after its own build finishes. Every one of those was a
+  # duplicate of the newest.
+  #
+  # Tags keep their runs. A release is not superseded by the next push, and
+  # cancelling one would leave a version half published.
+  concurrency = {
+    group = "\${{ github.workflow }}-\${{ github.ref }}";
+    cancel-in-progress = "\${{ !startsWith(github.ref, 'refs/tags/') }}";
+  };
+
+  env = {
+    REPO_USERNAME = "\${{ github.actor }}";
+    REPO_TOKEN = "\${{ secrets.GITHUB_TOKEN }}";
+    CACHIX_AUTH_TOKEN = "\${{ secrets.CACHIX_AUTH_TOKEN }}";
+  };
+
+  permissions = {
+    contents = "write";
+    packages = "write";
+    actions = "write";
+  };
+
+  jobs = {
+    check = {
+      runs-on = "ubuntu-latest";
+      # A job with no `timeout-minutes` gets GitHub's default of 360, and a
+      # build that hangs then holds a runner for six hours. That is what issue
+      # #9 cost, twice per run. Every job here carries a bound for that reason.
+      timeout-minutes = 30;
+      steps = bootstrap ++ [
+        # `nix develop`, not `nix-shell --run`. To run a command, nix-shell
+        # needs an interactive bash, and it gets one by evaluating its own
+        # built-in `(import <nixpkgs> {}).bashInteractive`. Nothing in this
+        # repository asks for that; nix-shell does. With no `nixpkgs` in
+        # NIX_PATH it fails:
+        #
+        #   error: file 'nixpkgs' was not found in the Nix search path
+        #   uses bash from your environment
+        #
+        # The derivation still came from shell.nix, so the type check was
+        # correct, but the shell around it was the runner's rather than a
+        # pinned one.
+        #
+        # Pinned inputs are the rule here. One input still breaks it, and it
+        # is not this one: nix/sources.nix fetches the umbrella with no rev
+        # when nixkube is built standalone, which is how CI builds it. See
+        # issue #28.
+        {
+          name = "Run type checker";
+          run = "nix develop --file shell.nix --command pyright pkgs/nixkube/src";
+        }
+        # Evaluation-only, and its closure is empty, so this costs seconds. It
+        # renders a container with no volumeMounts to keep the
+        # hostPath+subPath assertion working against easykubenix's submodule
+        # defaults, which nixkube's own resources never produce.
+        {
+          name = "Check the assertion against a consumer-shaped render";
+          run = "nix build --show-trace --file . assertionsNullShape";
+        }
+        {
+          name = "Check that a neighbour's object is warned about, not refused";
+          run = "nix build --show-trace --file . assertionsNeighbourScope";
+        }
+        # Also evaluation-only. Both of these encode a shape a consumer
+        # reported and this repository's own instances cannot produce.
+        {
+          name = "Check that an operator can cap builders";
+          run = "nix build --show-trace --file . builderSettingsOverride";
+        }
+        {
+          name = "Check that nix-node reports a dead driver";
+          run = "nix build --show-trace --file . nodeDriverReadiness";
+        }
+        # A source read as a directory is a different input from the tree this
+        # runner fetches, so the same commit builds different packages in the
+        # two places and only a cluster finds out.
+        {
+          name = "Check that every source is a fetched tree";
+          run = "nix build --show-trace --file . sourcesAreLocked";
+        }
+        # This file renders the workflow the runner is executing. A change
+        # here that was never rendered would run the old one and say nothing.
+        {
+          name = "Check that the committed workflow matches ci/workflows";
+          run = "nix build --show-trace --file . ciWorkflowCheck";
+        }
+        # A runner has no binfmt, so an attribute that needs the other
+        # architecture cannot be built by any job here. A workstation with
+        # extra-platforms emulates it and says nothing, which is how
+        # kubenixApply came to need 3120 aarch64 derivations on x86_64.
+        {
+          name = "Check that every CI attribute builds natively";
+          run = lib.concatStringsSep " \\\n  " ([ "nix run --file . arch-audit --" ] ++ archAudited) + "\n";
+        }
+        {
+          name = "Check formatting";
+          run = ''
+            nix run --file . treefmt
+            git diff --exit-code
+          '';
+        }
+      ];
+    };
+
+    build-amd64 = {
+      runs-on = "ubuntu-latest";
+      # Same reason as build-arm64 below, lower bound: this one has never been
+      # the slow half.
+      timeout-minutes = 45;
+      steps = bootstrap ++ [
+        # --print-build-logs, because without it a stuck build is silent.
+        #
+        # Measured on run 34477979957: both builders printed their last line
+        # within 20 seconds of starting, then said nothing for 44 and 60
+        # minutes, until timeout-minutes killed them. `building '<drv>'...`
+        # was all either one gave, so nothing said which phase was stuck. See
+        # #21.
+        {
+          name = "Build and push environments";
+          run = ''
+            unlink nix-envs || true
+            nix build --show-trace --print-build-logs --file . push --out-link nix-envs
+            ./nix-envs/bin/push
+          '';
+        }
+        # Built on every branch, published from develop and tags only.
+        # Building still proves it builds.
+        {
+          name = "Build amd64 nix image";
+          run = ''
+            unlink nix-nix || true
+            nix build --show-trace --print-build-logs --file . nixImage.pushArch.x86_64-linux --out-link nix-nix
+          '';
+        }
+        {
+          name = "Push amd64 nix image";
+          "if" = publishRef;
+          run = "./nix-nix/bin/push-nix-x86_64-linux";
+        }
+      ];
+    };
+
+    build-arm64 = {
+      runs-on = "ubuntu-24.04-arm";
+      # Fail rather than hang. Measured on 2026-09-10: this job sat in "Build
+      # and push environments" for three hours, and GitHub's default would
+      # have let it reach six. `build-manifests` needs it, so everything
+      # downstream -- both kind tests, the release -- waits behind a job that
+      # is not progressing, and the whole run publishes nothing.
+      #
+      # It is not building from source when this happens. Measured the same
+      # day: 3260 of 3265 paths in this job's aarch64 closure are already on a
+      # substituter, and the five that are not came from unpushed commits. The
+      # stall is in fetching, which is what issue #21 says.
+      #
+      # 90 minutes is well above a healthy run and well below the point where
+      # a stuck job costs a day of pipeline.
+      timeout-minutes = 90;
+      steps = bootstrap ++ [
+        # One derivation at a time, with every core. This is insurance, not
+        # the fix for what killed this job.
+        #
+        # `max-jobs auto` lets a 4-core, 16 GB runner build four of nixkube's
+        # Python packages at once; grpclib-ttrpc compiles a Go ttrpc test
+        # server and runs its suite, and four more run grpcio-tools. That
+        # would be a plausible cause and is not this one: the job stalls while
+        # *fetching* from cachix, before it builds anything. See issue #21 and
+        # the note in the setup-nix action.
+        #
+        # Kept because this runner has died twice, and the next path that
+        # lands uncached will be built here rather than fetched.
+        {
+          name = "Build and push environments";
+          run = ''
+            unlink nix-envs || true
+            nix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . push --out-link nix-envs
+            ./nix-envs/bin/push
+          '';
+        }
+        # Built everywhere, published from develop and tags only. See the
+        # amd64 job above for why.
+        {
+          name = "Build arm64 nix image";
+          run = ''
+            unlink nix-nix || true
+            nix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . nixImage.pushArch.aarch64-linux --out-link nix-nix
+          '';
+        }
+        {
+          name = "Push arm64 nix image";
+          "if" = publishRef;
+          run = "./nix-nix/bin/push-nix-aarch64-linux";
+        }
+      ];
+    };
+
+    build-manifests = {
+      needs = [
+        "build-amd64"
+        "build-arm64"
+      ];
+      runs-on = "ubuntu-latest";
+      timeout-minutes = 30;
+      steps = bootstrap ++ [
+        # Both build jobs have passed, so every store path the deployment
+        # names should now be fetchable. Assert it before assembling the index
+        # rather than after, because the index is what consumers pull.
+        #
+        # It walks the closure and unions the substituters. A per-path narinfo
+        # check passes on the shape that actually bit: cacheEnv present on
+        # cachix with a closure member only on cache.nixos.org, and issue #8's
+        # present-top-path-absent-member.
+        {
+          name = "Assert both architectures' closures are fetchable";
+          run = ''
+            nix build --show-trace --file . kubenixApply.manifestJSONFile --out-link manifest
+            nix run --file . assert-cached -- manifest
+          '';
+        }
+        # These write floating tags -- `nix:latest`, `scratch:latest` and the
+        # version tags -- and nothing here was branch-guarded, so a push to
+        # any branch republished what consumers pull. It has not bitten only
+        # because `build-arm64` stalls before this job runs.
+        #
+        # A branch still builds and still asserts. It just does not publish,
+        # so the kind tests below run against the images develop published.
+        {
+          name = "Build the index and scratch publishers";
+          run = ''
+            unlink nix-manifest || true
+            unlink nix-scratches || true
+            nix build --show-trace --file . nixImage.pushManifest --out-link nix-manifest
+            nix build --show-trace --file . scratchImage.push --out-link nix-scratches
+          '';
+        }
+        {
+          name = "Create nix multi-arch manifest";
+          "if" = publishRef;
+          run = "./nix-manifest/bin/push-nix-manifest";
+        }
+        {
+          name = "Push scratch image";
+          "if" = publishRef;
+          run = "./nix-scratches/bin/push";
+        }
+        # Let this fail the job. The cache is load-bearing, not an
+        # optimisation: a node cannot bring itself up without nodeEnv, and a
+        # node with no local store cannot build one. A push that silently does
+        # nothing shows up days later as a pod stuck in ContainerCreating,
+        # nowhere near this line.
+        #
+        # A fork has no token and cannot push. That case is skipped by name
+        # here, rather than by discarding every error including the real ones.
+        {
+          name = "Push nocache variant store paths";
+          "if" = "env.CACHIX_AUTH_TOKEN != ''";
+          run = "nix run --file . push-ci2";
+        }
+        # The test workloads, for the same reason and with the same exception.
+        # `env-ssl` runs a derivation built on this runner, and a node cannot
+        # fetch what nothing published: it failed with "don't know how to
+        # build these paths: ...-printer" on every kind run. See issue #30.
+        {
+          name = "Push test workload store paths";
+          "if" = "env.CACHIX_AUTH_TOKEN != ''";
+          run = "nix run --file . push-citest";
+        }
+      ];
+    };
+
+    test-kind-cache = testKind {
+      instance = "kubenixCI1";
+      cleanRunner = ''
+        # Remove cache because permissions can get fucked up preventing kluctl from creating it's cache directory
+        sudo rm --recursive --force /home/runner/.cache
+      '';
+      extraWaits = [
+        {
+          name = "Wait for nix-csi cache pod";
+          run = ''
+            kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=pynixd -n nixkube --timeout=180s
+          '';
+        }
+      ];
+    };
+
+    test-kind-nocache = testKind {
+      instance = "kubenixCI2";
+      cleanRunner = ''
+        sudo rm --recursive --force /home/runner/.cache
+      '';
+    };
+
+    docs-build = {
+      "if" = "github.ref == 'refs/heads/develop'";
+      runs-on = "ubuntu-24.04";
+      timeout-minutes = 30;
+      steps = [
+        { uses = "actions/checkout@v4"; }
+        # The same action as every other job, rather than an installer of its
+        # own. This was the last `nix-quick-install-action` in the workflow, so
+        # docs were the one thing built by a single-user nix with its own
+        # substituter list to keep in step.
+        #
+        # A bare installer swap would have been wrong here. A daemon ignores
+        # substituters and public keys that an untrusted user asks for, so
+        # `trusted-users = root runner` is what keeps nix-csi readable at all
+        # -- and that setting lives in the action.
+        setupNix
+        # nix-csi is the cache this repository owns, and the one every other
+        # job pushes to. The token can push to it. A push to `lillecarl`
+        # answered 403 "You're not authorized to access binary cache
+        # lillecarl."
+        {
+          uses = "cachix/cachix-action@v15";
+          "with" = {
+            name = "nix-csi";
+            authToken = "\${{ secrets.CACHIX_AUTH_TOKEN }}";
+          };
+        }
+        {
+          name = "Build documentation";
+          run = "nix build --file . nixkube-docs --out-link result --print-build-logs --print-out-paths";
+        }
+        {
+          name = "Verify docs closure";
+          run = "nix store verify --recursive --no-trust \"$(readlink -f result)\"";
+        }
+        {
+          name = "Prepare Pages artifact";
+          run = ''
+            mkdir -p public
+            cp -r --no-preserve=mode,ownership result/. public/
+          '';
+        }
+        {
+          uses = "actions/upload-pages-artifact@v3";
+          "with".path = "public";
+        }
+      ];
+    };
+
+    docs-deploy = {
+      "if" = "github.ref == 'refs/heads/develop'";
+      needs = "docs-build";
+      runs-on = "ubuntu-24.04";
+      timeout-minutes = 15;
+      permissions = {
+        pages = "write";
+        id-token = "write";
+      };
+      environment = {
+        name = "github-pages";
+        url = "\${{ steps.deployment.outputs.page_url }}";
+      };
+      concurrency = {
+        group = "pages";
+        cancel-in-progress = false;
+      };
+      steps = [
+        {
+          name = "Deploy to GitHub Pages";
+          id = "deployment";
+          uses = "actions/deploy-pages@v4";
+        }
+      ];
+    };
+
+    release = {
+      needs = [
+        "check"
+        "build-manifests"
+        "test-kind-cache"
+        "test-kind-nocache"
+      ];
+      runs-on = "ubuntu-latest";
+      "if" = "startsWith(github.ref, 'refs/tags/v')";
+      timeout-minutes = 30;
+      steps = bootstrap ++ [
+        # A release YAML nobody has checked is deployable is how #3 and #4
+        # reached users. Every path it names has to be fetchable, because a
+        # node can only substitute them.
+        {
+          name = "Render deployment manifest";
+          run = ''
+            nix build --show-trace --file . kubenixApply.manifestYAMLFile
+            cp result nix-csi-deployment.yaml
+          '';
+        }
+        {
+          name = "Assert the release manifest is deployable";
+          run = "nix run --file . assert-cached -- nix-csi-deployment.yaml";
+        }
+        {
+          name = "Create GitHub Release";
+          uses = "softprops/action-gh-release@v1";
+          "with" = {
+            files = "nix-csi-deployment.yaml";
+            draft = false;
+            prerelease = false;
+          };
+        }
+      ];
+    };
+  };
+}
