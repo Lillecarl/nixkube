@@ -31,9 +31,14 @@ runs:
       # Every caller carries `timeout-minutes` at the job level instead.
       uses: cachix/install-nix-action@master
       with:
-        # nixkube is the cache this repository owns and the only one it
-        # reads. It replaced nix-csi, which was the name before the module
-        # was renamed.
+        # nixkube is the cache this repository owns. It replaced nix-csi,
+        # which was the name before the module was renamed.
+        #
+        # lillecarl is the cache the other umbrella projects push to, and
+        # it is here because this repository's closure contains theirs:
+        # without it every job rebuilt nanopynix from source, which is
+        # minutes on every run of every job. A read-only substituter costs
+        # nothing when it misses.
         #
         # trusted-users, because a daemon ignores substituters and public keys
         # a non-trusted user asks for. Without it every path would come from
@@ -47,8 +52,8 @@ runs:
         extra_nix_config: |
           experimental-features = nix-command flakes
           trusted-users = root runner
-          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M=
-          substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2
+          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+          substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
   # No GitHub store cache. cachix is the cache.
   #
   # `nix-community/cache-nix-action` restored a whole /nix/store from the
