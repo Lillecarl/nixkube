@@ -759,7 +759,15 @@ rec {
     Not a check and not in CI's sandbox: the node pulls from
     registry.k8s.io and what it deploys comes from ghcr.io.
 
+    Two of them, for the two kind jobs: `test-kind-nocache` deploys
+    kubenixCI2 and `test-kind-cache` deploys kubenixCI1, which brings the
+    pynixd cache with it.  Everything else is the same, down to the job
+    lists -- ./ci/test-jobs.nix.
+
         nix run --file . ciTest.run          # no pynixd, kubenixCI2
+        nix run --file . ciTestCache.run     # pynixd, kubenixCI1
+
+    A guest takes 14 GB, so these are two runs and not one.
   */
   ciTest = pkgs.callPackage ./nix/uml/ci.nix {
     inherit sources;
@@ -768,6 +776,23 @@ rec {
     workloads = kubenixCITest;
     deployedJobs = (import ./ci/test-jobs.nix).deployed;
     assertedJobs = (import ./ci/test-jobs.nix).asserted;
+    lan = {
+      network = "nixkube-ci";
+      address = "10.105.0.1/24";
+    };
+  };
+
+  ciTestCache = pkgs.callPackage ./nix/uml/ci.nix {
+    inherit sources;
+    name = "nixkube-ci-cache";
+    instance = kubenixCI1;
+    workloads = kubenixCITest;
+    deployedJobs = (import ./ci/test-jobs.nix).deployed;
+    assertedJobs = (import ./ci/test-jobs.nix).asserted;
+    lan = {
+      network = "nixkube-ci-cache";
+      address = "10.106.0.1/24";
+    };
   };
   ci-debug = pkgs.callPackage ./pkgs/ci-debug { };
 

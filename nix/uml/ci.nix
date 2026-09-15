@@ -2,7 +2,8 @@
 
 # What the kind jobs do, on a guest instead of on a container.
 #
-#     nix run --file . ciTest.run
+#     nix run --file . ciTest.run          # test-kind-nocache
+#     nix run --file . ciTestCache.run     # test-kind-cache
 #
 # `nix/uml/default.nix` is the other cluster test and asks a different
 # question: it renders the manifest, applies it, and then breaks the node
@@ -39,9 +40,17 @@
   deployedJobs,
   assertedJobs,
   name,
+  # The guest's own segment.  Two of these tests can run at once, so each
+  # needs a network of its own -- see ./default.nix.
+  lan,
 }:
 let
   uml = import (sources.user-mode-nixos + "/lib.nix") { inherit pkgs; };
+
+  # Whether this deployment brings the pynixd cache with it, which is the
+  # difference between the two kind jobs.  Asked of the instance rather
+  # than passed in, so the two cannot disagree.
+  pynixd = instance.config.nixkube.pynixd.enable;
 in
 uml.mkTest {
   inherit name;
@@ -74,11 +83,28 @@ uml.mkTest {
         # The DaemonSet asks containerd for an NRI connection whether or
         # not containerd is listening, and gets no error when it is not.
         nri = true;
+
+        /*
+          Somewhere for pynixd's claim to land.
+
+          `pynixd` is a StatefulSet with a `volumeClaimTemplate` and no
+          `storageClassName`, so it binds against the cluster's default
+          StorageClass or it stays Pending forever. kind has one and a
+          kubeadm node has none, which is the one thing this test needs
+          that the kind job got for free.
+
+          One volume, because there is one claim.
+        */
+        persistentVolumes = if pynixd then 1 else 0;
       };
 
       boot.uml = {
         memory = "14336M";
         cpus = 4;
+        # Measured at the end of a `ciTestCache` run, which is the heavier
+        # of the two: 3.8G of 7.8G used, and pynixd's volume 8.3M of that.
+        # The test prints `df` for this reason -- raise it from a
+        # measurement, not from a guess.
         diskSize = 8192;
         /*
           The API server, reachable from the host, because kluctl runs
@@ -105,10 +131,7 @@ uml.mkTest {
             ];
           }
         ];
-        lan = {
-          network = "nixkube-ci";
-          address = "10.105.0.1/24";
-        };
+        inherit lan;
       };
 
     };
@@ -116,6 +139,6 @@ uml.mkTest {
   settings = {
     deploy = "${instance.deploymentScript}";
     deployWorkloads = "${workloads.deploymentScript}";
-    inherit deployedJobs assertedJobs;
+    inherit deployedJobs assertedJobs pynixd;
   };
 }

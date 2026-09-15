@@ -21,7 +21,14 @@ import subprocess
 import tempfile
 
 from uml_runner import run_test
-from uml_runner.cluster import KUBE_DNS, KUBE_PROXY, bring_up, kubectl, until
+from uml_runner.cluster import (
+    KUBE_DNS,
+    KUBE_PROXY,
+    bring_up,
+    kubectl,
+    until,
+    wait_for_pods,
+)
 
 # kubeadm gives the API server a certificate for the addresses the node
 # has. The host reaches it on a 127.0.0.x the runner picks when the guest
@@ -116,6 +123,22 @@ async def test(vms):
         await until("the node DaemonSet", rolled_out, 300, cp)
         print("[test] the node DaemonSet rolled out")
 
+        if settings["pynixd"]:
+            # The `Wait for nix-csi cache pod` step of `test-kind-cache`.
+            #
+            # pynixd is a StatefulSet whose claim names no StorageClass, so
+            # it only runs on a cluster with a default one -- see
+            # `services.uml-k8s.persistentVolumes` in nix/uml/ci.nix. The
+            # claim is reported beside the pod because a Pending pod and an
+            # unbound claim look the same from here.
+            await wait_for_pods(
+                cp,
+                "--selector app.kubernetes.io/component=pynixd",
+                namespace="nixkube",
+            )
+            claims = await kubectl(cp, "get pvc --namespace nixkube --no-headers")
+            print(f"[test] the pynixd cache is ready, on {claims.strip()}")
+
         run(settings["deployWorkloads"], kubeconfig, "--yes")
         print("[test] the test workloads are deployed")
 
@@ -151,6 +174,17 @@ async def test(vms):
             timeout=180,
         )
         print("[test] the jobs are gone and their pods with them")
+
+        # What `boot.uml.diskSize` has to cover, measured rather than
+        # guessed: the images this node pulled, every store path the jobs
+        # asked for, and pynixd's volume when there is one. A runner has
+        # 14 GB for the whole guest.
+        print(
+            "[test] node disk\n"
+            + await cp.succeed(
+                "df -h /; du -sh /var/lib/uml-storage 2>/dev/null || true"
+            )
+        )
 
 
 run_test(test)
