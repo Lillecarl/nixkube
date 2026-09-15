@@ -33,8 +33,8 @@ ghalib.evalWorkflow {
     # keys are the ones ci.nix uses and cannot drift from them -- which is
     # what issue #33 was about, when this step wrote them out again.
     #
-    # No `access-tokens`. This workflow fetches nothing from github.com that
-    # needs a token, and the rate limit has never been what stopped it.
+    # No `access-tokens` here: ghanix's installer sets one by default now,
+    # and this workflow has no reason to hold a different value.
     ghanix = lib.mkMerge [
       bootstrap
       {
