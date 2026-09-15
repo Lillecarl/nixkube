@@ -28,6 +28,25 @@ let
     setupNix
   ];
 
+  /*
+    passt isolates itself with `unshare(CLONE_NEWUSER)` before it serves the
+    guest's uplink, and Ubuntu's AppArmor policy denies an unprivileged user
+    namespace by default. So without this passt exits at startup, the guest
+    boots with a link-local address on vec0 and no route, and says so several
+    minutes later as `lookup registry.k8s.io: no such host`.
+
+    That reads as a DNS bug and is not one. Measured with strace; issue #35
+    has the evidence, and user-mode-nixos `ci/lib.nix` carries the same step
+    for the same reason.
+  */
+  userNamespaces = {
+    name = "Allow the unprivileged user namespace passt needs";
+    run = ''
+      sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      unshare --user --map-root-user true
+    '';
+  };
+
   # /dev/kvm exists on an x64 runner, and the runner user is not in the
   # `kvm` group -- so this is not optional for a job that boots a guest.
   # Without it QEMU exits with "Could not access KVM kernel module:
@@ -94,6 +113,7 @@ let
       runs-on = "ubuntu-latest";
       timeout-minutes = 60;
       steps = bootstrap ++ [
+        userNamespaces
         openKvm
         {
           name = "Deploy and test ${what}, on a guest";
@@ -481,13 +501,15 @@ ghalib.evalWorkflow {
       already on the machine that built it -- which is what lets this job
       run with no `needs` and no published image.
 
-      `ubuntu-latest` because it is x64, and `openKvm` because the runner
-      user cannot open /dev/kvm without it.
+      `ubuntu-latest` because it is x64, `openKvm` because the runner user
+      cannot open /dev/kvm without it, and `userNamespaces` because passt
+      cannot start without one.
     */
     test-qemu = {
       runs-on = "ubuntu-latest";
       timeout-minutes = 60;
       steps = bootstrap ++ [
+        userNamespaces
         openKvm
         {
           name = "Run the node test as a virtual machine";

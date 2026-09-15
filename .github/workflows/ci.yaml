@@ -214,6 +214,8 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
+      - name: Allow the unprivileged user namespace passt needs
+        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nunshare --user --map-root-user true\n"
       - name: Let the runner user open /dev/kvm
         run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
       - name: Run the node test as a virtual machine
@@ -227,6 +229,8 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
+      - name: Allow the unprivileged user namespace passt needs
+        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nunshare --user --map-root-user true\n"
       - name: Let the runner user open /dev/kvm
         run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
       - name: Deploy and test without the pynixd cache, on a guest
@@ -240,6 +244,8 @@ jobs:
         uses: actions/checkout@main
       - name: Setup Nix environment
         uses: ./.github/actions/setup-nix
+      - name: Allow the unprivileged user namespace passt needs
+        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nunshare --user --map-root-user true\n"
       - name: Let the runner user open /dev/kvm
         run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
       - name: Deploy and test with the pynixd cache, on a guest
