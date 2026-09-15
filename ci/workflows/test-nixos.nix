@@ -3,7 +3,10 @@
 #
 # It runs on `cidev` only. `ci.yaml` excludes that branch, so a push there
 # runs this and nothing else.
-{ ghalib, ... }:
+{ lib, ghalib, ... }:
+let
+  inherit (import ./bootstrap.nix { inherit lib; }) bootstrap;
+in
 ghalib.evalWorkflow {
   on = {
     push.branches = [ "cidev" ];
@@ -24,37 +27,24 @@ ghalib.evalWorkflow {
     # holds a runner for GitHub's default 360 minutes before it gives up, and
     # a nixos test that hangs in a VM is exactly the shape that does.
     timeout-minutes = 60;
+
+    # The shared bootstrap, and the one setting only this workflow needs.
+    # They merge rather than replace, so the substituters and the public
+    # keys are the ones ci.nix uses and cannot drift from them -- which is
+    # what issue #33 was about, when this step wrote them out again.
+    #
+    # No `access-tokens`. This workflow fetches nothing from github.com that
+    # needs a token, and the rate limit has never been what stopped it.
+    ghanix = lib.mkMerge [
+      bootstrap
+      {
+        # A nixos test starts VMs, which the strict sandbox will not let a
+        # build do.
+        nix.install.settings.sandbox = "relaxed";
+      }
+    ];
+
     steps = [
-      {
-        name = "Checkout";
-        uses = "actions/checkout@main";
-      }
-      # cachix/install-nix-action, which installs a daemon. A single-user nix
-      # builds under the runner's TMPDIR, so what a derivation can do depends
-      # on where the checkout happens to be. See nixkube issue #23.
-      #
-      # Not the shared setup-nix action: this workflow needs `access-tokens`
-      # and `sandbox = relaxed`, which that action does not take. It does need
-      # `trusted-users`, because a daemon ignores substituters and public keys
-      # an untrusted user asks for -- without it every path here would come
-      # from cache.nixos.org and nix-csi would go unread.
-      #
-      # The keys and substituters here are written again in that action, and
-      # nothing makes the two agree. See issue #33. They cannot be one value
-      # yet: the action is YAML that nothing renders, and ghanix describes
-      # workflows rather than actions.
-      {
-        name = "Install Nix";
-        uses = "cachix/install-nix-action@master";
-        "with".extra_nix_config = ''
-          experimental-features = nix-command flakes
-          trusted-users = root runner
-          access-tokens = github.com=''${{ secrets.GITHUB_TOKEN }}
-          trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M=
-          substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2
-          sandbox = relaxed
-        '';
-      }
       {
         name = "Build nixos test driver";
         run = "nix build --file . nixosTests.containerd.driverInteractive";

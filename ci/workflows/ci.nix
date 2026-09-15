@@ -7,65 +7,12 @@
 # ghanix is the schema. It takes `lib` and nothing else, which is what lets
 # this repository use it while pinning its own nixpkgs. See issue #13.
 #
-# Every step here is written out. ghanix ships `steps.checkout` and
-# `steps.installNix` constructors, and neither fits: this repository installs
-# Nix through its own composite action, which carries the substituters and
-# the `trusted-users` setting that a bare installer would not.
 { lib, ghalib }:
 let
-  checkout = {
-    name = "Checkout";
-    uses = "actions/checkout@main";
-  };
-
-  setupNix = {
-    name = "Setup Nix environment";
-    uses = "./.github/actions/setup-nix";
-  };
-
-  bootstrap = [
-    checkout
-    setupNix
-  ];
-
-  /*
-    passt isolates itself with `unshare(CLONE_NEWUSER)` before it serves the
-    guest's uplink, and Ubuntu's AppArmor policy denies an unprivileged user
-    namespace by default. So without this passt exits at startup, the guest
-    boots with a link-local address on vec0 and no route, and says so several
-    minutes later as `lookup registry.k8s.io: no such host`.
-
-    That reads as a DNS bug and is not one. Measured with strace; issue #35
-    has the evidence, and user-mode-nixos `ci/lib.nix` carries the same step
-    for the same reason.
-  */
-  userNamespaces = {
-    name = "Allow the unprivileged user namespace passt needs";
-    run = ''
-      sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      unshare --user --map-root-user true
-    '';
-  };
-
-  # /dev/kvm exists on an x64 runner, and the runner user is not in the
-  # `kvm` group -- so this is not optional for a job that boots a guest.
-  # Without it QEMU exits with "Could not access KVM kernel module:
-  # Permission denied".
-  #
-  # x64 only. GitHub's ARM runners have no /dev/kvm at all, and this backend
-  # asks for `accel=kvm` and never `accel=kvm:tcg`: a silent fall back to
-  # emulation would turn a twenty-minute cluster test into a timeout nobody
-  # could explain.
-  openKvm = {
-    name = "Let the runner user open /dev/kvm";
-    run = ''
-      echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-        | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-      sudo udevadm control --reload-rules
-      sudo udevadm trigger --name-match=kvm
-      ls -l /dev/kvm
-    '';
-  };
+  # The checkout, the Nix install and the runner permissions every job
+  # needs, as `ghanix` options rather than as steps written out. Shared
+  # with test-nixos.nix; see that file for why it is a file.
+  inherit (import ./bootstrap.nix { inherit lib; }) bootstrap guest;
 
   # Publish from develop and tags only. The image tags are named from
   # versions, not from the commit, so a branch that changes neither version
@@ -112,9 +59,8 @@ let
       needs = "build-manifests";
       runs-on = "ubuntu-latest";
       timeout-minutes = 60;
-      steps = bootstrap ++ [
-        userNamespaces
-        openKvm
+      ghanix = guest;
+      steps = [
         {
           name = "Deploy and test ${what}, on a guest";
           run = "nix run --file . ${attr}.run";
@@ -135,86 +81,85 @@ let
       needs = "build-manifests";
       runs-on = "ubuntu-latest";
       timeout-minutes = 45;
-      steps =
-        bootstrap
-        ++ [
-          {
-            name = "Create Kind cluster";
-            uses = "helm/kind-action@main";
-          }
-          {
-            name = "Clean runner";
-            run = cleanRunner;
-          }
-          {
-            name = "Deploy nix-csi";
-            run = ''
-              nix build --show-trace --file . ${instance}.deploymentScript
-              ./result/bin/kubenixDeploy --yes
-            '';
-          }
-          {
-            name = "Wait for nix-csi node daemonset";
-            run = ''
-              kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s
-            '';
-          }
-        ]
-        ++ extraWaits
-        ++ [
-          {
-            name = "Deploy test workloads";
-            run = ''
-              nix build --show-trace --file . kubenixCITest.deploymentScript
-              ./result/bin/kubenixDeploy --yes
-            '';
-          }
-          {
-            name = "Wait for test workload";
-            run = ''
-              kubectl wait --for=condition=complete ${
-                lib.concatMapStringsSep " " (j: "job/${j}") assertedJobs
-              } -n nixkube --timeout=300s
-            '';
-          }
-          # A Job here asks the driver for something that cannot be built:
-          # a store path of zeroes, a flake that is not there, an
-          # expression that does not evaluate. One that succeeded would be
-          # a driver that mounted the wrong thing quietly.
-          #
-          # Asked once, after the waits above, rather than waited for:
-          # "has not succeeded" is true of a Job that failed and of one
-          # still trying, so there is nothing to poll for.
-          {
-            name = "Check the invalid workloads were refused";
-            run = ''
-              for job in ${lib.concatStringsSep " " rejectedJobs}; do
-                ok=$(kubectl get job "$job" -n nixkube -o jsonpath='{.status.succeeded}')
-                if [ -n "$ok" ] && [ "$ok" != 0 ]; then
-                  echo "$job succeeded, and it asks for something that cannot be built" >&2
-                  exit 1
-                fi
-              done
-            '';
-          }
-          {
-            name = "Delete jobs and verify CSI cleanup";
-            run = ''
-              kubectl delete job ${lib.concatStringsSep " " deployedJobs} -n nixkube
-              kubectl wait --for=delete pod -l "job-name in (${lib.concatStringsSep "," deployedJobs})" -n nixkube --timeout=120s
-            '';
-          }
-          # `|| true` so a debug step never replaces the real failure. No
-          # `2>/dev/null` beside it: that hid why ci-debug itself failed, and
-          # a debug tool that fails silently is worse than none. Issue #12
-          # was this exact shape on push-ci2. See #32.
-          {
-            name = "Debug on failure";
-            "if" = "failure()";
-            env.DS_API = "\${{ secrets.DS_API }}";
-            run = "nix run --file . ci-debug || true";
-          }
-        ];
+      ghanix = bootstrap;
+      steps = [
+        {
+          name = "Create Kind cluster";
+          uses = "helm/kind-action@main";
+        }
+        {
+          name = "Clean runner";
+          run = cleanRunner;
+        }
+        {
+          name = "Deploy nix-csi";
+          run = ''
+            nix build --show-trace --file . ${instance}.deploymentScript
+            ./result/bin/kubenixDeploy --yes
+          '';
+        }
+        {
+          name = "Wait for nix-csi node daemonset";
+          run = ''
+            kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s
+          '';
+        }
+      ]
+      ++ extraWaits
+      ++ [
+        {
+          name = "Deploy test workloads";
+          run = ''
+            nix build --show-trace --file . kubenixCITest.deploymentScript
+            ./result/bin/kubenixDeploy --yes
+          '';
+        }
+        {
+          name = "Wait for test workload";
+          run = ''
+            kubectl wait --for=condition=complete ${
+              lib.concatMapStringsSep " " (j: "job/${j}") assertedJobs
+            } -n nixkube --timeout=300s
+          '';
+        }
+        # A Job here asks the driver for something that cannot be built:
+        # a store path of zeroes, a flake that is not there, an
+        # expression that does not evaluate. One that succeeded would be
+        # a driver that mounted the wrong thing quietly.
+        #
+        # Asked once, after the waits above, rather than waited for:
+        # "has not succeeded" is true of a Job that failed and of one
+        # still trying, so there is nothing to poll for.
+        {
+          name = "Check the invalid workloads were refused";
+          run = ''
+            for job in ${lib.concatStringsSep " " rejectedJobs}; do
+              ok=$(kubectl get job "$job" -n nixkube -o jsonpath='{.status.succeeded}')
+              if [ -n "$ok" ] && [ "$ok" != 0 ]; then
+                echo "$job succeeded, and it asks for something that cannot be built" >&2
+                exit 1
+              fi
+            done
+          '';
+        }
+        {
+          name = "Delete jobs and verify CSI cleanup";
+          run = ''
+            kubectl delete job ${lib.concatStringsSep " " deployedJobs} -n nixkube
+            kubectl wait --for=delete pod -l "job-name in (${lib.concatStringsSep "," deployedJobs})" -n nixkube --timeout=120s
+          '';
+        }
+        # `|| true` so a debug step never replaces the real failure. No
+        # `2>/dev/null` beside it: that hid why ci-debug itself failed, and
+        # a debug tool that fails silently is worse than none. Issue #12
+        # was this exact shape on push-ci2. See #32.
+        {
+          name = "Debug on failure";
+          "if" = "failure()";
+          env.DS_API = "\${{ secrets.DS_API }}";
+          run = "nix run --file . ci-debug || true";
+        }
+      ];
     };
 in
 # No `name`. GitHub shows the file path instead, which is what this workflow
@@ -268,7 +213,8 @@ ghalib.evalWorkflow {
       # build that hangs then holds a runner for six hours. That is what issue
       # #9 cost, twice per run. Every job here carries a bound for that reason.
       timeout-minutes = 30;
-      steps = bootstrap ++ [
+      ghanix = bootstrap;
+      steps = [
         # `nix develop`, not `nix-shell --run`. To run a command, nix-shell
         # needs an interactive bash, and it gets one by evaluating its own
         # built-in `(import <nixpkgs> {}).bashInteractive`. Nothing in this
@@ -328,7 +274,8 @@ ghalib.evalWorkflow {
       # Same reason as build-arm64 below, lower bound: this one has never been
       # the slow half.
       timeout-minutes = 45;
-      steps = bootstrap ++ [
+      ghanix = bootstrap;
+      steps = [
         # --print-build-logs, because without it a stuck build is silent.
         #
         # Measured on run 34477979957: both builders printed their last line
@@ -377,7 +324,8 @@ ghalib.evalWorkflow {
       # 90 minutes is well above a healthy run and well below the point where
       # a stuck job costs a day of pipeline.
       timeout-minutes = 90;
-      steps = bootstrap ++ [
+      ghanix = bootstrap;
+      steps = [
         # One derivation at a time, with every core. This is insurance, not
         # the fix for what killed this job.
         #
@@ -386,7 +334,7 @@ ghalib.evalWorkflow {
         # server and runs its suite, and four more run grpcio-tools. That
         # would be a plausible cause and is not this one: the job stalls while
         # *fetching* from cachix, before it builds anything. See issue #21 and
-        # the note in the setup-nix action.
+        # the note in ./bootstrap.nix.
         #
         # Kept because this runner has died twice, and the next path that
         # lands uncached will be built here rather than fetched.
@@ -422,7 +370,8 @@ ghalib.evalWorkflow {
       ];
       runs-on = "ubuntu-latest";
       timeout-minutes = 30;
-      steps = bootstrap ++ [
+      ghanix = bootstrap;
+      steps = [
         # Both build jobs have passed, so every store path the deployment
         # names should now be fetchable. Assert it before assembling the index
         # rather than after, because the index is what consumers pull.
@@ -508,9 +457,8 @@ ghalib.evalWorkflow {
     test-qemu = {
       runs-on = "ubuntu-latest";
       timeout-minutes = 60;
-      steps = bootstrap ++ [
-        userNamespaces
-        openKvm
+      ghanix = guest;
+      steps = [
         {
           name = "Run the node test as a virtual machine";
           run = "nix run --file . umlTest.run";
@@ -565,28 +513,20 @@ ghalib.evalWorkflow {
       "if" = "github.ref == 'refs/heads/develop'";
       runs-on = "ubuntu-24.04";
       timeout-minutes = 30;
-      steps = [
-        { uses = "actions/checkout@v4"; }
-        # The same action as every other job, rather than an installer of its
-        # own. This was the last `nix-quick-install-action` in the workflow, so
-        # docs were the one thing built by a single-user nix with its own
-        # substituter list to keep in step.
-        #
-        # A bare installer swap would have been wrong here. A daemon ignores
-        # substituters and public keys that an untrusted user asks for, so
-        # `trusted-users = root runner` is what keeps the caches readable at
-        # all -- and that setting lives in the action.
-        setupNix
-        # nixkube is the cache this repository owns, and the one every other
-        # job pushes to. A push to `lillecarl` answered 403 "You're not
-        # authorized to access binary cache lillecarl."
+      # `nixkube` and not `lillecarl`: this is the cache the repository owns
+      # and the one every other job pushes to. A push to `lillecarl`
+      # answered 403 "You're not authorized to access binary cache
+      # lillecarl."
+      ghanix = lib.mkMerge [
+        bootstrap
         {
-          uses = "cachix/cachix-action@v15";
-          "with" = {
+          nix.cachix = {
+            enable = true;
             name = "nixkube";
-            authToken = "\${{ secrets.CACHIX_AUTH_TOKEN }}";
           };
         }
+      ];
+      steps = [
         {
           name = "Build documentation";
           run = "nix build --file . nixkube-docs --out-link result --print-build-logs --print-out-paths";
@@ -645,7 +585,8 @@ ghalib.evalWorkflow {
       runs-on = "ubuntu-latest";
       "if" = "startsWith(github.ref, 'refs/tags/v')";
       timeout-minutes = 30;
-      steps = bootstrap ++ [
+      ghanix = bootstrap;
+      steps = [
         # A release YAML nobody has checked is deployable is how #3 and #4
         # reached users. Every path it names has to be fetchable, because a
         # node can only substitute them.

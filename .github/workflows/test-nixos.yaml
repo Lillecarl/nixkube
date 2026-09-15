@@ -9,12 +9,12 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Install Nix
+      - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\ntrusted-users = root runner\naccess-tokens = github.com=${{ secrets.GITHUB_TOKEN }}\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M=\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2\nsandbox = relaxed\n"
+          extra_nix_config: "experimental-features = nix-command flakes\nsandbox = relaxed\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Build nixos test driver
         run: nix build --file . nixosTests.containerd.driverInteractive
       - name: Start nixos test (background)

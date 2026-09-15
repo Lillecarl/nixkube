@@ -12,10 +12,12 @@ jobs:
   build-amd64:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Build and push environments
         run: "unlink nix-envs || true\nnix build --show-trace --print-build-logs --file . push --out-link nix-envs\n./nix-envs/bin/push\n"
       - name: Build amd64 nix image
@@ -27,10 +29,12 @@ jobs:
   build-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Build and push environments
         run: "unlink nix-envs || true\nnix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . push --out-link nix-envs\n./nix-envs/bin/push\n"
       - name: Build arm64 nix image
@@ -45,10 +49,12 @@ jobs:
       - build-arm64
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Assert both architectures' closures are fetchable
         run: "nix build --show-trace --file . kubenixApply.manifestJSONFile --out-link manifest\nnix run --file . assert-cached -- manifest\n"
       - name: Build the index and scratch publishers
@@ -69,10 +75,12 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Run type checker
         run: nix develop --file shell.nix --command pyright pkgs/nixkube/src
       - name: Run the checks
@@ -86,13 +94,18 @@ jobs:
     if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
-      - uses: cachix/cachix-action@v15
+      - timeout-minutes: 10
+        uses: actions/checkout@main
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+      - timeout-minutes: 15
+        uses: cachix/cachix-action@master
         with:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           name: nixkube
+          useDaemon: false
       - name: Build documentation
         run: nix build --file . nixkube-docs --out-link result --print-build-logs --print-out-paths
       - name: Verify docs closure
@@ -130,10 +143,12 @@ jobs:
       - test-kind-nocache
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Render deployment manifest
         run: "nix build --show-trace --file . kubenixApply.manifestYAMLFile\ncp result nix-csi-deployment.yaml\n"
       - name: Assert the release manifest is deployable
@@ -149,10 +164,12 @@ jobs:
     needs: build-manifests
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Create Kind cluster
         uses: helm/kind-action@main
       - name: Clean runner
@@ -181,10 +198,12 @@ jobs:
     needs: build-manifests
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Create Kind cluster
         uses: helm/kind-action@main
       - name: Clean runner
@@ -210,14 +229,18 @@ jobs:
   test-qemu:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
-      - name: Allow the unprivileged user namespace passt needs
-        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nunshare --user --map-root-user true\n"
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+      - name: Allow the unprivileged user namespaces Nix and passt need
+        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nsudo sysctl -w kernel.unprivileged_userns_clone=1\nunshare --user --map-root-user --mount --pid --fork --mount-proc true\n"
+        timeout-minutes: 5
       - name: Let the runner user open /dev/kvm
         run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
+        timeout-minutes: 5
       - name: Run the node test as a virtual machine
         run: nix run --file . umlTest.run
     timeout-minutes: 60
@@ -225,14 +248,18 @@ jobs:
     needs: build-manifests
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
-      - name: Allow the unprivileged user namespace passt needs
-        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nunshare --user --map-root-user true\n"
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+      - name: Allow the unprivileged user namespaces Nix and passt need
+        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nsudo sysctl -w kernel.unprivileged_userns_clone=1\nunshare --user --map-root-user --mount --pid --fork --mount-proc true\n"
+        timeout-minutes: 5
       - name: Let the runner user open /dev/kvm
         run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
+        timeout-minutes: 5
       - name: Deploy and test without the pynixd cache, on a guest
         run: nix run --file . ciTest.run
     timeout-minutes: 60
@@ -240,14 +267,18 @@ jobs:
     needs: build-manifests
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Setup Nix environment
-        uses: ./.github/actions/setup-nix
-      - name: Allow the unprivileged user namespace passt needs
-        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nunshare --user --map-root-user true\n"
+      - timeout-minutes: 15
+        uses: cachix/install-nix-action@master
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+      - name: Allow the unprivileged user namespaces Nix and passt need
+        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nsudo sysctl -w kernel.unprivileged_userns_clone=1\nunshare --user --map-root-user --mount --pid --fork --mount-proc true\n"
+        timeout-minutes: 5
       - name: Let the runner user open /dev/kvm
         run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
+        timeout-minutes: 5
       - name: Deploy and test with the pynixd cache, on a guest
         run: nix run --file . ciTestCache.run
     timeout-minutes: 60
