@@ -531,21 +531,9 @@ ghalib.evalWorkflow {
           name = "Build documentation";
           run = "nix build --file . nixkube-docs --out-link result --print-build-logs --print-out-paths";
         }
-        {
-          name = "Verify docs closure";
-          run = "nix store verify --recursive --no-trust \"$(readlink -f result)\"";
-        }
-        {
-          name = "Prepare Pages artifact";
-          run = ''
-            mkdir -p public
-            cp -r --no-preserve=mode,ownership result/. public/
-          '';
-        }
-        {
-          uses = "actions/upload-pages-artifact@v3";
-          "with".path = "public";
-        }
+        (ghalib.steps.verifyClosure { name = "Verify docs closure"; })
+        (ghalib.steps.preparePages { })
+        (ghalib.steps.uploadPages { })
       ];
     };
 
@@ -566,13 +554,8 @@ ghalib.evalWorkflow {
         group = "pages";
         cancel-in-progress = false;
       };
-      steps = [
-        {
-          name = "Deploy to GitHub Pages";
-          id = "deployment";
-          uses = "actions/deploy-pages@v4";
-        }
-      ];
+      # `steps.deployment.outputs.page_url` above is what names the id.
+      steps = [ (ghalib.steps.deployPages { }) ];
     };
 
     release = {

@@ -110,9 +110,12 @@ jobs:
         run: nix build --file . nixkube-docs --out-link result --print-build-logs --print-out-paths
       - name: Verify docs closure
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
-      - name: Prepare Pages artifact
+        timeout-minutes: 15
+      - name: Prepare the Pages artifact
         run: "mkdir -p public\ncp -r --no-preserve=mode,ownership result/. public/\n"
-      - uses: actions/upload-pages-artifact@v3
+        timeout-minutes: 5
+      - timeout-minutes: 10
+        uses: actions/upload-pages-artifact@main
         with:
           path: public
     timeout-minutes: 30
@@ -132,7 +135,8 @@ jobs:
     steps:
       - id: deployment
         name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+        timeout-minutes: 10
+        uses: actions/deploy-pages@main
     timeout-minutes: 15
   release:
     if: startsWith(github.ref, 'refs/tags/v')
