@@ -17,7 +17,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Build and push environments
         run: "unlink nix-envs || true\nnix build --show-trace --print-build-logs --file . push --out-link nix-envs\n./nix-envs/bin/push\n"
       - name: Build amd64 nix image
@@ -34,7 +34,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Build and push environments
         run: "unlink nix-envs || true\nnix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . push --out-link nix-envs\n./nix-envs/bin/push\n"
       - name: Build arm64 nix image
@@ -54,7 +54,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Assert both architectures' closures are fetchable
         run: "nix build --show-trace --file . kubenixApply.manifestJSONFile --out-link manifest\nnix run --file . assert-cached -- manifest\n"
       - name: Build the index and scratch publishers
@@ -80,7 +80,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Run type checker
         run: nix develop --file shell.nix --command pyright pkgs/nixkube/src
       - name: Run the checks
@@ -99,7 +99,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - timeout-minutes: 15
         uses: cachix/cachix-action@master
         with:
@@ -152,7 +152,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Render deployment manifest
         run: "nix build --show-trace --file . kubenixApply.manifestYAMLFile\ncp result nix-csi-deployment.yaml\n"
       - name: Assert the release manifest is deployable
@@ -173,7 +173,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Create Kind cluster
         uses: helm/kind-action@main
       - name: Clean runner
@@ -207,7 +207,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Create Kind cluster
         uses: helm/kind-action@main
       - name: Clean runner
@@ -238,7 +238,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Allow the unprivileged user namespaces Nix and passt need
         run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nsudo sysctl -w kernel.unprivileged_userns_clone=1\nunshare --user --map-root-user --mount --pid --fork --mount-proc true\n"
         timeout-minutes: 5
@@ -257,7 +257,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Allow the unprivileged user namespaces Nix and passt need
         run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nsudo sysctl -w kernel.unprivileged_userns_clone=1\nunshare --user --map-root-user --mount --pid --fork --mount-proc true\n"
         timeout-minutes: 5
@@ -276,7 +276,7 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "experimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
       - name: Allow the unprivileged user namespaces Nix and passt need
         run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nsudo sysctl -w kernel.unprivileged_userns_clone=1\nunshare --user --map-root-user --mount --pid --fork --mount-proc true\n"
         timeout-minutes: 5
