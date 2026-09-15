@@ -39,6 +39,7 @@
   # Both lists come from ci/workflows/ci.nix so the two cannot drift.
   deployedJobs,
   assertedJobs,
+  rejectedJobs,
   name,
   # The guest's own segment.  Two of these tests can run at once, so each
   # needs a network of its own -- see ./default.nix.
@@ -139,6 +140,11 @@ uml.mkTest {
   settings = {
     deploy = "${instance.deploymentScript}";
     deployWorkloads = "${workloads.deploymentScript}";
-    inherit deployedJobs assertedJobs pynixd;
+    inherit
+      deployedJobs
+      assertedJobs
+      rejectedJobs
+      pynixd
+      ;
   };
 }

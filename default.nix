@@ -769,13 +769,19 @@ rec {
 
     A guest takes 14 GB, so these are two runs and not one.
   */
+  # What the test workloads are, and what each one is supposed to do.
+  # ci/workflows/ci.nix reads the same file, so the kind jobs and the guest
+  # tests cannot disagree about which Jobs exist.
+  testJobs = import ./ci/test-jobs.nix;
+
   ciTest = pkgs.callPackage ./nix/uml/ci.nix {
     inherit sources;
     name = "nixkube-ci";
     instance = kubenixCI2;
     workloads = kubenixCITest;
-    deployedJobs = (import ./ci/test-jobs.nix).deployed;
-    assertedJobs = (import ./ci/test-jobs.nix).asserted;
+    deployedJobs = testJobs.deployed;
+    assertedJobs = testJobs.asserted;
+    rejectedJobs = testJobs.rejected;
     lan = {
       network = "nixkube-ci";
       address = "10.105.0.1/24";
@@ -787,8 +793,9 @@ rec {
     name = "nixkube-ci-cache";
     instance = kubenixCI1;
     workloads = kubenixCITest;
-    deployedJobs = (import ./ci/test-jobs.nix).deployed;
-    assertedJobs = (import ./ci/test-jobs.nix).asserted;
+    deployedJobs = testJobs.deployed;
+    assertedJobs = testJobs.asserted;
+    rejectedJobs = testJobs.rejected;
     lan = {
       network = "nixkube-ci-cache";
       address = "10.106.0.1/24";

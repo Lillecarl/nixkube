@@ -166,9 +166,11 @@ jobs:
       - name: Deploy test workloads
         run: "nix build --show-trace --file . kubenixCITest.deploymentScript\n./result/bin/kubenixDeploy --yes\n"
       - name: Wait for test workload
-        run: "kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s\n"
+        run: "kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/commandpath-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s\n"
+      - name: Check the invalid workloads were refused
+        run: "for job in invalid-storepath-hello invalid-flake-hello invalid-expr-hello; do\n  ok=$(kubectl get job \"$job\" -n nixkube -o jsonpath='{.status.succeeded}')\n  if [ -n \"$ok\" ] && [ \"$ok\" != 0 ]; then\n    echo \"$job succeeded, and it asks for something that cannot be built\" >&2\n    exit 1\n  fi\ndone\n"
       - name: Delete jobs and verify CSI cleanup
-        run: "kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl invalid-storepath-hello invalid-flake-hello invalid-expr-hello nri-hello-ro nri-hello-rw -n nixkube\nkubectl wait --for=delete pod -l \"job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello,nri-hello-ro,nri-hello-rw)\" -n nixkube --timeout=120s\n"
+        run: "kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl nri-hello-ro nri-hello-rw invalid-storepath-hello invalid-flake-hello invalid-expr-hello -n nixkube\nkubectl wait --for=delete pod -l \"job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,nri-hello-ro,nri-hello-rw,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello)\" -n nixkube --timeout=120s\n"
       - env:
           DS_API: ${{ secrets.DS_API }}
         if: failure()
@@ -194,9 +196,11 @@ jobs:
       - name: Deploy test workloads
         run: "nix build --show-trace --file . kubenixCITest.deploymentScript\n./result/bin/kubenixDeploy --yes\n"
       - name: Wait for test workload
-        run: "kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s\n"
+        run: "kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/commandpath-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s\n"
+      - name: Check the invalid workloads were refused
+        run: "for job in invalid-storepath-hello invalid-flake-hello invalid-expr-hello; do\n  ok=$(kubectl get job \"$job\" -n nixkube -o jsonpath='{.status.succeeded}')\n  if [ -n \"$ok\" ] && [ \"$ok\" != 0 ]; then\n    echo \"$job succeeded, and it asks for something that cannot be built\" >&2\n    exit 1\n  fi\ndone\n"
       - name: Delete jobs and verify CSI cleanup
-        run: "kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl invalid-storepath-hello invalid-flake-hello invalid-expr-hello nri-hello-ro nri-hello-rw -n nixkube\nkubectl wait --for=delete pod -l \"job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello,nri-hello-ro,nri-hello-rw)\" -n nixkube --timeout=120s\n"
+        run: "kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl nri-hello-ro nri-hello-rw invalid-storepath-hello invalid-flake-hello invalid-expr-hello -n nixkube\nkubectl wait --for=delete pod -l \"job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,nri-hello-ro,nri-hello-rw,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello)\" -n nixkube --timeout=120s\n"
       - env:
           DS_API: ${{ secrets.DS_API }}
         if: failure()

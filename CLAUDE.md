@@ -131,7 +131,9 @@ either one alone fails the build.
 - `test-kind-cache` and `test-kind-nocache` — deploy `kubenixCI1` and
   `kubenixCI2` to a Kind cluster and run the test workloads from
   `kubenix/ci/test-workloads.nix`. The two differ in whether pynixd is
-  enabled, which is what makes them worth running both.
+  enabled, which is what makes them worth running both. Which Jobs have to
+  finish, and which have to not, is `ci/test-jobs.nix` — one file, because
+  the guest tests below read the same lists.
 - `test-qemu` — the node test of `nix/uml`, as a virtual machine on the
   runner. No cluster to create and no registry: the guest's store is the
   runner's.

@@ -144,17 +144,20 @@ async def test(vms):
 
         asserted = settings["assertedJobs"]
 
-        async def complete():
+        async def succeeded() -> set[str]:
             out = await kubectl(
                 cp,
                 "get jobs --namespace nixkube --no-headers"
                 " --output custom-columns=NAME:.metadata.name,OK:.status.succeeded",
             )
-            done = {
+            return {
                 row.split()[0]
                 for row in out.splitlines()
                 if len(row.split()) > 1 and row.split()[1] not in ("<none>", "0")
             }
+
+        async def complete():
+            done = await succeeded()
             missing = [job for job in asserted if job not in done]
             return (
                 not missing,
@@ -163,6 +166,24 @@ async def test(vms):
 
         await until(f"{len(asserted)} jobs to complete", complete, 600, cp)
         print(f"[test] {', '.join(asserted)} all completed")
+
+        # And the ones that must not finish -- see ci/test-jobs.nix.
+        #
+        # Each asks the driver for something that cannot be built, so a
+        # success here is a driver that mounted the wrong thing quietly.
+        #
+        # Asked once, after the others are done, rather than waited for:
+        # "has not succeeded" is true of a Job that failed and of one that
+        # is still trying, so there is nothing to poll. It can miss a
+        # success that arrives later; it cannot report one that never came.
+        rejected = settings["rejectedJobs"]
+        wrong = sorted(await succeeded() & set(rejected))
+        assert not wrong, (
+            f"{', '.join(wrong)} succeeded, and each of them asks for"
+            " something that cannot be built:\n"
+            + await kubectl(cp, "get jobs --namespace nixkube")
+        )
+        print(f"[test] {', '.join(rejected)} were all refused")
 
         deployed = " ".join(settings["deployedJobs"])
         await kubectl(cp, f"delete job --namespace nixkube {deployed}", timeout=300)

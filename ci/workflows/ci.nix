@@ -76,12 +76,13 @@ let
     "scratchImage.push"
   ];
 
-  # Every test workload the kind jobs deploy, and the ones they wait for.
-  # ../test-jobs.nix says what the difference between the two means; it is
-  # a file because nix/uml/ci.nix reads the same lists.
+  # Every test workload the kind jobs deploy, the ones that have to finish
+  # and the ones that have to not. ../test-jobs.nix says what each list
+  # means; it is a file because nix/uml/ci.nix reads the same three.
   testJobs = import ../test-jobs.nix;
   deployedJobs = testJobs.deployed;
   assertedJobs = testJobs.asserted;
+  rejectedJobs = testJobs.rejected;
 
   # The same two deployments as the kind jobs, on a guest that boots on the
   # runner.  The test itself is nix/uml/ci.py, so a developer runs exactly
@@ -154,6 +155,26 @@ let
               kubectl wait --for=condition=complete ${
                 lib.concatMapStringsSep " " (j: "job/${j}") assertedJobs
               } -n nixkube --timeout=300s
+            '';
+          }
+          # A Job here asks the driver for something that cannot be built:
+          # a store path of zeroes, a flake that is not there, an
+          # expression that does not evaluate. One that succeeded would be
+          # a driver that mounted the wrong thing quietly.
+          #
+          # Asked once, after the waits above, rather than waited for:
+          # "has not succeeded" is true of a Job that failed and of one
+          # still trying, so there is nothing to poll for.
+          {
+            name = "Check the invalid workloads were refused";
+            run = ''
+              for job in ${lib.concatStringsSep " " rejectedJobs}; do
+                ok=$(kubectl get job "$job" -n nixkube -o jsonpath='{.status.succeeded}')
+                if [ -n "$ok" ] && [ "$ok" != 0 ]; then
+                  echo "$job succeeded, and it asks for something that cannot be built" >&2
+                  exit 1
+                fi
+              done
             '';
           }
           {
