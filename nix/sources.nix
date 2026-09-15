@@ -40,10 +40,31 @@ let
   # took the fetch below instead of the umbrella it shipped inside.
   inUmbrella = !escapesStore && builtins.pathExists ../../nix/wire.nix;
 
+  # The umbrella itself, when this checkout is on its own.
+  #
+  # **This fetch is the one the umbrella cannot cover.** Every other source
+  # goes through the umbrella's own `nix/resolve.nix`, which UMBRELLA_GIT
+  # already reaches. This one has to find the umbrella first, so it reads the
+  # variable a second time.
+  #
+  # `github:` here is unlocked -- no revision, no narHash -- so Nix asks
+  # api.github.com for the head of the default branch on every evaluation
+  # that `tarball-ttl` does not answer from cache. That is one call per job
+  # before any source is resolved at all. Anonymous api.github.com allows 60
+  # an hour per IP and GitHub's runners share a NAT pool.
+  #
+  # The git reference resolves the same head over the git protocol, which
+  # that limit does not count.
+  umbrellaRef =
+    if builtins.getEnv "UMBRELLA_GIT" != "" then
+      "git+https://github.com/nixidae/nixidae?shallow=1"
+    else
+      "github:nixidae/nixidae";
+
   wire =
     if inUmbrella then
       ../../nix/wire.nix
     else
-      (builtins.fetchTree (builtins.parseFlakeRef "github:nixidae/nixidae")).outPath + "/nix/wire.nix";
+      (builtins.fetchTree (builtins.parseFlakeRef umbrellaRef)).outPath + "/nix/wire.nix";
 in
 import wire { overrides.nixkube = ../.; }

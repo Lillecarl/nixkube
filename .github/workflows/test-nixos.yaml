@@ -4,6 +4,7 @@
 env:
   REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   REPO_USERNAME: ${{ github.actor }}
+  UMBRELLA_GIT: '1'
 jobs:
   test-nixos:
     continue-on-error: true

@@ -13,7 +13,12 @@ ghalib.evalWorkflow {
     workflow_dispatch = null;
   };
 
+  # UMBRELLA_GIT makes the umbrella fetch each source over the git
+  # protocol, and not through api.github.com. Anonymous api.github.com
+  # allows 60 calls an hour per IP, GitHub's runners share a NAT pool, and
+  # every source a job resolves is one call. nanopynix issue #301.
   env = {
+    UMBRELLA_GIT = "1";
     REPO_USERNAME = "\${{ github.actor }}";
     REPO_TOKEN = "\${{ secrets.GITHUB_TOKEN }}";
   };

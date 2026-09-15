@@ -8,6 +8,7 @@ env:
   CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
   REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   REPO_USERNAME: ${{ github.actor }}
+  UMBRELLA_GIT: '1'
 jobs:
   build-amd64:
     runs-on: ubuntu-latest
