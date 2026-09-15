@@ -17,11 +17,21 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Build and push environments
-        run: "unlink nix-envs || true\nnix build --show-trace --print-build-logs --file . push --out-link nix-envs\n./nix-envs/bin/push\n"
+        run: |
+          unlink nix-envs || true
+          nix build --show-trace --print-build-logs --file . push --out-link nix-envs
+          ./nix-envs/bin/push
       - name: Build amd64 nix image
-        run: "unlink nix-nix || true\nnix build --show-trace --print-build-logs --file . nixImage.pushArch.x86_64-linux --out-link nix-nix\n"
+        run: |
+          unlink nix-nix || true
+          nix build --show-trace --print-build-logs --file . nixImage.pushArch.x86_64-linux --out-link nix-nix
       - if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
         name: Push amd64 nix image
         run: ./nix-nix/bin/push-nix-x86_64-linux
@@ -34,11 +44,21 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Build and push environments
-        run: "unlink nix-envs || true\nnix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . push --out-link nix-envs\n./nix-envs/bin/push\n"
+        run: |
+          unlink nix-envs || true
+          nix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . push --out-link nix-envs
+          ./nix-envs/bin/push
       - name: Build arm64 nix image
-        run: "unlink nix-nix || true\nnix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . nixImage.pushArch.aarch64-linux --out-link nix-nix\n"
+        run: |
+          unlink nix-nix || true
+          nix build --show-trace --print-build-logs --max-jobs 1 --cores 4 --file . nixImage.pushArch.aarch64-linux --out-link nix-nix
       - if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
         name: Push arm64 nix image
         run: ./nix-nix/bin/push-nix-aarch64-linux
@@ -54,11 +74,22 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Assert both architectures' closures are fetchable
-        run: "nix build --show-trace --file . kubenixApply.manifestJSONFile --out-link manifest\nnix run --file . assert-cached -- manifest\n"
+        run: |
+          nix build --show-trace --file . kubenixApply.manifestJSONFile --out-link manifest
+          nix run --file . assert-cached -- manifest
       - name: Build the index and scratch publishers
-        run: "unlink nix-manifest || true\nunlink nix-scratches || true\nnix build --show-trace --file . nixImage.pushManifest --out-link nix-manifest\nnix build --show-trace --file . scratchImage.push --out-link nix-scratches\n"
+        run: |
+          unlink nix-manifest || true
+          unlink nix-scratches || true
+          nix build --show-trace --file . nixImage.pushManifest --out-link nix-manifest
+          nix build --show-trace --file . scratchImage.push --out-link nix-scratches
       - if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')
         name: Create nix multi-arch manifest
         run: ./nix-manifest/bin/push-nix-manifest
@@ -80,15 +111,34 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Run type checker
         run: nix develop --file shell.nix --command pyright pkgs/nixkube/src
       - name: Run the checks
         run: nix build --show-trace --file ./checks.nix all
       - name: Check that every CI attribute builds natively
-        run: "nix run --file . arch-audit -- \\\n  push \\\n  push-ci2 \\\n  push-citest \\\n  kubenixApply.manifestJSONFile \\\n  kubenixApply.manifestYAMLFile \\\n  kubenixCI1.deploymentScript \\\n  kubenixCI2.deploymentScript \\\n  kubenixCITest.deploymentScript \\\n  nixImage.pushArch.x86_64-linux \\\n  nixImage.pushManifest \\\n  scratchImage.push\n"
+        run: |
+          nix run --file . arch-audit -- \
+            push \
+            push-ci2 \
+            push-citest \
+            kubenixApply.manifestJSONFile \
+            kubenixApply.manifestYAMLFile \
+            kubenixCI1.deploymentScript \
+            kubenixCI2.deploymentScript \
+            kubenixCITest.deploymentScript \
+            nixImage.pushArch.x86_64-linux \
+            nixImage.pushManifest \
+            scratchImage.push
       - name: Check formatting
-        run: "nix run --file . treefmt\ngit diff --exit-code\n"
+        run: |
+          nix run --file . treefmt
+          git diff --exit-code
     timeout-minutes: 30
   docs-build:
     if: github.ref == 'refs/heads/develop'
@@ -99,7 +149,12 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - timeout-minutes: 15
         uses: cachix/cachix-action@master
         with:
@@ -112,7 +167,9 @@ jobs:
         run: nix store verify --recursive --no-trust "$(readlink -f result)"
         timeout-minutes: 15
       - name: Prepare the Pages artifact
-        run: "mkdir -p public\ncp -r --no-preserve=mode,ownership result/. public/\n"
+        run: |
+          mkdir -p public
+          cp -r --no-preserve=mode,ownership result/. public/
         timeout-minutes: 5
       - timeout-minutes: 10
         uses: actions/upload-pages-artifact@main
@@ -152,9 +209,16 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Render deployment manifest
-        run: "nix build --show-trace --file . kubenixApply.manifestYAMLFile\ncp result nix-csi-deployment.yaml\n"
+        run: |
+          nix build --show-trace --file . kubenixApply.manifestYAMLFile
+          cp result nix-csi-deployment.yaml
       - name: Assert the release manifest is deployable
         run: nix run --file . assert-cached -- nix-csi-deployment.yaml
       - name: Create GitHub Release
@@ -173,25 +237,48 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Create Kind cluster
         uses: helm/kind-action@main
       - name: Clean runner
-        run: "# Remove cache because permissions can get fucked up preventing kluctl from creating it's cache directory\nsudo rm --recursive --force /home/runner/.cache\n"
+        run: |
+          # Remove cache because permissions can get fucked up preventing kluctl from creating it's cache directory
+          sudo rm --recursive --force /home/runner/.cache
       - name: Deploy nix-csi
-        run: "nix build --show-trace --file . kubenixCI1.deploymentScript\n./result/bin/kubenixDeploy --yes\n"
+        run: |
+          nix build --show-trace --file . kubenixCI1.deploymentScript
+          ./result/bin/kubenixDeploy --yes
       - name: Wait for nix-csi node daemonset
-        run: "kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s\n"
+        run: |
+          kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s
       - name: Wait for nix-csi cache pod
-        run: "kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=pynixd -n nixkube --timeout=180s\n"
+        run: |
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=pynixd -n nixkube --timeout=180s
       - name: Deploy test workloads
-        run: "nix build --show-trace --file . kubenixCITest.deploymentScript\n./result/bin/kubenixDeploy --yes\n"
+        run: |
+          nix build --show-trace --file . kubenixCITest.deploymentScript
+          ./result/bin/kubenixDeploy --yes
       - name: Wait for test workload
-        run: "kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/commandpath-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s\n"
+        run: |
+          kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/commandpath-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s
       - name: Check the invalid workloads were refused
-        run: "for job in invalid-storepath-hello invalid-flake-hello invalid-expr-hello; do\n  ok=$(kubectl get job \"$job\" -n nixkube -o jsonpath='{.status.succeeded}')\n  if [ -n \"$ok\" ] && [ \"$ok\" != 0 ]; then\n    echo \"$job succeeded, and it asks for something that cannot be built\" >&2\n    exit 1\n  fi\ndone\n"
+        run: |
+          for job in invalid-storepath-hello invalid-flake-hello invalid-expr-hello; do
+            ok=$(kubectl get job "$job" -n nixkube -o jsonpath='{.status.succeeded}')
+            if [ -n "$ok" ] && [ "$ok" != 0 ]; then
+              echo "$job succeeded, and it asks for something that cannot be built" >&2
+              exit 1
+            fi
+          done
       - name: Delete jobs and verify CSI cleanup
-        run: "kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl nri-hello-ro nri-hello-rw invalid-storepath-hello invalid-flake-hello invalid-expr-hello -n nixkube\nkubectl wait --for=delete pod -l \"job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,nri-hello-ro,nri-hello-rw,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello)\" -n nixkube --timeout=120s\n"
+        run: |
+          kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl nri-hello-ro nri-hello-rw invalid-storepath-hello invalid-flake-hello invalid-expr-hello -n nixkube
+          kubectl wait --for=delete pod -l "job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,nri-hello-ro,nri-hello-rw,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello)" -n nixkube --timeout=120s
       - env:
           DS_API: ${{ secrets.DS_API }}
         if: failure()
@@ -207,23 +294,44 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Create Kind cluster
         uses: helm/kind-action@main
       - name: Clean runner
-        run: "sudo rm --recursive --force /home/runner/.cache\n"
+        run: |
+          sudo rm --recursive --force /home/runner/.cache
       - name: Deploy nix-csi
-        run: "nix build --show-trace --file . kubenixCI2.deploymentScript\n./result/bin/kubenixDeploy --yes\n"
+        run: |
+          nix build --show-trace --file . kubenixCI2.deploymentScript
+          ./result/bin/kubenixDeploy --yes
       - name: Wait for nix-csi node daemonset
-        run: "kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s\n"
+        run: |
+          kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s
       - name: Deploy test workloads
-        run: "nix build --show-trace --file . kubenixCITest.deploymentScript\n./result/bin/kubenixDeploy --yes\n"
+        run: |
+          nix build --show-trace --file . kubenixCITest.deploymentScript
+          ./result/bin/kubenixDeploy --yes
       - name: Wait for test workload
-        run: "kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/commandpath-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s\n"
+        run: |
+          kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/commandpath-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s
       - name: Check the invalid workloads were refused
-        run: "for job in invalid-storepath-hello invalid-flake-hello invalid-expr-hello; do\n  ok=$(kubectl get job \"$job\" -n nixkube -o jsonpath='{.status.succeeded}')\n  if [ -n \"$ok\" ] && [ \"$ok\" != 0 ]; then\n    echo \"$job succeeded, and it asks for something that cannot be built\" >&2\n    exit 1\n  fi\ndone\n"
+        run: |
+          for job in invalid-storepath-hello invalid-flake-hello invalid-expr-hello; do
+            ok=$(kubectl get job "$job" -n nixkube -o jsonpath='{.status.succeeded}')
+            if [ -n "$ok" ] && [ "$ok" != 0 ]; then
+              echo "$job succeeded, and it asks for something that cannot be built" >&2
+              exit 1
+            fi
+          done
       - name: Delete jobs and verify CSI cleanup
-        run: "kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl nri-hello-ro nri-hello-rw invalid-storepath-hello invalid-flake-hello invalid-expr-hello -n nixkube\nkubectl wait --for=delete pod -l \"job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,nri-hello-ro,nri-hello-rw,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello)\" -n nixkube --timeout=120s\n"
+        run: |
+          kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl nri-hello-ro nri-hello-rw invalid-storepath-hello invalid-flake-hello invalid-expr-hello -n nixkube
+          kubectl wait --for=delete pod -l "job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,nri-hello-ro,nri-hello-rw,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello)" -n nixkube --timeout=120s
       - env:
           DS_API: ${{ secrets.DS_API }}
         if: failure()
@@ -238,12 +346,25 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Allow the unprivileged user namespaces Nix and passt need
-        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nsudo sysctl -w kernel.unprivileged_userns_clone=1\nunshare --user --map-root-user --mount --pid --fork --mount-proc true\n"
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          unshare --user --map-root-user --mount --pid --fork --mount-proc true
         timeout-minutes: 5
       - name: Let the runner user open /dev/kvm
-        run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
         timeout-minutes: 5
       - name: Run the node test as a virtual machine
         run: nix run --file . umlTest.run
@@ -257,12 +378,25 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Allow the unprivileged user namespaces Nix and passt need
-        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nsudo sysctl -w kernel.unprivileged_userns_clone=1\nunshare --user --map-root-user --mount --pid --fork --mount-proc true\n"
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          unshare --user --map-root-user --mount --pid --fork --mount-proc true
         timeout-minutes: 5
       - name: Let the runner user open /dev/kvm
-        run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
         timeout-minutes: 5
       - name: Deploy and test without the pynixd cache, on a guest
         run: nix run --file . ciTest.run
@@ -276,12 +410,25 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Allow the unprivileged user namespaces Nix and passt need
-        run: "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0\nsudo sysctl -w kernel.unprivileged_userns_clone=1\nunshare --user --map-root-user --mount --pid --fork --mount-proc true\n"
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          unshare --user --map-root-user --mount --pid --fork --mount-proc true
         timeout-minutes: 5
       - name: Let the runner user open /dev/kvm
-        run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
         timeout-minutes: 5
       - name: Deploy and test with the pynixd cache, on a guest
         run: nix run --file . ciTestCache.run

@@ -903,15 +903,19 @@ rec {
 
   # Those values as the files GitHub reads.
   #
-  # `pkgs.formats.yaml` emits a `%YAML 1.1` directive and a `---` marker that
-  # no workflow carries, so the first two lines go. It quotes `'on'` for the
-  # same YAML 1.1 reason that makes the directive appear, which is what a
-  # workflow needs: unquoted, `on` is the boolean `true` to a 1.1 parser.
+  # `ci/to_yaml.py` and not `pkgs.formats.yaml`, which is remarshal: remarshal
+  # writes a multi-line string as one escaped double-quoted scalar, so a
+  # ten-line `run:` body arrives as a single 600-column line holding `\n`.
+  # The script writes those as literal blocks, and emits no `%YAML 1.1`
+  # directive and no `---` marker, which is why nothing trims a header here
+  # any more. It quotes `'on'` for the same YAML 1.1 reason the directive
+  # used to appear, which is what a workflow needs: unquoted, `on` is the
+  # boolean `true` to a 1.1 parser.
   #
   # Then yamlfmt, because treefmt runs yamlfmt over this file and the `check`
   # job ends in `git diff --exit-code`. A render in any other style is a
   # failing job on every run. Running the same formatter here makes the two
-  # agree by construction rather than by taste.
+  # agree by construction rather than by taste. yamlfmt keeps the blocks.
   #
   # Key order is alphabetical and nothing depends on it: GitHub does not, and
   # ciWorkflowCheck compares parsed documents rather than text.
@@ -924,14 +928,23 @@ rec {
         # Edit ci/workflows/${name}.nix, then run: nix run --file . ci-workflow-update
       '';
     in
-    pkgs.runCommand "${name}.yaml" { nativeBuildInputs = [ pkgs.yamlfmt ]; } ''
+    pkgs.runCommand "${name}.yaml"
       {
-        printf '%s\n' ${lib.escapeShellArg header}
-        tail --lines=+3 ${(pkgs.formats.yaml { }).generate "${name}.yaml" wf.value}
-      } > out.yaml
-      HOME=$PWD yamlfmt out.yaml
-      mv out.yaml $out
-    ''
+        nativeBuildInputs = [
+          (pkgs.python3.withPackages (ps: [ ps.pyyaml ]))
+          pkgs.yamlfmt
+        ];
+        value = builtins.toJSON wf.value;
+        passAsFile = [ "value" ];
+      }
+      ''
+        {
+          printf '%s\n' ${lib.escapeShellArg header}
+          python3 ${./ci/to_yaml.py} "$valuePath"
+        } > out.yaml
+        HOME=$PWD yamlfmt out.yaml
+        mv out.yaml $out
+      ''
   ) ciWorkflows;
 
   # Does each committed workflow still say what its ci/workflows/*.nix says?

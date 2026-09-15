@@ -14,15 +14,33 @@ jobs:
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
         with:
-          extra_nix_config: "access-tokens = github.com=${{ github.token }}\nexperimental-features = nix-command flakes\nsandbox = relaxed\nsubstituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=\ntrusted-users = root runner\n"
+          extra_nix_config: |
+            access-tokens = github.com=${{ github.token }}
+            experimental-features = nix-command flakes
+            sandbox = relaxed
+            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
+            trusted-users = root runner
       - name: Build nixos test driver
         run: nix build --file . nixosTests.containerd.driverInteractive
       - name: Start nixos test (background)
-        run: "# The nixos-test-driver uses XDG_RUNTIME_DIR as its temp dir and\n# propagates it to VM subprocesses automatically.  GHA's default\n# XDG_RUNTIME_DIR is /run/user/1001 (1.6 GB tmpfs) which fills up\n# quickly — redirect to the root filesystem (87 GB free) instead.\nmkdir -p /tmp/nixos-test-tmp\nXDG_RUNTIME_DIR=/tmp/nixos-test-tmp ./result/bin/nixos-test-driver --no-interactive > /tmp/test.log 2>&1 &\necho $! > /tmp/test.pid\necho \"Test running in background (PID: $(cat /tmp/test.pid))\"\nsleep 5\n"
+        run: |
+          # The nixos-test-driver uses XDG_RUNTIME_DIR as its temp dir and
+          # propagates it to VM subprocesses automatically.  GHA's default
+          # XDG_RUNTIME_DIR is /run/user/1001 (1.6 GB tmpfs) which fills up
+          # quickly — redirect to the root filesystem (87 GB free) instead.
+          mkdir -p /tmp/nixos-test-tmp
+          XDG_RUNTIME_DIR=/tmp/nixos-test-tmp ./result/bin/nixos-test-driver --no-interactive > /tmp/test.log 2>&1 &
+          echo $! > /tmp/test.pid
+          echo "Test running in background (PID: $(cat /tmp/test.pid))"
+          sleep 5
       - name: Print test logs
-        run: "cat /tmp/test.log || true\n"
+        run: |
+          cat /tmp/test.log || true
       - name: Print test results
-        run: "echo \"=== Test log output ===\"\ncat /tmp/test.log 2>/dev/null || echo \"(no test log)\"\n"
+        run: |
+          echo "=== Test log output ==="
+          cat /tmp/test.log 2>/dev/null || echo "(no test log)"
     timeout-minutes: 60
 'on':
   push:
