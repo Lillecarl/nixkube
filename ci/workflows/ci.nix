@@ -28,6 +28,26 @@ let
     setupNix
   ];
 
+  # /dev/kvm exists on an x64 runner, and the runner user is not in the
+  # `kvm` group -- so this is not optional for a job that boots a guest.
+  # Without it QEMU exits with "Could not access KVM kernel module:
+  # Permission denied".
+  #
+  # x64 only. GitHub's ARM runners have no /dev/kvm at all, and this backend
+  # asks for `accel=kvm` and never `accel=kvm:tcg`: a silent fall back to
+  # emulation would turn a twenty-minute cluster test into a timeout nobody
+  # could explain.
+  openKvm = {
+    name = "Let the runner user open /dev/kvm";
+    run = ''
+      echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+        | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+      sudo udevadm control --reload-rules
+      sudo udevadm trigger --name-match=kvm
+      ls -l /dev/kvm
+    '';
+  };
+
   # Publish from develop and tags only. The image tags are named from
   # versions, not from the commit, so a branch that changes neither version
   # would overwrite develop's tag with its own content under the same name.
@@ -62,6 +82,24 @@ let
   testJobs = import ../test-jobs.nix;
   deployedJobs = testJobs.deployed;
   assertedJobs = testJobs.asserted;
+
+  # The same two deployments as the kind jobs, on a guest that boots on the
+  # runner.  The test itself is nix/uml/ci.py, so a developer runs exactly
+  # what CI runs: `nix run --file . ciTest.run`.
+  testQemu =
+    { attr, what }:
+    {
+      needs = "build-manifests";
+      runs-on = "ubuntu-latest";
+      timeout-minutes = 60;
+      steps = bootstrap ++ [
+        openKvm
+        {
+          name = "Deploy and test ${what}, on a guest";
+          run = "nix run --file . ${attr}.run";
+        }
+      ];
+    };
 
   # The two kind jobs run the same test against two deployments: one with the
   # pynixd cache, one without. Only the instance and the readiness waits
@@ -422,34 +460,39 @@ ghalib.evalWorkflow {
       already on the machine that built it -- which is what lets this job
       run with no `needs` and no published image.
 
-      `ubuntu-latest` because it is x64. GitHub's ARM runners have no
-      /dev/kvm at all, and this backend asks for `accel=kvm` and never
-      `accel=kvm:tcg`: a silent fall back to emulation would turn a
-      twenty-minute cluster test into a timeout nobody could explain.
-
-      /dev/kvm exists on x64 runners but the runner user is not in the
-      `kvm` group, so the udev rule below is not optional. Without it QEMU
-      exits with "Could not access KVM kernel module: Permission denied".
+      `ubuntu-latest` because it is x64, and `openKvm` because the runner
+      user cannot open /dev/kvm without it.
     */
     test-qemu = {
       runs-on = "ubuntu-latest";
       timeout-minutes = 60;
       steps = bootstrap ++ [
-        {
-          name = "Let the runner user open /dev/kvm";
-          run = ''
-            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-              | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-            sudo udevadm control --reload-rules
-            sudo udevadm trigger --name-match=kvm
-            ls -l /dev/kvm
-          '';
-        }
+        openKvm
         {
           name = "Run the node test as a virtual machine";
           run = "nix run --file . umlTest.run";
         }
       ];
+    };
+
+    # The kind jobs, on a guest. Same deployment, same workloads, same
+    # asserted jobs -- see nix/uml/ci.nix.
+    #
+    # `needs = build-manifests` for the same reason the kind jobs have it:
+    # the deployment names images on ghcr.io and store paths on cachix, and
+    # a node cannot fetch what nothing published.
+    #
+    # Not in the `release` gate yet. These run beside the kind jobs rather
+    # than instead of them, and a release should not start depending on a
+    # job that has not yet proved itself over a few weeks of runs.
+    test-qemu-ci = testQemu {
+      attr = "ciTest";
+      what = "without the pynixd cache";
+    };
+
+    test-qemu-ci-cache = testQemu {
+      attr = "ciTestCache";
+      what = "with the pynixd cache";
     };
 
     test-kind-cache = testKind {

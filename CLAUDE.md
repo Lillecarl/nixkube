@@ -132,6 +132,14 @@ either one alone fails the build.
   `kubenixCI2` to a Kind cluster and run the test workloads from
   `kubenix/ci/test-workloads.nix`. The two differ in whether pynixd is
   enabled, which is what makes them worth running both.
+- `test-qemu` — the node test of `nix/uml`, as a virtual machine on the
+  runner. No cluster to create and no registry: the guest's store is the
+  runner's.
+- `test-qemu-ci` and `test-qemu-ci-cache` — the two kind jobs above, on a
+  guest instead of a container. Same deployment, same workloads, same
+  asserted jobs, and the same script a developer runs: `nix run --file .
+  ciTest.run`. They run beside the kind jobs until they have proved
+  themselves, and then the kind jobs go.
 - `docs-build`, `docs-deploy`, `release`.
 
 `test-nixos.yaml` runs the NixOS VM integration test, on the `cidev` branch

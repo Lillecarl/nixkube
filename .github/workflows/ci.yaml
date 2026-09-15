@@ -215,6 +215,32 @@ jobs:
       - name: Run the node test as a virtual machine
         run: nix run --file . umlTest.run
     timeout-minutes: 60
+  test-qemu-ci:
+    needs: build-manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+      - name: Setup Nix environment
+        uses: ./.github/actions/setup-nix
+      - name: Let the runner user open /dev/kvm
+        run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
+      - name: Deploy and test without the pynixd cache, on a guest
+        run: nix run --file . ciTest.run
+    timeout-minutes: 60
+  test-qemu-ci-cache:
+    needs: build-manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+      - name: Setup Nix environment
+        uses: ./.github/actions/setup-nix
+      - name: Let the runner user open /dev/kvm
+        run: "echo 'KERNEL==\"kvm\", GROUP=\"kvm\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"' \\\n  | sudo tee /etc/udev/rules.d/99-kvm4all.rules\nsudo udevadm control --reload-rules\nsudo udevadm trigger --name-match=kvm\nls -l /dev/kvm\n"
+      - name: Deploy and test with the pynixd cache, on a guest
+        run: nix run --file . ciTestCache.run
+    timeout-minutes: 60
 'on':
   pull_request: null
   push:
