@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """The kind jobs, on a guest.
 
 Deploy nixkube with the same `kubenixDeploy` CI runs, deploy the test
@@ -65,6 +64,16 @@ async def host_kubeconfig(cp) -> str:
     return await cp.succeed(f"cat {conf}")
 
 
+def write(path: str, text: str) -> None:
+    """Here rather than inline, because the caller is a coroutine.
+
+    A blocking `open` in an async function stalls the event loop, which is
+    what runs the other guests -- and ruff refuses one (ASYNC230).
+    """
+    with open(path, "w") as handle:
+        handle.write(text)
+
+
 def run(script: str, kubeconfig: str, *args: str) -> None:
     """One of CI's deployment scripts, run the way CI runs it."""
     env = dict(os.environ, KUBECONFIG=kubeconfig)
@@ -73,6 +82,7 @@ def run(script: str, kubeconfig: str, *args: str) -> None:
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     if done.returncode != 0:
         raise AssertionError(
@@ -88,8 +98,7 @@ async def test(vms):
 
     with tempfile.TemporaryDirectory(prefix="nixkube-ci-") as work:
         kubeconfig = os.path.join(work, "kubeconfig")
-        with open(kubeconfig, "w") as handle:
-            handle.write(await host_kubeconfig(cp))
+        write(kubeconfig, await host_kubeconfig(cp))
         print(f"[test] the host reaches the API server on {cp.reachable(6443)[0]}")
         print(await kubectl(cp, "get nodes"))
 
