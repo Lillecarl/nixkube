@@ -303,32 +303,33 @@ rec {
         buildah manifest add ${scratchManifest} ${scratchUrl "aarch64-linux"}
         buildah manifest push ${scratchManifest}
       '';
-  genModDoc =
-    let
-      optionsDocs = pkgs.nixosOptionsDoc {
-        # `passthru.eval`, not `eval`. easykubenix moved it under passthru and
-        # this line kept the old path, so `nix run --file . genModDoc` has
-        # failed with "attribute 'eval' missing" ever since -- which takes
-        # `just precommit` with it, because that runs gendoc.
-        inherit (kubenixCI1.passthru.eval) options;
-        warningsAreErrors = false;
-        transformOptions =
-          opt:
-          opt
-          // {
-            # Remove internal options, modify declarations, etc.
-            visible =
-              opt.visible or true && (lib.hasPrefix "nix-csi" opt.name || lib.hasPrefix "nixkube" opt.name);
-            declarations = map (
-              decl:
-              let
-                prefix = builtins.toString ./.;
-              in
-              if lib.hasPrefix prefix (toString decl) then lib.removePrefix prefix (toString decl) else decl
-            ) opt.declarations;
-          };
+  # The module options as CommonMark. `genModDoc` writes it into the tree and
+  # `docOptionsCheck` compares the tree against it, so both read one binding.
+  optionsDocs = pkgs.nixosOptionsDoc {
+    # `passthru.eval`, not `eval`. easykubenix moved it under passthru and
+    # this line kept the old path, so `nix run --file . genModDoc` has
+    # failed with "attribute 'eval' missing" ever since -- which takes
+    # `just precommit` with it, because that runs gendoc.
+    inherit (kubenixCI1.passthru.eval) options;
+    warningsAreErrors = false;
+    transformOptions =
+      opt:
+      opt
+      // {
+        # Remove internal options, modify declarations, etc.
+        visible =
+          opt.visible or true && (lib.hasPrefix "nix-csi" opt.name || lib.hasPrefix "nixkube" opt.name);
+        declarations = map (
+          decl:
+          let
+            prefix = builtins.toString ./.;
+          in
+          if lib.hasPrefix prefix (toString decl) then lib.removePrefix prefix (toString decl) else decl
+        ) opt.declarations;
       };
-    in
+  };
+
+  genModDoc =
     pkgs.writeScriptBin "genModDoc" # bash
       ''
         #! ${pkgs.runtimeShell}
@@ -867,6 +868,7 @@ rec {
       nodeDriverReadiness
       sourcesAreLocked
       ciWorkflowCheck
+      docOptionsCheck
       builderPresentsPinnedHostKey
       noPrivateKeysInManifest
       probeWatchHasRbac
@@ -888,6 +890,7 @@ rec {
         nodeDriverReadiness
         sourcesAreLocked
         ciWorkflowCheck
+        docOptionsCheck
         builderPresentsPinnedHostKey
         noPrivateKeysInManifest
         probeWatchHasRbac
@@ -974,6 +977,26 @@ rec {
   # ghanix change reaches this check only after the umbrella lock moves, and
   # UMBRELLA_DEV=ghanix can pass here while a runner fails. That is the same
   # asymmetry as issue #28 and not a separate bug.
+  # Does doc/options.md still say what the modules say?
+  #
+  # The same question ciWorkflowCheck asks about the workflows, and it exists
+  # because nothing asked it: `genModDoc` was broken two ways for weeks and
+  # the committed file drifted 573 lines with nothing to notice. A generated
+  # file with no gate is a file that silently stops being generated.
+  #
+  # Text, not parsed. Markdown has no canonical form to compare, and the
+  # generator is a derivation, so its output is byte-stable for a given
+  # module set.
+  docOptionsCheck = pkgs.runCommand "doc-options-check" { } ''
+    if ! diff --unified ${./doc/options.md} ${optionsDocs.optionsCommonMark}; then
+      echo >&2
+      echo "doc/options.md and the module options disagree." >&2
+      echo "Run: nix run --file . genModDoc" >&2
+      exit 1
+    fi
+    touch $out
+  '';
+
   ciWorkflowCheck =
     pkgs.runCommand "ci-workflow-check"
       {
