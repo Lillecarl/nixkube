@@ -42,10 +42,7 @@ let
       {
         id = "resolve";
         name = "Resolve the umbrella revision";
-        run = ''
-          rev=$(ci/walkback.sh https://github.com/nixidae/nixidae nixkube)
-          echo "rev=$rev" >> "$GITHUB_OUTPUT"
-        '';
+        run = "ci/walkback.sh https://github.com/nixidae/nixidae nixkube | sed 's/^/rev=/' >> \"$GITHUB_OUTPUT\"";
       }
     ];
   };
