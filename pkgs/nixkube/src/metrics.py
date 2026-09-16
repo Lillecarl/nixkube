@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 
 import structlog
-from prometheus_client import REGISTRY, Counter, Histogram, start_http_server
+from prometheus_client import REGISTRY, Counter, Gauge, Histogram, start_http_server
 from prometheus_client.core import GaugeMetricFamily
 
 from .constants import NIX_ROOT
@@ -39,6 +39,43 @@ GC_CYCLE_DURATION = Histogram(
     "nixkube_gc_cycle_duration_seconds",
     "Time one garbage collection cycle took",
     buckets=(1, 5, 15, 30, 60, 120, 300, 600),
+)
+
+# Zero until the first cycle finishes, so an alert reads it as
+# `== 0 or time() - it > N`. That is the shape `node_boot_time_seconds` and
+# the textfile collector use for the same thing.
+#
+# **This is the series that would have surfaced #38 on day one.** A timestamp
+# that stops advancing says the collector is stuck, which no size gauge says
+# on its own: the store grew for 33 hours while every other number looked
+# ordinary.
+GC_LAST_SUCCESS = Gauge(
+    "nixkube_gc_last_success_timestamp_seconds",
+    "When a garbage collection cycle last finished, in unix seconds",
+)
+
+# --- The store itself ---
+#
+# Free: `_run_gc_cycle` already reads `nix path-info --all --json` for
+# `registrationTime`, and `narSize` rides along in the same answer. So these
+# cost nothing beyond the call the GC cycle already makes, and they move on
+# the GC cadence rather than the scrape one.
+
+# **`nar_bytes`, and not `store_bytes`.** A NAR size is what the path weighs on
+# the wire. It ignores the hard links and the block overhead of the store on
+# disk, so it is not the number `du` gives. Measured on a workstation: summing
+# `narSize` over `ValidPaths` answered 952 GB for a file system of 268 GB. The
+# name says `nar` so that nobody subtracts it from
+# `nixkube_store_filesystem_size_bytes` beside it. It is the right series for
+# watching growth, and the wrong one for how full the disk is.
+STORE_NAR_BYTES = Gauge(
+    "nixkube_store_nar_bytes",
+    "Sum of the NAR size of every path in this node's store, which over-counts disk use",
+)
+
+STORE_PATHS = Gauge(
+    "nixkube_store_paths",
+    "Paths in this node's store",
 )
 
 # --- Volumes ---

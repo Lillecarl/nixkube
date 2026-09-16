@@ -31,7 +31,14 @@ from .constants import (
     GC_STALL_CYCLES,
     PYNIXD_ENABLED,
 )
-from .metrics import GC_CYCLE_DURATION, GC_CYCLES, GC_PATHS_DELETED
+from .metrics import (
+    GC_CYCLE_DURATION,
+    GC_CYCLES,
+    GC_LAST_SUCCESS,
+    GC_PATHS_DELETED,
+    STORE_NAR_BYTES,
+    STORE_PATHS,
+)
 
 logger = structlog.get_logger("nixkube.gc")
 
@@ -72,6 +79,8 @@ async def gc_loop() -> None:
         else:
             GC_CYCLES.labels(result="ok").inc()
             last_ok = time.monotonic()
+            # `time.time` and not `time.monotonic`: this one leaves the node.
+            GC_LAST_SUCCESS.set(time.time())
         finally:
             GC_CYCLE_DURATION.observe(time.monotonic() - started)
 
@@ -106,6 +115,30 @@ async def _read_path_info(work: Path) -> dict[str, dict]:
             "1",
         ).stdout(out)
     return json.loads(out.read_text())
+
+
+def _record_store_size(path_info: dict[str, dict]) -> None:
+    """How big this node's store is, from the answer the cycle already has.
+
+    There is no way to see a node's store grow from outside it, which is how
+    issue #38 stayed invisible for 33 hours: the file system alert fired
+    against `/var`, and nothing said which share was the store. Issue #39.
+
+    The cost is nothing. `nix path-info --all --json` carries `narSize` beside
+    the `registrationTime` the cycle reads, so this is a sum over a dict that
+    is already in memory, on a cadence that is already slow. A `du`-style walk
+    over a multi-GB store is what this avoids.
+
+    `narSize` over-counts. See `STORE_NAR_BYTES` for the measurement.
+    """
+    STORE_PATHS.set(len(path_info))
+    STORE_NAR_BYTES.set(
+        sum(
+            facts.get("narSize", 0)
+            for facts in path_info.values()
+            if isinstance(facts, dict)
+        )
+    )
 
 
 def _select_old_paths(path_info: dict[str, dict], cutoff: float) -> list[str]:
@@ -183,6 +216,7 @@ async def _run_gc_cycle() -> None:
             logger.warning("gc_path_info_parse_error", exc_info=True)
             return
 
+        _record_store_size(path_info)
         old_paths = _select_old_paths(path_info, time.time() - GC_KEEP_SECONDS)
 
         if not old_paths:

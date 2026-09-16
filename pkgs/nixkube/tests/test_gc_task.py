@@ -15,6 +15,7 @@ import asyncio
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from src import gc_task
@@ -208,6 +209,91 @@ class TestTheCommands:
         before = gc_task.GC_PATHS_DELETED._value.get()
         await gc_task._run_gc_cycle()
         assert gc_task.GC_PATHS_DELETED._value.get() == before + 1
+
+
+class TestStoreSize:
+    """How big this node's store is, taken from the GC cycle's own answer.
+
+    Issue #39: there was no way to see a node's store grow from outside it,
+    which is how #38 stayed invisible for 33 hours.
+    """
+
+    def test_the_sum_and_the_count_come_from_one_answer(self):
+        gc_task._record_store_size(
+            {
+                "/nix/store/aaa": {"narSize": 100, "registrationTime": 1},
+                "/nix/store/bbb": {"narSize": 250, "registrationTime": 2},
+            }
+        )
+
+        assert gc_task.STORE_PATHS._value.get() == 2
+        assert gc_task.STORE_NAR_BYTES._value.get() == 350
+
+    def test_an_empty_store_answers_zero_rather_than_nothing(self):
+        """Absent and zero mean different things on a dashboard."""
+        gc_task._record_store_size({})
+
+        assert gc_task.STORE_PATHS._value.get() == 0
+        assert gc_task.STORE_NAR_BYTES._value.get() == 0
+
+    def test_a_path_with_no_nar_size_does_not_break_the_sum(self):
+        gc_task._record_store_size({"/nix/store/aaa": {"registrationTime": 1}})
+
+        assert gc_task.STORE_NAR_BYTES._value.get() == 0
+
+
+class TestLastSuccess:
+    """The series that would have surfaced #38 on day one.
+
+    A timestamp that stops advancing says the collector is stuck. No size gauge
+    says that on its own.
+    """
+
+    def test_it_starts_at_zero(self):
+        """So an alert reads `== 0 or time() - it > N`, not a 1970 timestamp.
+
+        A private registry, because the shared gauge may already have been set
+        by another test in this file.
+        """
+        from prometheus_client import CollectorRegistry, Gauge
+
+        fresh = Gauge("probe", "probe", registry=CollectorRegistry())
+        assert fresh._value.get() == 0
+
+    @pytest.mark.asyncio
+    async def test_a_finished_cycle_advances_it(self, monkeypatch):
+        async def cycle():
+            return None
+
+        monkeypatch.setattr(gc_task, "_run_gc_cycle", cycle)
+        monkeypatch.setattr(gc_task, "GC_LAST_SUCCESS", gc_task.GC_LAST_SUCCESS)
+
+        before = gc_task.GC_LAST_SUCCESS._value.get()
+        # One pass of the loop body, then stop it at the sleep.
+        monkeypatch.setattr(
+            gc_task.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError)
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await gc_task.gc_loop()
+
+        assert gc_task.GC_LAST_SUCCESS._value.get() > before
+
+    @pytest.mark.asyncio
+    async def test_a_failed_cycle_does_not(self, monkeypatch):
+        """It says when collection last worked, not when it last ran."""
+
+        async def cycle():
+            raise RuntimeError("nix store delete failed")
+
+        monkeypatch.setattr(gc_task, "_run_gc_cycle", cycle)
+        gc_task.GC_LAST_SUCCESS.set(1000.0)
+        monkeypatch.setattr(
+            gc_task.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError)
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await gc_task.gc_loop()
+
+        assert gc_task.GC_LAST_SUCCESS._value.get() == 1000.0
 
 
 class TestTimeouts:
