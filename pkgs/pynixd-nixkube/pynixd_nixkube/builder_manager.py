@@ -14,7 +14,7 @@ import kr8s.asyncio as k8s
 import structlog
 from kr8s.asyncio.objects import Job, PodTemplate, new_class
 from pynixd.config import SSHSubprocessStoreSpec
-from pynixd.serde.ids import StoreId
+from pynixd.serde import StoreId
 from pynixd.store import SSHSubprocessStore
 
 if TYPE_CHECKING:

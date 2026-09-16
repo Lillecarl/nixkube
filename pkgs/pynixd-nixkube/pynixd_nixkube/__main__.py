@@ -6,7 +6,7 @@ from pathlib import Path
 import structlog
 from pynixd.config import LocalSocketStoreSpec, PynixdSettings
 from pynixd.instance import Server
-from pynixd.serde.ids import StoreId
+from pynixd.serde import StoreId
 from pynixd.store import LocalSocketStore
 
 from .setup import configure_logging, install_nss
