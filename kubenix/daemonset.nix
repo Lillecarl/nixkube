@@ -92,6 +92,13 @@ in
               metadata.labels = labels;
               metadata.annotations = {
                 "kubectl.kubernetes.io/default-container" = "nix-node";
+              }
+              // lib.optionalAttrs (cfg.metrics.enable && cfg.metrics.annotations) {
+                "prometheus.io/scrape" = "true";
+                "prometheus.io/port" = toString cfg.metrics.port;
+                "prometheus.io/path" = "/metrics";
+              }
+              // {
                 configHash = lib.hashAttrs (
                   { } // nsRes.ConfigMap.nix-node or { } // nsRes.configMap.ssh-config or { }
                 );
@@ -228,6 +235,8 @@ in
                         KUBE_POD_UID.valueFrom.fieldRef.fieldPath = "metadata.uid";
                         NIX_BUILD_TIMEOUT.value = toString cfg.nodeBuildTimeout;
                         VERIFY_STORE_PATHS.value = lib.boolToString cfg.verifyStorePaths;
+                        METRICS_ENABLED.value = lib.boolToString cfg.metrics.enable;
+                        METRICS_PORT.value = toString cfg.metrics.port;
                         NIXPKGS_ALLOW_UNFREE.value = "1";
                         USER.value = "root";
                       };

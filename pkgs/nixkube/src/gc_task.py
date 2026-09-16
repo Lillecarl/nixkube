@@ -18,6 +18,7 @@ from shellous import sh
 
 from .cache import copy_to_cache
 from .constants import GC_INTERVAL_SECONDS, GC_KEEP_SECONDS, PYNIXD_ENABLED
+from .metrics import GC_CYCLE_DURATION, GC_CYCLES, GC_PATHS_DELETED
 
 logger = structlog.get_logger("nixkube.gc")
 
@@ -28,12 +29,21 @@ async def gc_loop() -> None:
     Non-fatal: exceptions are logged as warnings and the loop continues.
     """
     while True:
+        started = time.monotonic()
         try:
             await _run_gc_cycle()
         except asyncio.CancelledError:
             raise
         except Exception:
+            # Counted, and not only logged. A cycle that fails every time
+            # leaves the store growing, and the daemon says nothing about it
+            # otherwise: the loop swallows the error and sleeps.
+            GC_CYCLES.labels(result="error").inc()
             logger.warning("gc_error", exc_info=True)
+        else:
+            GC_CYCLES.labels(result="ok").inc()
+        finally:
+            GC_CYCLE_DURATION.observe(time.monotonic() - started)
 
         sleep_secs = random.uniform(GC_INTERVAL_SECONDS / 2, GC_INTERVAL_SECONDS)
         logger.debug("gc_sleeping", seconds=round(sleep_secs, 1))
@@ -74,4 +84,5 @@ async def _run_gc_cycle() -> None:
     await sh(
         "nix", "store", "delete", "--store", "local", "--stdin", "--skip-live"
     ).stdin("\n".join(old_paths))
+    GC_PATHS_DELETED.inc(len(old_paths))
     logger.info("gc_done", deleted=len(old_paths))

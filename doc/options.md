@@ -418,6 +418,86 @@ JSON value
 
 
 
+## nixkube\.metrics\.enable
+
+
+
+Serve Prometheus metrics from each node pod, on ` port `\.
+
+A DaemonSet answers for its own node, so the series are per-node:
+the size and free space of that node’s /nix, and what its garbage
+collection and its volumes have done\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
+## nixkube\.metrics\.annotations
+
+
+
+Add ` prometheus.io/* ` annotations to the node pods, which is what a
+Prometheus configured for annotation discovery reads\. Turn this off
+where a PodMonitor or a ServiceMonitor selects the pods instead, so
+that the two do not both scrape\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
+## nixkube\.metrics\.port
+
+
+
+The port ` /metrics ` answers on\. Arbitrary: nixkube holds no entry
+in the Prometheus port registry\.
+
+
+
+*Type:*
+16 bit unsigned integer; between 0 and 65535 (both inclusive)
+
+
+
+*Default:*
+
+```nix
+9099
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
 ## nixkube\.namespace
 
 

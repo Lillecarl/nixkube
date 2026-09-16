@@ -80,6 +80,16 @@ NRI_ENABLED = os.environ.get("NRI_ENABLED", "true") == "true"
 # Set via ENABLE_COMPAT_DRIVER environment variable (default: false)
 ENABLE_COMPAT_DRIVER = os.environ.get("ENABLE_COMPAT_DRIVER", "false") == "true"
 
+# Prometheus metrics endpoint.
+#
+# On by default: a DaemonSet that cannot be scraped is one nobody can see, and
+# the endpoint is read-only and carries no cluster data -- every series is
+# about this node. `METRICS_ADDR` is every interface, because the scraper
+# reaches a pod over the pod network and not over localhost.
+METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true") == "true"
+METRICS_PORT = int(os.environ.get("METRICS_PORT", "9099"))
+METRICS_ADDR = os.environ.get("METRICS_ADDR", "0.0.0.0")
+
 # Verify store paths before mounting to detect corruption early
 # Set via VERIFY_STORE_PATHS environment variable
 VERIFY_STORE_PATHS = os.environ.get("VERIFY_STORE_PATHS", "false") == "true"

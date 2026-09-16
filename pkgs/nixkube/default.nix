@@ -22,6 +22,7 @@
   util-linuxMinimal, # mount, umount
   pyzmq, # Talking to OCI hooks
   nri-wait, # OCI hook for waiting on NRI builds
+  prometheus-client, # The /metrics endpoint
   structlog, # Structured logging library
   rich, # Rich terminal output (used for structlog RichTracebackFormatter)
   pytest, # Unit tests
@@ -56,6 +57,7 @@ buildPythonApplication {
     util-linuxMinimal
     pyzmq
     nri-wait
+    prometheus-client
     structlog
     rich
   ];

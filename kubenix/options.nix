@@ -93,6 +93,37 @@ in
       type = lib.types.bool;
       default = true;
     };
+    metrics = {
+      enable = lib.mkOption {
+        description = ''
+          Serve Prometheus metrics from each node pod, on `port`.
+
+          A DaemonSet answers for its own node, so the series are per-node:
+          the size and free space of that node's /nix, and what its garbage
+          collection and its volumes have done.
+        '';
+        type = lib.types.bool;
+        default = true;
+      };
+      port = lib.mkOption {
+        description = ''
+          The port `/metrics` answers on. Arbitrary: nixkube holds no entry
+          in the Prometheus port registry.
+        '';
+        type = lib.types.port;
+        default = 9099;
+      };
+      annotations = lib.mkOption {
+        description = ''
+          Add `prometheus.io/*` annotations to the node pods, which is what a
+          Prometheus configured for annotation discovery reads. Turn this off
+          where a PodMonitor or a ServiceMonitor selects the pods instead, so
+          that the two do not both scrape.
+        '';
+        type = lib.types.bool;
+        default = true;
+      };
+    };
     nodeBuildTimeout = lib.mkOption {
       description = ''
         Timeout in seconds for Nix build operations on node pods.

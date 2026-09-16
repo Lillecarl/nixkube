@@ -22,6 +22,7 @@ dependencies = [
   "shellous",
   "structlog",
   "rich",
+  "prometheus-client",
 ]
 
 [project.scripts]

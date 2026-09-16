@@ -27,6 +27,7 @@ from ..constants import (
 )
 from ..errors import CSIError
 from ..events import report_event
+from ..metrics import VOLUME_MOUNTS, VOLUME_PREPARE_DURATION, VOLUME_UNMOUNTS
 from ..nix import (
     build_pod_packages,
     build_primary_package,
@@ -308,6 +309,11 @@ class NodeServicer(csi_grpc.NodeBase):
                 )
                 # Report successful mount with closure size and elapsed time
                 elapsed = time.perf_counter() - start_time
+                VOLUME_MOUNTS.labels(result="ok").inc()
+                # The whole publish, and not `mount_volume` alone: realising
+                # the closure is where the time goes, and a pod waits for all
+                # of it. `start_time` is the top of this handler.
+                VOLUME_PREPARE_DURATION.observe(elapsed)
                 await report_event(
                     pod,
                     reason="VolumeMount",
@@ -315,11 +321,13 @@ class NodeServicer(csi_grpc.NodeBase):
                     event_type="Normal",
                 )
             except CSIError as e:
+                VOLUME_MOUNTS.labels(result="error").inc()
                 cleanup_failed_volume(gc_root, volume_root)
                 # Attach pod to exception for decorator to emit pod-specific event
                 e.pod = pod
                 raise
             except Exception:
+                VOLUME_MOUNTS.labels(result="error").inc()
                 cleanup_failed_volume(gc_root, volume_root)
                 raise
 
@@ -359,9 +367,20 @@ class NodeServicer(csi_grpc.NodeBase):
             # CSI driver is responsible for unmounting only, not for removing the
             # kubelet-managed mount directory (that's kubelet's job).
             if is_mount(target_path):
-                await unmount(target_path)
+                try:
+                    await unmount(target_path)
+                except Exception:
+                    # Counted before it propagates. A node that cannot unmount
+                    # leaves pods in Terminating, and this is the series that
+                    # says so before somebody opens a shell on the node.
+                    VOLUME_UNMOUNTS.labels(result="error").inc()
+                    raise
+                VOLUME_UNMOUNTS.labels(result="ok").inc()
                 log.debug("unmounted")
             else:
+                # Not counted either way. Kubelet retries an unpublish, so a
+                # path already gone is a repeat of work that was done, and
+                # counting it would inflate the total over the mounts.
                 log.debug("not_mounted")
 
             # Clean up stale gcroots and volume directories based on active volumes.

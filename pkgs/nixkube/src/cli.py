@@ -9,11 +9,15 @@ from pathlib import Path
 import anyio
 import structlog
 
+from . import metrics
 from .constants import (
     BUILDERS_ENABLED,
     ENABLE_COMPAT_DRIVER,
     HOST_MOUNT_PATH,
     KUBE_NODE_NAME,
+    METRICS_ADDR,
+    METRICS_ENABLED,
+    METRICS_PORT,
     NAMESPACE,
     NIX_BUILD_TIMEOUT,
     NRI_ENABLED,
@@ -181,6 +185,9 @@ async def async_main():
         "csi_drivers",
         drivers=["nixkube"] + (["nix.csi.store"] if ENABLE_COMPAT_DRIVER else []),
     )
+
+    if METRICS_ENABLED:
+        metrics.serve(port=METRICS_PORT, addr=METRICS_ADDR)
 
     await run_setup()
 
