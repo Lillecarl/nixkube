@@ -8,7 +8,7 @@ from pathlib import Path
 
 import structlog
 
-from .constants import PYNIXD_ENABLED
+from .constants import GC_COPY_TIMEOUT_SECONDS, PYNIXD_ENABLED
 from .subprocessing import run_captured
 
 logger = structlog.get_logger("nixkube.cache")
@@ -160,6 +160,10 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
                 )
                 await sleep(exp_backoff)
 
+            # The timeout is what makes the retry loop below reachable. With
+            # no deadline, a copy to an unreachable cache never returned, and
+            # `gc_loop` calls this first: one stuck copy stopped collection on
+            # that node until the pod restarted. Issue #38.
             nix_copy = await run_captured(
                 "nix",
                 "copy",
@@ -167,6 +171,7 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
                 "--to",
                 "ssh-ng://nix@pynixd",
                 *path_args,
+                timeout=GC_COPY_TIMEOUT_SECONDS,
             )
             if nix_copy.returncode == 0:
                 log.debug("copy_to_cache_done")

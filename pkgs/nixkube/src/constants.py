@@ -135,6 +135,24 @@ MS_BIND = 4096
 GC_KEEP_SECONDS: int = _parse_int_env("GC_KEEP_SECONDS", "3600")
 GC_INTERVAL_SECONDS: int = _parse_int_env("GC_INTERVAL_SECONDS", "3600")
 
+# Every nix call in the GC loop needs a deadline. The loop awaits one cycle at
+# a time, so a call that never returns ends collection on that node until the
+# pod restarts, and a restart re-enters the same call. Measured on a four-node
+# Talos cluster: 33 hours, zero completed cycles, stores at 1.59 to 4.37 GB.
+# Issue #38.
+#
+# The copy is the generous one: it can move a whole node's store over SSH.
+GC_COPY_TIMEOUT_SECONDS: int = _parse_int_env("GC_COPY_TIMEOUT_SECONDS", "1800")
+GC_PATH_INFO_TIMEOUT_SECONDS: int = _parse_int_env(
+    "GC_PATH_INFO_TIMEOUT_SECONDS", "300"
+)
+GC_DELETE_TIMEOUT_SECONDS: int = _parse_int_env("GC_DELETE_TIMEOUT_SECONDS", "1800")
+
+# Cycles without one completing before the loop says so at error level. Both
+# failures of #38 were silent, and on a Talos node the first visible symptom
+# is the kubelet evicting pods for disk.
+GC_STALL_CYCLES: int = _parse_int_env("GC_STALL_CYCLES", "3")
+
 # Paths baked in at build time by makeWrapperArgs (empty in dev/test environments)
 SETUP_BINSH = os.environ.get("SETUP_BINSH", "")
 SETUP_CACERTS = os.environ.get("SETUP_CACERTS", "")
