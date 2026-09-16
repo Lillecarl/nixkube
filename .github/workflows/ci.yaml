@@ -11,6 +11,10 @@ env:
   UMBRELLA_GIT: '1'
 jobs:
   build-amd64:
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    needs:
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -38,6 +42,10 @@ jobs:
         run: ./nix-nix/bin/push-nix-x86_64-linux
     timeout-minutes: 45
   build-arm64:
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    needs:
+      - umbrella-rev
     runs-on: ubuntu-24.04-arm
     steps:
       - timeout-minutes: 10
@@ -65,9 +73,12 @@ jobs:
         run: ./nix-nix/bin/push-nix-aarch64-linux
     timeout-minutes: 90
   build-manifests:
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     needs:
       - build-amd64
       - build-arm64
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -105,6 +116,10 @@ jobs:
         run: nix run --file . push-citest
     timeout-minutes: 30
   check:
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    needs:
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -142,7 +157,11 @@ jobs:
           git diff --exit-code
     timeout-minutes: 30
   docs-build:
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     if: github.ref == 'refs/heads/develop'
+    needs:
+      - umbrella-rev
     runs-on: ubuntu-24.04
     steps:
       - timeout-minutes: 10
@@ -181,11 +200,15 @@ jobs:
     concurrency:
       cancel-in-progress: false
       group: pages
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     if: github.ref == 'refs/heads/develop'
-    needs: docs-build
+    needs:
+      - docs-build
+      - umbrella-rev
     permissions:
       id-token: write
       pages: write
@@ -197,12 +220,15 @@ jobs:
         uses: actions/deploy-pages@main
     timeout-minutes: 15
   release:
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
     if: startsWith(github.ref, 'refs/tags/v')
     needs:
       - check
       - build-manifests
       - test-kind-cache
       - test-kind-nocache
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -230,7 +256,11 @@ jobs:
           prerelease: false
     timeout-minutes: 30
   test-kind-cache:
-    needs: build-manifests
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    needs:
+      - build-manifests
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -287,7 +317,11 @@ jobs:
         run: nix run --file . ci-debug || true
     timeout-minutes: 45
   test-kind-nocache:
-    needs: build-manifests
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    needs:
+      - build-manifests
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -340,6 +374,10 @@ jobs:
         run: nix run --file . ci-debug || true
     timeout-minutes: 45
   test-qemu:
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    needs:
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -371,7 +409,11 @@ jobs:
         run: nix run --file . umlTest.run
     timeout-minutes: 60
   test-qemu-ci:
-    needs: build-manifests
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    needs:
+      - build-manifests
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -403,7 +445,11 @@ jobs:
         run: nix run --file . ciTest.run
     timeout-minutes: 60
   test-qemu-ci-cache:
-    needs: build-manifests
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    needs:
+      - build-manifests
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -434,6 +480,15 @@ jobs:
       - name: Deploy and test with the pynixd cache, on a guest
         run: nix run --file . ciTestCache.run
     timeout-minutes: 60
+  umbrella-rev:
+    outputs:
+      rev: ${{ steps.resolve.outputs.rev }}
+    runs-on: ubuntu-24.04
+    steps:
+      - id: resolve
+        name: Resolve the umbrella revision
+        run: git ls-remote https://github.com/nixidae/nixidae main | cut -f1 | sed 's/^/rev=/' >> "$GITHUB_OUTPUT"
+    timeout-minutes: 5
 'on':
   pull_request: null
   push:

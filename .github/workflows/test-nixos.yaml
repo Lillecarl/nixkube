@@ -8,6 +8,10 @@ env:
 jobs:
   test-nixos:
     continue-on-error: true
+    env:
+      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
+    needs:
+      - umbrella-rev
     runs-on: ubuntu-latest
     steps:
       - timeout-minutes: 10
@@ -43,6 +47,15 @@ jobs:
           echo "=== Test log output ==="
           cat /tmp/test.log 2>/dev/null || echo "(no test log)"
     timeout-minutes: 60
+  umbrella-rev:
+    outputs:
+      rev: ${{ steps.resolve.outputs.rev }}
+    runs-on: ubuntu-24.04
+    steps:
+      - id: resolve
+        name: Resolve the umbrella revision
+        run: git ls-remote https://github.com/nixidae/nixidae main | cut -f1 | sed 's/^/rev=/' >> "$GITHUB_OUTPUT"
+    timeout-minutes: 5
 'on':
   push:
     branches:

@@ -890,7 +890,12 @@ rec {
   # ci/workflows/*.nix hold them and say why.
   ciWorkflows =
     let
-      ghalib = import sources.ghanix { inherit lib; };
+      ghanix = import sources.ghanix { inherit lib; };
+      # Every job of every workflow reads one umbrella revision, resolved once
+      # per run. ci/workflows/umbrella-rev.nix says what goes wrong without it.
+      ghalib = ghanix // {
+        evalWorkflow = import ./ci/workflows/umbrella-rev.nix ghanix.evalWorkflow;
+      };
       workflow = module: committed: {
         inherit committed;
         value = import module { inherit lib ghalib; };
