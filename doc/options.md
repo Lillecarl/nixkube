@@ -52,6 +52,71 @@ true
 
 
 
+## nixkube\.discardStringContext
+
+
+
+Strip Nix string context from every resource annotated
+` nixkube/discard `, so rendering a manifest does not make the deployer
+realise the store paths it names\.
+
+On by default, and it is an optimisation rather than a correctness
+choice\. The node and pynixd environments are ` buildEnv ` outputs, one
+per enabled system, and ` buildEnv ` sets ` allowSubstitutes = false `\.
+Keeping their context therefore makes a deployer *build* each of
+them, never fetch them\. Measured on an x86_64 machine with binfmt
+off:
+
+error: Cannot build ‘…-nodeEnv\.drv’
+Reason: platform mismatch
+Required system: ‘aarch64-linux’
+
+Its aarch64 dependencies substituted normally; only the ` buildEnv `
+output refused\. So a deployer who has not arranged foreign-platform
+builds cannot render a manifest for a cluster with a second
+architecture\. That is what this avoids, and it is why the default
+holds even though the paths are on cachix: the cache cannot serve a
+derivation that declines to be substituted\.
+
+What it costs\. ` ekn.cachePackage ` defaults to the manifest and finds
+referenced paths through string context, so with this on it finds
+none of these:
+
+store paths named as text in manifest\.json   4
+paths in its closure                         1   (itself)
+
+` ekn deploy ` then reports a successful cache push and seeds none of
+the paths a node needs to boot\. A cluster that relies on that push
+must name the environments itself, through the ` csiPkgs ` module
+argument – ` ekn.cachePackage `’s own documentation carries the
+fragment\.
+
+Turning this off is reasonable when every enabled system is one the
+deployer can realise, or when ` always-allow-substitutes = true ` is
+set, which lets the fetch happen despite ` allowSubstitutes = false `
+and needs no derivation change\. nixkube’s own CI instances turn it
+off for exactly that reason\.
+
+See issue \#29\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
 ## nixkube\.hostMountPath
 
 
@@ -393,7 +458,71 @@ package
 *Default:*
 
 ```nix
-<derivation nix-2.31.3>
+<derivation nix-2.34.8>
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
+## nixkube\.nixConfig
+
+
+
+Shared nix\.conf defaults inherited by node, pynixd controller, and builder\.
+
+
+
+*Type:*
+submodule
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
+## nixkube\.nixConfig\.extraOptions
+
+
+
+Extra lines to add to nix\.conf
+
+
+
+*Type:*
+strings concatenated with “\\n”
+
+
+
+*Default:*
+
+```nix
+""
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
+## nixkube\.nixConfig\.settings
+
+
+
+Settings rendered to nix\.conf
+
+
+
+*Type:*
+open submodule of attribute set of (Nix config atom (null, bool, int, float, str, path or package) or list of (Nix config atom (null, bool, int, float, str, path or package)))
+
+
+
+*Default:*
+
+```nix
+{ }
 ```
 
 *Declared by:*
@@ -522,6 +651,66 @@ open submodule of attribute set of (Nix config atom (null, bool, int, float, str
 
 ```nix
 { }
+```
+
+*Declared by:*
+ - [/kubenix/daemonset\.nix](file:///kubenix/daemonset.nix)
+
+
+
+## nixkube\.node\.tolerations
+
+
+
+Taints the node DaemonSet tolerates, as a Kubernetes ` tolerations `
+list\. Empty by default, so the DaemonSet lands only where an ordinary
+workload would\.
+
+This used to be an unconditional toleration of
+` node-role.kubernetes.io/control-plane:NoSchedule `, which is right on
+a cluster that runs workloads on its control plane – where nixkube
+was developed – and wrong as a default\. Shipped that way it assumes
+every cluster does that, and on one that respects the taint it puts a
+nix-node pod where an ordinary workload would not go\.
+
+Set it to restore the old behaviour where that is what you want:
+
+```
+nixkube.node.tolerations = [
+  {
+    key = "node-role.kubernetes.io/control-plane";
+    operator = "Exists";
+    effect = "NoSchedule";
+  }
+];
+```
+
+
+
+*Type:*
+list of (attribute set)
+
+
+
+*Default:*
+
+```nix
+[ ]
+```
+
+
+
+*Example:*
+
+```nix
+[
+  {
+    key = "node-role.kubernetes.io/control-plane";
+    operator = "Exists";
+    effect = "NoSchedule";
+  }
+]
+
 ```
 
 *Declared by:*
@@ -686,23 +875,49 @@ open submodule of attribute set of (Nix config atom (null, bool, int, float, str
 
 
 
-## nixkube\.pynixd\.builderIdleTimeout
+## nixkube\.pynixd\.builder\.settings
 
 
 
-Seconds of inactivity before an ephemeral builder pod shuts down\.
+Pynixd configuration as a JSON object\. Merged into the PYNIXD_CONFIG
+config file mounted in the pynixd pod\. Corresponds to the PynixdSettings
+pydantic model (see pynixd\.config)\.
+
+Common keys include stores (dict of StoreSpec keyed by store ID),
+ranking weights, GC intervals, etc\. When stores include SSH stores,
+their client keys are auto-discovered from HOME/\.ssh/ if client_keys
+is omitted\.
 
 
 
 *Type:*
-positive integer, meaning >0
+JSON value
 
 
 
 *Default:*
 
 ```nix
-300
+{ }
+```
+
+
+
+*Example:*
+
+```nix
+{
+  stores = {
+    builder1 = {
+      type = "ssh-subprocess";
+      host = "builder.example.com";
+      port = 22;
+      username = "nix";
+      systems = [ "x86_64-linux" ];
+    };
+  };
+}
+
 ```
 
 *Declared by:*
@@ -710,23 +925,39 @@ positive integer, meaning >0
 
 
 
-## nixkube\.pynixd\.builderMax
+## nixkube\.pynixd\.controller\.nixConfig
 
 
 
-Maximum number of ephemeral builder Jobs that pynixd can create\.
+nix\.conf for pynixd pod
 
 
 
 *Type:*
-positive integer, meaning >0
+submodule
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.controller\.nixConfig\.extraOptions
+
+
+
+Extra lines to add to nix\.conf
+
+
+
+*Type:*
+strings concatenated with “\\n”
 
 
 
 *Default:*
 
 ```nix
-3
+""
 ```
 
 *Declared by:*
@@ -734,23 +965,147 @@ positive integer, meaning >0
 
 
 
-## nixkube\.pynixd\.builderMin
+## nixkube\.pynixd\.controller\.nixConfig\.settings
 
 
 
-Minimum number of builder Jobs to keep alive even when idle\.
+Settings rendered to nix\.conf
 
 
 
 *Type:*
-unsigned integer, meaning >=0
+open submodule of attribute set of (Nix config atom (null, bool, int, float, str, path or package) or list of (Nix config atom (null, bool, int, float, str, path or package)))
 
 
 
 *Default:*
 
 ```nix
-1
+{ }
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.controller\.settings
+
+
+
+Pynixd configuration as a JSON object\. Merged into the PYNIXD_CONFIG
+config file mounted in the pynixd pod\. Corresponds to the PynixdSettings
+pydantic model (see pynixd\.config)\.
+
+Common keys include stores (dict of StoreSpec keyed by store ID),
+ranking weights, GC intervals, etc\. When stores include SSH stores,
+their client keys are auto-discovered from HOME/\.ssh/ if client_keys
+is omitted\.
+
+
+
+*Type:*
+JSON value
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+
+
+*Example:*
+
+```nix
+{
+  stores = {
+    builder1 = {
+      type = "ssh-subprocess";
+      host = "builder.example.com";
+      port = 22;
+      username = "nix";
+      systems = [ "x86_64-linux" ];
+    };
+  };
+}
+
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.extraVolumeMounts
+
+
+
+Extra volume mounts keyed by name\. Merged into the pynixd
+container volumeMounts\. Mount external SSH client keys into
+HOME/\.ssh/ for asyncssh auto-discovery\.
+
+
+
+*Type:*
+attribute set of (JSON value)
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+
+
+*Example:*
+
+```nix
+{
+  my-builder-key.mountPath = "/nix/var/nix-csi/root/.ssh/id_ed25519";
+}
+
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.extraVolumes
+
+
+
+Extra Kubernetes volumes keyed by name\. Merged into the
+StatefulSet pod spec volumes\. Useful for mounting Secrets
+containing SSH client keys for external stores\.
+
+
+
+*Type:*
+attribute set of (JSON value)
+
+
+
+*Default:*
+
+```nix
+{ }
+```
+
+
+
+*Example:*
+
+```nix
+{
+  my-builder-key.secret.secretName = "my-builder-key";
+}
+
 ```
 
 *Declared by:*
@@ -783,56 +1138,23 @@ null or signed integer
 
 
 
-## nixkube\.pynixd\.nixConfig
+## nixkube\.pynixd\.settings
 
 
 
-nix\.conf for pynixd pod
+Pynixd configuration as a JSON object\. Merged into the PYNIXD_CONFIG
+config file mounted in the pynixd pod\. Corresponds to the PynixdSettings
+pydantic model (see pynixd\.config)\.
 
-
-
-*Type:*
-submodule
-
-*Declared by:*
- - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
-
-
-
-## nixkube\.pynixd\.nixConfig\.extraOptions
-
-
-
-Extra lines to add to nix\.conf
+Common keys include stores (dict of StoreSpec keyed by store ID),
+ranking weights, GC intervals, etc\. When stores include SSH stores,
+their client keys are auto-discovered from HOME/\.ssh/ if client_keys
+is omitted\.
 
 
 
 *Type:*
-strings concatenated with “\\n”
-
-
-
-*Default:*
-
-```nix
-""
-```
-
-*Declared by:*
- - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
-
-
-
-## nixkube\.pynixd\.nixConfig\.settings
-
-
-
-Settings rendered to nix\.conf
-
-
-
-*Type:*
-open submodule of attribute set of (Nix config atom (null, bool, int, float, str, path or package) or list of (Nix config atom (null, bool, int, float, str, path or package)))
+JSON value
 
 
 
@@ -840,6 +1162,25 @@ open submodule of attribute set of (Nix config atom (null, bool, int, float, str
 
 ```nix
 { }
+```
+
+
+
+*Example:*
+
+```nix
+{
+  stores = {
+    builder1 = {
+      type = "ssh-subprocess";
+      host = "builder.example.com";
+      port = 22;
+      username = "nix";
+      systems = [ "x86_64-linux" ];
+    };
+  };
+}
+
 ```
 
 *Declared by:*
