@@ -306,7 +306,11 @@ rec {
   genModDoc =
     let
       optionsDocs = pkgs.nixosOptionsDoc {
-        inherit (kubenixCI1.eval) options;
+        # `passthru.eval`, not `eval`. easykubenix moved it under passthru and
+        # this line kept the old path, so `nix run --file . genModDoc` has
+        # failed with "attribute 'eval' missing" ever since -- which takes
+        # `just precommit` with it, because that runs gendoc.
+        inherit (kubenixCI1.passthru.eval) options;
         warningsAreErrors = false;
         transformOptions =
           opt:
@@ -328,7 +332,14 @@ rec {
     pkgs.writeScriptBin "genModDoc" # bash
       ''
         #! ${pkgs.runtimeShell}
-        cp --no-preserve=mode ${optionsDocs.optionsCommonMark} $GIT_ROOT/doc/options.md
+        set -euo pipefail
+        # GIT_ROOT comes from the dev shell. Without it this wrote to
+        # `/doc/options.md`, which fails with "No such file or directory" and,
+        # unset `-e`, still exited 0. Ask git when the variable is absent, so
+        # `nix run --file . genModDoc` works from any directory in the
+        # checkout and from no shell at all.
+        root="''${GIT_ROOT:-$(${lib.getExe pkgs.git} rev-parse --show-toplevel)}"
+        cp --no-preserve=mode ${optionsDocs.optionsCommonMark} "$root/doc/options.md"
       '';
 
   # Evaluate the hostPath+subPath assertion against a container that has no
