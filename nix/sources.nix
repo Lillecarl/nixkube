@@ -43,27 +43,21 @@ let
   # The umbrella itself, when this checkout is on its own.
   #
   # **This fetch is the one the umbrella cannot cover.** Every other source
-  # goes through the umbrella's own `nix/resolve.nix`, which UMBRELLA_GIT
-  # already reaches. This one has to find the umbrella first, so it reads the
-  # variable a second time.
+  # goes through the umbrella's own `nix/resolve.nix`. This one has to find
+  # the umbrella first.
   #
-  # `github:` here is unlocked -- no revision, no narHash -- so Nix asks
-  # api.github.com for the head of the default branch on every evaluation
-  # that `tarball-ttl` does not answer from cache. That is one call per job
-  # before any source is resolved at all. Anonymous api.github.com allows 60
-  # an hour per IP and GitHub's runners share a NAT pool.
+  # UMBRELLA_REV names it, and that is what makes two jobs of one CI run
+  # agree. `ci/walkback.sh` computes it: the umbrella that locks the nearest
+  # landed ancestor of HEAD, read from the umbrella remote refs named
+  # `refs/umbrella/nixkube/*`. `umbrella mark` publishes them.
   #
-  # The git reference resolves the same head over the git protocol, which
-  # that limit does not count.
-  # UMBRELLA_REV pins it, and that is what makes two jobs of one CI run agree.
-  #
-  # Without it the reference below is unlocked, so it resolves the head of the
-  # default branch again in every job. `umbrella land` pushes the working
-  # copies, which starts the run, and the umbrella lock commit follows
-  # seconds later, so a run straddles the push and its jobs read two
-  # revisions. Measured in nixkube run 35026926963: seven seconds between the
-  # first job starting and the commit, two `cacheEnv` paths, and a job that
-  # asked for one nothing had built. Issue Lillecarl/nanopynix#301.
+  # Before umbrella 0.1.0 this fell back to an unlocked
+  # `github:nixidae/nixidae`, which resolves the head of the default branch at
+  # evaluation time, every time `tarball-ttl` does not answer from cache. So
+  # the same commit gave a different answer an hour later, with nothing here
+  # changed and no lock moved. Measured 2026-09-16 by a consumer whose nixidae
+  # pin had not moved since 2026-09-14 and whose render hash moved anyway,
+  # twice. Issue Lillecarl/nanopynix#301.
   umbrellaRev = builtins.getEnv "UMBRELLA_REV";
 
   # The umbrella revision this checkout was written against, when it records
@@ -105,10 +99,24 @@ let
       "git+https://github.com/nixidae/nixidae?rev=${umbrellaRev}&shallow=1"
     else if pinned != "" then
       "git+https://github.com/nixidae/nixidae?rev=${pinned}&shallow=1"
-    else if builtins.getEnv "UMBRELLA_GIT" != "" then
-      "git+https://github.com/nixidae/nixidae?shallow=1"
     else
-      "github:nixidae/nixidae";
+      # **No third source.** `builtins.tryEval` does not catch a failed
+      # `fetchGit` -- measured, not assumed -- so an arm that guessed at a
+      # mapping ref could not fall back when that ref is absent. The lookup
+      # belongs outside Nix, in `ci/walkback.sh`.
+      throw ''
+        nix/sources.nix: no umbrella to build nixkube against.
+
+        Set UMBRELLA_REV, or write an umbrella revision into
+        nix/umbrella.rev. This prints the one that locks this checkout:
+
+          ci/walkback.sh https://github.com/nixidae/nixidae nixkube
+
+        umbrella 0.1.0 removed the arm that fell back to the head of the
+        umbrella default branch. That arm was unlocked, so one commit of
+        this repository rendered differently from one hour to the next.
+        See umbrella/docs/releases.md.
+      '';
 
   wire =
     if inUmbrella then
