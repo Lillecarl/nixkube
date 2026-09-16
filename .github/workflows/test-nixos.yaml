@@ -52,9 +52,14 @@ jobs:
       rev: ${{ steps.resolve.outputs.rev }}
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 100
       - id: resolve
         name: Resolve the umbrella revision
-        run: git ls-remote https://github.com/nixidae/nixidae main | cut -f1 | sed 's/^/rev=/' >> "$GITHUB_OUTPUT"
+        run: |
+          rev=$(ci/walkback.sh https://github.com/nixidae/nixidae nixkube)
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
     timeout-minutes: 5
 'on':
   push:
