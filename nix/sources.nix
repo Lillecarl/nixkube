@@ -108,7 +108,8 @@ let
         nix/sources.nix: no umbrella to build nixkube against.
 
         Set UMBRELLA_REV, or write an umbrella revision into
-        nix/umbrella.rev. This prints the one that locks this checkout:
+        nix/umbrella.rev. This prints the umbrella that locks the
+        nearest landed ancestor of HEAD:
 
           ci/walkback.sh https://github.com/nixidae/nixidae nixkube
 

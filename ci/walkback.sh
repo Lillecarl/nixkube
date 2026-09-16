@@ -24,10 +24,19 @@ UMBRELLA_URL="${1:?usage: walkback.sh <umbrella url> <child name> [max commits]}
 CHILD="${2:?usage: walkback.sh <umbrella url> <child name> [max commits]}"
 MAX="${3:-100}"
 
+# `set -e` does not see a failure inside `< <(...)`, so ask git separately.
+# Without this a network error leaves the table empty and reads as "the
+# umbrella has never locked this child".
+if ! refs=$(git ls-remote "$UMBRELLA_URL" "refs/umbrella/$CHILD/*"); then
+  echo "walkback: cannot read refs from $UMBRELLA_URL." >&2
+  exit 1
+fi
+
 declare -A LOCKED
 while read -r umbrella_rev refname; do
+  [ -n "$refname" ] || continue
   LOCKED["${refname#refs/umbrella/"$CHILD"/}"]="$umbrella_rev"
-done < <(git ls-remote "$UMBRELLA_URL" "refs/umbrella/$CHILD/*")
+done <<<"$refs"
 
 if [ "${#LOCKED[@]}" -eq 0 ]; then
   echo "walkback: the umbrella has never locked a revision of '$CHILD'." >&2
