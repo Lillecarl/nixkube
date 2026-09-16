@@ -15,12 +15,7 @@ from __future__ import annotations
 import os
 
 import structlog
-from prometheus_client import (
-    REGISTRY,
-    Counter,
-    Histogram,
-    start_http_server,
-)
+from prometheus_client import REGISTRY, Counter, Histogram, start_http_server
 from prometheus_client.core import GaugeMetricFamily
 
 from .constants import NIX_ROOT
