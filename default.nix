@@ -353,6 +353,45 @@ rec {
   #
   # Every container nixkube declares has volumeMounts, so none of the six
   # instances above can produce the shape. This attribute does, on purpose.
+  /*
+    `metrics.podMonitor` emits one object, and turns the other path off.
+
+    The two discovery mechanisms are mutually exclusive in practice and the
+    failure is silent both ways round: an operator ignores the
+    `prometheus.io/*` annotations, so a cluster with only those scrapes
+    nothing and looks configured; a cluster with both scrapes every pod twice.
+
+    The named port matters as much as the object. A PodMonitor selecting
+    `port = "metrics"` against a container that declares no such name is
+    accepted by the apiserver and scrapes nothing. Issue #40.
+  */
+  metricsPodMonitorShape =
+    let
+      render =
+        podMonitor:
+        (kubenixInstance {
+          module = {
+            nixkube.metrics.podMonitor = podMonitor;
+          };
+        }).config;
+      off = render false;
+      on = render true;
+      nsOf = cfg: cfg.kubernetes.resources.nixkube;
+      podOf = cfg: (nsOf cfg).DaemonSet.nix-node.spec.template;
+      nodeContainer = cfg: lib.head (lib.filter (c: c.name == "nix-node") (podOf cfg).spec.containers);
+      annotated = cfg: (podOf cfg).metadata.annotations ? "prometheus.io/scrape";
+      monitor = (nsOf on).PodMonitor.nixkube;
+    in
+    assert !((nsOf off) ? PodMonitor);
+    assert (nsOf on) ? PodMonitor;
+    assert annotated off;
+    assert !(annotated on);
+    assert monitor.spec.selector.matchLabels."app.kubernetes.io/component" == "node";
+    assert (lib.head monitor.spec.podMetricsEndpoints).port == "metrics";
+    # The endpoint names a port, so a port of that name has to exist.
+    assert lib.any (p: p.name == "metrics") (nodeContainer on).ports;
+    pkgs.runCommand "metrics-podmonitor-shape" { } "echo ok > $out";
+
   assertionsNullShape =
     let
       instance = kubenixInstance {
@@ -910,6 +949,7 @@ rec {
       assertionsNullShape
       assertionsNeighbourScope
       builderSettingsOverride
+      metricsPodMonitorShape
       nodeDriverReadiness
       pynixdProbesSurviveAPush
       sourcesAreLocked

@@ -79,6 +79,30 @@ in
     in
     lib.mkIf cfg.enable {
       kubernetes.resources.${cfg.namespace} = {
+        # **The operator's own kind, and the checked path.** An operator
+        # ignores the `prometheus.io/*` annotations on the pod template and
+        # selects pods by this object instead. A VictoriaMetrics operator
+        # converts it into a VMPodScrape, so one object serves both, and this
+        # kind has a real schema so a render is validated against an
+        # apiserver. `metrics.podMonitor` says why not a VM-native CR, and
+        # what start-up order makes an unconverted PodMonitor look like an
+        # unscraped one. Issue #40.
+        PodMonitor = lib.mkIf (cfg.metrics.enable && cfg.metrics.podMonitor) {
+          nixkube = {
+            metadata.labels = labels;
+            spec = {
+              selector.matchLabels = matchLabels;
+              podMetricsEndpoints = [
+                {
+                  # By name, not by number: the container declares the port
+                  # under this name, so the two move together.
+                  port = "metrics";
+                  path = "/metrics";
+                }
+              ];
+            };
+          };
+        };
         DaemonSet.nix-node = {
           metadata.labels = labels;
           metadata.annotations."nixkube/discard" = "true";
@@ -149,6 +173,14 @@ in
                         "nixkube"
                       ];
                       securityContext.privileged = true;
+                      # The port `cli.py` serves `/metrics` on. Declared so
+                      # that `metrics.podMonitor` can select it by name, and
+                      # named so the two move together. Issue #40.
+                      ports = lib.mkIf cfg.metrics.enable (
+                        lib.mkNamedList {
+                          metrics.containerPort = cfg.metrics.port;
+                        }
+                      );
 
                       /*
                         Ask the livenessprobe sidecar whether the driver still

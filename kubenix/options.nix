@@ -119,9 +119,41 @@ in
           Prometheus configured for annotation discovery reads. Turn this off
           where a PodMonitor or a ServiceMonitor selects the pods instead, so
           that the two do not both scrape.
+
+          Defaults to the opposite of `podMonitor`: an operator ignores these
+          annotations, so leaving both on gives a cluster where one discovery
+          path is dead and looks live.
         '';
         type = lib.types.bool;
-        default = true;
+        default = !config.nixkube.metrics.podMonitor;
+        defaultText = lib.literalExpression "!config.nixkube.metrics.podMonitor";
+      };
+      podMonitor = lib.mkOption {
+        description = ''
+          Emit a `monitoring.coreos.com/v1` PodMonitor selecting the node
+          pods.
+
+          **Off by default, because it asserts something about the cluster.**
+          A PodMonitor needs the prometheus-operator CRDs to exist, and
+          nixkube neither ships them nor assumes them: a consumer installs
+          them as its own component and turns this on to say so.
+
+          A PodMonitor and not a `VMPodScrape`, even on a VictoriaMetrics
+          cluster. The VictoriaMetrics operator converts prometheus-operator
+          objects into its own, and the prometheus-operator kind has a real
+          schema, so validation checks this object against an apiserver. A
+          VM-native CR declares `x-kubernetes-preserve-unknown-fields` and
+          would ship unchecked, which gives up the only reason to prefer one
+          kind over the other.
+
+          **The VictoriaMetrics operator converts only what it knew at
+          start-up.** On a cluster where the CRDs and this object arrive in
+          one apply, the PodMonitor lands, nothing converts it, and nothing
+          reports that. Restart the operator once. A PodMonitor that is never
+          converted looks exactly like one that is never scraped.
+        '';
+        type = lib.types.bool;
+        default = false;
       };
     };
     nodeBuildTimeout = lib.mkOption {
