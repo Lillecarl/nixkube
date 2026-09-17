@@ -900,7 +900,12 @@ rec {
   # If it ever stops being worth 100s, move it to `build-amd64`, which builds
   # the same image and so already holds the closure. Dropping it is the wrong
   # answer; nothing else asks this question.
-  checks = {
+  # `all` is `attrValues` of this set and not a second list. The list was the
+  # second list, and it dropped `pynixdProbesSurviveAPush`: the check existed,
+  # `nix build --file . checks.pynixdProbesSurviveAPush` passed, and the
+  # `check` job never ran it, because that job builds `all`. A member added to
+  # one place and not the other is silent both ways round.
+  checkMembers = {
     inherit
       assertionsNullShape
       assertionsNeighbourScope
@@ -923,21 +928,11 @@ rec {
     # The suite only ran inside `build-amd64`, so the feedback came after a
     # full environment build rather than in seconds.
     pynixd-nixkube-tests = pkgs.pynixd-nixkube;
+  };
+
+  checks = checkMembers // {
     all = pkgs.runCommand "nixkube-checks" {
-      checks = [
-        assertionsNullShape
-        assertionsNeighbourScope
-        builderSettingsOverride
-        nodeDriverReadiness
-        sourcesAreLocked
-        ciWorkflowCheck
-        docOptionsCheck
-        builderPresentsPinnedHostKey
-        noPrivateKeysInManifest
-        probeWatchHasRbac
-        umlImagesMatch
-        pkgs.pynixd-nixkube
-      ];
+      checks = builtins.attrValues checkMembers;
     } "printf '%s\\n' $checks > $out";
   };
 
