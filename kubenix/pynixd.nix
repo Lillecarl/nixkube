@@ -15,6 +15,31 @@ let
   image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
   storeVolumeAttributes = lib.mapAttrs (_: pkgs: pkgs.nixkube-pynixd-env) csiPkgs;
 
+  # The controller and a builder answer the same way and take the same kind of
+  # push, so one shape for both. See `nixkube.pynixd.probes` for why the
+  # kubelet's own defaults are not enough. Issue #37.
+  probes =
+    let
+      p = cfg.pynixd.probes;
+      tcp = {
+        tcpSocket.port = "ssh";
+        inherit (p) timeoutSeconds periodSeconds;
+      };
+    in
+    {
+      readinessProbe = tcp // {
+        inherit (p) failureThreshold;
+      };
+      livenessProbe = tcp // {
+        inherit (p) failureThreshold;
+      };
+      # Liveness and readiness do not run until this passes, so a cold pynixd
+      # restoring its store is not killed part way through.
+      startupProbe = tcp // {
+        failureThreshold = p.startupFailureThreshold;
+      };
+    };
+
   pynixdLabels = cfg.labels // {
     "app.kubernetes.io/component" = "pynixd";
   };
@@ -88,6 +113,50 @@ in
           ./keys/deploy.pub
         ]
       '';
+    };
+    probes = {
+      timeoutSeconds = lib.mkOption {
+        description = ''
+          How long the kubelet waits for the TCP dial of one probe.
+
+          **The kubelet's own default is 1 second, and that is not enough.**
+          A pynixd busy ingesting a multi-hundred-megabyte store transfer does
+          not answer a dial inside a second, so the liveness probe fails, the
+          kubelet kills the container, and the push dies with it. Measured
+          twice on one cluster while pushing a 186 MiB path: `Liveness probe
+          failed: dial tcp ...: i/o timeout`, then `exitCode: 143`.
+
+          The push does not report a probe failure. It reports `Nix daemon
+          disconnected unexpectedly`, which sends the investigation towards
+          the network instead. Issue #37.
+        '';
+        type = lib.types.ints.positive;
+        default = 10;
+      };
+      periodSeconds = lib.mkOption {
+        description = "How often the kubelet probes.";
+        type = lib.types.ints.positive;
+        default = 10;
+      };
+      failureThreshold = lib.mkOption {
+        description = ''
+          Failed probes in a row before the kubelet acts. With the defaults
+          here that is 60 seconds of no answer, against the 3 seconds the
+          kubelet's own defaults give.
+        '';
+        type = lib.types.ints.positive;
+        default = 6;
+      };
+      startupFailureThreshold = lib.mkOption {
+        description = ''
+          The same, for the startup probe. Liveness and readiness do not run
+          until the startup probe passes, so this is how long a cold pynixd
+          may take to restore its store before anything kills it. With the
+          default period that is ten minutes.
+        '';
+        type = lib.types.ints.positive;
+        default = 60;
+      };
     };
     storageClassName = lib.mkOption {
       description = "StorageClass for the pynixd PVC. null uses the cluster's default StorageClass.";
@@ -282,8 +351,7 @@ in
                   ports = lib.mkNamedList {
                     ssh.containerPort = 22;
                   };
-                  readinessProbe.tcpSocket.port = "ssh";
-                  livenessProbe.tcpSocket.port = "ssh";
+                  inherit (probes) readinessProbe livenessProbe startupProbe;
                   volumeMounts = lib.mkNamedList (
                     {
                       nix-config.mountPath = "/etc/nix";
@@ -491,8 +559,7 @@ in
                 ports = lib.mkNamedList {
                   ssh.containerPort = 22;
                 };
-                readinessProbe.tcpSocket.port = "ssh";
-                livenessProbe.tcpSocket.port = "ssh";
+                inherit (probes) readinessProbe livenessProbe startupProbe;
                 volumeMounts = lib.mkNamedList {
                   nix-config.mountPath = "/etc/nix";
                   nix-store = {

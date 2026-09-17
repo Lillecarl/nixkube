@@ -1218,6 +1218,116 @@ null or signed integer
 
 
 
+## nixkube\.pynixd\.probes\.failureThreshold
+
+
+
+Failed probes in a row before the kubelet acts\. With the defaults
+here that is 60 seconds of no answer, against the 3 seconds the
+kubelet’s own defaults give\.
+
+
+
+*Type:*
+positive integer, meaning >0
+
+
+
+*Default:*
+
+```nix
+6
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.probes\.periodSeconds
+
+
+
+How often the kubelet probes\.
+
+
+
+*Type:*
+positive integer, meaning >0
+
+
+
+*Default:*
+
+```nix
+10
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.probes\.startupFailureThreshold
+
+
+
+The same, for the startup probe\. Liveness and readiness do not run
+until the startup probe passes, so this is how long a cold pynixd
+may take to restore its store before anything kills it\. With the
+default period that is ten minutes\.
+
+
+
+*Type:*
+positive integer, meaning >0
+
+
+
+*Default:*
+
+```nix
+60
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.probes\.timeoutSeconds
+
+
+
+How long the kubelet waits for the TCP dial of one probe\.
+
+**The kubelet’s own default is 1 second, and that is not enough\.**
+A pynixd busy ingesting a multi-hundred-megabyte store transfer does
+not answer a dial inside a second, so the liveness probe fails, the
+kubelet kills the container, and the push dies with it\. Measured
+twice on one cluster while pushing a 186 MiB path: ` Liveness probe failed: dial tcp ...: i/o timeout `, then ` exitCode: 143 `\.
+
+The push does not report a probe failure\. It reports ` Nix daemon disconnected unexpectedly `, which sends the investigation towards
+the network instead\. Issue \#37\.
+
+
+
+*Type:*
+positive integer, meaning >0
+
+
+
+*Default:*
+
+```nix
+10
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
 ## nixkube\.pynixd\.settings
 
 

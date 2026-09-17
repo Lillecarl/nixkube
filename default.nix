@@ -572,6 +572,46 @@ rec {
       < node.livenessProbe.failureThreshold * node.livenessProbe.periodSeconds;
     pkgs.runCommand "node-driver-readiness" { } "echo ok > $out";
 
+  # A probe that a busy pynixd cannot answer kills the push it is busy with.
+  #
+  # The kubelet's own `timeoutSeconds` is 1. A pynixd ingesting a
+  # multi-hundred-megabyte store transfer does not answer a dial inside a
+  # second, so the liveness probe fails and the container is killed. Measured
+  # twice on one cluster while pushing 186 MiB: `exitCode: 143`,
+  # `restartCount: 2`. The push reports `Nix daemon disconnected
+  # unexpectedly`, never a probe failure, so nothing points at the probe.
+  # Issue Lillecarl/nixkube#37.
+  #
+  # Asserted on the rendered pod spec, because the defect was a field nobody
+  # wrote: an option-level check would have passed while the kubelet applied
+  # its own default.
+  pynixdProbesSurviveAPush =
+    let
+      instance = kubenixInstance { };
+      res = instance.config.kubernetes.resources.nixkube;
+      # A StatefulSet keeps its pod spec under `spec.template.spec`, a
+      # PodTemplate under `template.spec`.
+      containerNamed = podSpec: name: lib.head (lib.filter (c: c.name == name) podSpec.containers);
+      subjects = {
+        controller = containerNamed res.StatefulSet.pynixd.spec.template.spec "pynixd";
+        builder = containerNamed res.PodTemplate.nixkube-builder.template.spec "pynixd";
+      };
+      ok =
+        c:
+        # The whole of the defect: absent means 1.
+        assert c.livenessProbe.timeoutSeconds > 1;
+        assert c.readinessProbe.timeoutSeconds > 1;
+        # One slow answer must not kill it either.
+        assert c.livenessProbe.failureThreshold > 1;
+        # A cold pynixd restoring its store gets longer than a running one.
+        assert
+          c.startupProbe.failureThreshold * c.startupProbe.periodSeconds
+          > c.livenessProbe.failureThreshold * c.livenessProbe.periodSeconds;
+        true;
+    in
+    assert lib.all ok (lib.attrValues subjects);
+    pkgs.runCommand "pynixd-probes-survive-a-push" { } "echo ok > $out";
+
   # Does any private key reach the Nix store?
   #
   # /nix/store is world readable, and a manifest rendered here is a store
@@ -866,6 +906,7 @@ rec {
       assertionsNeighbourScope
       builderSettingsOverride
       nodeDriverReadiness
+      pynixdProbesSurviveAPush
       sourcesAreLocked
       ciWorkflowCheck
       docOptionsCheck
