@@ -905,6 +905,7 @@ rec {
   # module, so this asks about the caches a node really carries.
   assert-cached = pkgs.callPackage ./pkgs/assert-cached {
     substituters = kubenixApply.config.nixkube.nixConfig.settings.substituters;
+    inherit (kubenixApply.passthru) ekn;
   };
 
   # Does this attribute build on the machine that is asked to build it?

@@ -31,9 +31,13 @@ in
     #   88.48s  pynixd-0
     #
     # That is enough to push nri-hello-ro and nri-hello-rw past the
-    # `--timeout=300s` in ci.yaml, and it masks the cache gate as well:
-    # assert_cached.py raises Indeterminate on an unreachable substituter, so
-    # a FAIL becomes UNKNOWN.
+    # `--timeout=300s` in ci.yaml, and it reaches the cache gate as well.
+    #
+    # The gate is `ekn`'s `storecheck` now, and it treats an unreachable
+    # substituter as a failure rather than as an unknown: a substituter that
+    # will not answer needs a different fix from one that is missing a path,
+    # and passing either would be going ahead without the guard. So a
+    # substituter listed here and not reachable fails the check outright.
     #
     # It now lives on kubenixCI2, which is the instance the NixOS test uses.
     # See issue #30.
