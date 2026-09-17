@@ -979,9 +979,10 @@ rec {
 
   # Every GitHub Actions workflow as a value, beside the file it renders to.
   # ci/workflows/*.nix hold them and say why.
+  ghanix = import sources.ghanix { inherit lib; };
+
   ciWorkflows =
     let
-      ghanix = import sources.ghanix { inherit lib; };
       # Every job of every workflow reads one umbrella revision, resolved once
       # per run. ci/workflows/umbrella-rev.nix says what goes wrong without it.
       ghalib = ghanix // {
@@ -999,7 +1000,7 @@ rec {
 
   # Those values as the files GitHub reads.
   #
-  # `ci/to_yaml.py` and not `pkgs.formats.yaml`, which is remarshal: remarshal
+  # `ghanix.toYamlScript` and not `pkgs.formats.yaml`, which is remarshal: remarshal
   # writes a multi-line string as one escaped double-quoted scalar, so a
   # ten-line `run:` body arrives as a single 600-column line holding `\n`.
   # The script writes those as literal blocks, and emits no `%YAML 1.1`
@@ -1036,7 +1037,7 @@ rec {
       ''
         {
           printf '%s\n' ${lib.escapeShellArg header}
-          python3 ${./ci/to_yaml.py} "$valuePath"
+          python3 ${ghanix.toYamlScript} "$valuePath"
         } > out.yaml
         HOME=$PWD yamlfmt out.yaml
         mv out.yaml $out
