@@ -358,7 +358,6 @@ in
                   volumeMounts = lib.mkNamedList {
                     nix-store.mountPath = "/nix-volume";
                     nix-config.mountPath = "/etc/nix";
-                    nix-key.mountPath = "/etc/nix-key";
 
                     ssh-config.mountPath = "/etc/ssh";
                     ssh-key.mountPath = "/etc/ssh-key";
