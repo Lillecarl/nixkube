@@ -1,16 +1,19 @@
 # SPDX-License-Identifier: MIT
 
+import asyncio
 import os
 import tempfile
 from pathlib import Path
 
-from src.hardlinks import deref_hardlink_tree, hardlink_tree
+import pytest
+from src.hardlinks import _YIELD_EVERY, deref_hardlink_tree, hardlink_tree
 
 
 class TestHardlinkTree:
     """Tests for hardlink_tree function."""
 
-    def test_hardlink_single_file(self):
+    @pytest.mark.asyncio
+    async def test_hardlink_single_file(self):
         """Hardlink a single file."""
         with tempfile.TemporaryDirectory() as tmpdir:
             src_file = Path(tmpdir) / "src" / "file.txt"
@@ -18,14 +21,15 @@ class TestHardlinkTree:
             src_file.write_text("content")
 
             dst_file = Path(tmpdir) / "dst" / "file.txt"
-            hardlink_tree(src_file, dst_file)
+            await hardlink_tree(src_file, dst_file)
 
             assert dst_file.exists()
             assert dst_file.read_text() == "content"
             # Check they're hardlinks (same inode)
             assert os.stat(src_file).st_ino == os.stat(dst_file).st_ino
 
-    def test_hardlink_directory(self):
+    @pytest.mark.asyncio
+    async def test_hardlink_directory(self):
         """Hardlink a directory tree."""
         with tempfile.TemporaryDirectory() as tmpdir:
             src_dir = Path(tmpdir) / "src"
@@ -35,12 +39,13 @@ class TestHardlinkTree:
             (src_dir / "subdir" / "file2.txt").write_text("data2")
 
             dst_dir = Path(tmpdir) / "dst"
-            hardlink_tree(src_dir, dst_dir)
+            await hardlink_tree(src_dir, dst_dir)
 
             assert (dst_dir / "file1.txt").read_text() == "data1"
             assert (dst_dir / "subdir" / "file2.txt").read_text() == "data2"
 
-    def test_hardlink_symlink_preserved(self):
+    @pytest.mark.asyncio
+    async def test_hardlink_symlink_preserved(self):
         """Hardlink should preserve symlinks."""
         with tempfile.TemporaryDirectory() as tmpdir:
             src_dir = Path(tmpdir) / "src"
@@ -51,7 +56,7 @@ class TestHardlinkTree:
             os.symlink("target.txt", link_path)
 
             dst_dir = Path(tmpdir) / "dst"
-            hardlink_tree(src_dir, dst_dir)
+            await hardlink_tree(src_dir, dst_dir)
 
             dst_link = dst_dir / "link"
             assert dst_link.is_symlink()
@@ -61,7 +66,8 @@ class TestHardlinkTree:
 class TestDerefHardlinkTree:
     """Tests for deref_hardlink_tree function."""
 
-    def test_dereference_symlink_in_store(self):
+    @pytest.mark.asyncio
+    async def test_dereference_symlink_in_store(self):
         """Symlink to /nix/store target should be dereferenced."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create fake /nix/store structure
@@ -77,14 +83,15 @@ class TestDerefHardlinkTree:
             os.symlink(str(target), str(link))
 
             dst = Path(tmpdir) / "output"
-            deref_hardlink_tree(src_dir, dst)
+            await deref_hardlink_tree(src_dir, dst)
 
             # Symlink should be dereferenced (file should exist, not symlink)
             result_link = dst / "link"
             assert result_link.exists()
             assert result_link.read_text() == "target content"
 
-    def test_broken_symlink_in_store_copied(self):
+    @pytest.mark.asyncio
+    async def test_broken_symlink_in_store_copied(self):
         """Broken symlink in /nix/store should be copied as-is."""
         with tempfile.TemporaryDirectory() as tmpdir:
             store_dir = Path(tmpdir) / "nix" / "store"
@@ -97,14 +104,15 @@ class TestDerefHardlinkTree:
             os.symlink("/nix/store/nonexistent-path", broken_link)
 
             dst = Path(tmpdir) / "output"
-            deref_hardlink_tree(src_dir, dst)
+            await deref_hardlink_tree(src_dir, dst)
 
             result_link = dst / "broken"
             # Should be symlink, not dereferenced
             assert result_link.is_symlink()
             assert os.readlink(result_link) == "/nix/store/nonexistent-path"
 
-    def test_symlink_outside_store_copied(self):
+    @pytest.mark.asyncio
+    async def test_symlink_outside_store_copied(self):
         """Symlink pointing outside /nix/store should be copied as-is."""
         with tempfile.TemporaryDirectory() as tmpdir:
             store_dir = Path(tmpdir) / "nix" / "store"
@@ -118,26 +126,28 @@ class TestDerefHardlinkTree:
             os.symlink("/etc/passwd", link)
 
             dst = Path(tmpdir) / "output"
-            deref_hardlink_tree(src_dir, dst)
+            await deref_hardlink_tree(src_dir, dst)
 
             result_link = dst / "external_link"
             assert result_link.is_symlink()
             assert os.readlink(result_link) == "/etc/passwd"
 
-    def test_regular_file_hardlinked(self):
+    @pytest.mark.asyncio
+    async def test_regular_file_hardlinked(self):
         """Regular files should be hardlinked."""
         with tempfile.TemporaryDirectory() as tmpdir:
             src_file = Path(tmpdir) / "src_file.txt"
             src_file.write_text("content")
 
             dst_file = Path(tmpdir) / "dst_file.txt"
-            deref_hardlink_tree(src_file, dst_file)
+            await deref_hardlink_tree(src_file, dst_file)
 
             assert dst_file.read_text() == "content"
             # Should be hardlinks (same inode)
             assert os.stat(src_file).st_ino == os.stat(dst_file).st_ino
 
-    def test_nested_structure_with_symlinks(self):
+    @pytest.mark.asyncio
+    async def test_nested_structure_with_symlinks(self):
         """Complex nested structure with mixed symlinks and files."""
         with tempfile.TemporaryDirectory() as tmpdir:
             store_dir = Path(tmpdir) / "nix" / "store"
@@ -161,21 +171,55 @@ class TestDerefHardlinkTree:
             os.symlink(str(target), src / "link_to_target")
 
             dst = Path(tmpdir) / "output"
-            deref_hardlink_tree(src, dst)
+            await deref_hardlink_tree(src, dst)
 
             assert (dst / "main").read_text() == "executable"
             assert (dst / "lib" / "lib.so").read_text() == "library"
             # Symlink to target should be dereferenced
             assert (dst / "link_to_target" / "real.so").read_text() == "real library"
 
-    def test_empty_directory(self):
+    @pytest.mark.asyncio
+    async def test_empty_directory(self):
         """Empty directory should be created at destination."""
         with tempfile.TemporaryDirectory() as tmpdir:
             src_dir = Path(tmpdir) / "empty"
             src_dir.mkdir()
 
             dst = Path(tmpdir) / "output"
-            deref_hardlink_tree(src_dir, dst)
+            await deref_hardlink_tree(src_dir, dst)
 
             assert dst.exists()
             assert dst.is_dir()
+
+
+class TestEventLoopStaysAlive:
+    """The reason these functions are async at all.
+
+    `prepare_volume` runs on the loop that serves the NRI heartbeat and the
+    ZeroMQ REP socket, and `nri-wait` gives up after 30s of silence. A walk
+    that never yields kills the container it is linking a store into.
+    Issue #45.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_walk_lets_another_task_run(self):
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0)
+                ticks += 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = Path(tmpdir) / "src"
+            src_dir.mkdir()
+            # More than one checkpoint's worth of entries.
+            for i in range(_YIELD_EVERY * 3):
+                (src_dir / f"f{i:05d}").write_text("x")
+
+            pump = asyncio.create_task(ticker())
+            await hardlink_tree(src_dir, Path(tmpdir) / "dst")
+            pump.cancel()
+
+        assert ticks > 0, "the walk never gave the loop a turn"

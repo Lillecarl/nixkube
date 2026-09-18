@@ -57,7 +57,7 @@ async def run_setup() -> None:
         if src_str:
             src = Path(src_str)
             for entry in os.scandir(src):
-                hardlink_tree(Path(entry.path), root / entry.name)
+                await hardlink_tree(Path(entry.path), root / entry.name)
 
     # Write /etc/passwd, /etc/group, /etc/nsswitch.conf.
     # Mirrors users.nix: root, nix (ssh to cache), nixbld1-32 (nix sandboxed builds).

@@ -75,7 +75,7 @@ async def prepare_volume(
 
     # Copy closure to substore
     hardlink_start = time.perf_counter()
-    hardlink_closure(store_paths, volume_root / "nix/store")
+    await hardlink_closure(store_paths, volume_root / "nix/store")
     logger.debug(
         "hardlinked_paths",
         volume_root=volume_root,
@@ -101,7 +101,7 @@ async def prepare_volume(
         await install_result_link(volume_root, primary_package)
         # Create hardlink farm of primary package to volume_root
         deref_start = time.perf_counter()
-        deref_hardlink_tree(primary_package, volume_root)
+        await deref_hardlink_tree(primary_package, volume_root)
         logger.debug(
             "deref_hardlink_tree_done",
             elapsed=round(time.perf_counter() - deref_start, 3),
