@@ -29,6 +29,11 @@
   # Merged over what the venv projection already carries (`venv`, `package`,
   # `version`). For a build artefact a consumer reads off the application.
   passthru ? { },
+  # Needed only where the project installs more than one program. With one,
+  # pyproject.nix names it; with several it names none, and `lib.getExe` then
+  # guesses the derivation's own name -- which here is `<name>-wrapped`, a
+  # path that does not exist.
+  mainProgram ? null,
 }:
 
 let
@@ -48,9 +53,11 @@ let
         "${value}"
       ]) env
     );
+  meta = app.meta // lib.optionalAttrs (mainProgram != null) { inherit mainProgram; };
 in
 if wrapperArgs == [ ] then
   app.overrideAttrs (old: {
+    inherit meta;
     passthru = old.passthru // passthru;
   })
 else
@@ -66,6 +73,6 @@ else
         makeWrapper "${app}/bin/$base" "$program" ${lib.escapeShellArgs wrapperArgs}
       done
     '';
-    inherit (app) meta;
+    inherit meta;
     passthru = app.passthru // passthru;
   }

@@ -127,6 +127,8 @@ self: pkgs: {
   pynixd-nixkube = self.mkApp {
     name = "pynixd-nixkube";
     inherit (self) pythonSet;
+    # Three programs, so pyproject.nix names none of them.
+    mainProgram = "pynixd-nixkube";
     # `pynixd_nixkube/setup.py` reads both at import time, so an unset one is
     # a `KeyError` on the first import rather than a missing file later.
     env = {
