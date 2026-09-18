@@ -77,6 +77,12 @@ in
     # because a hostPath volume enforces no size at all.
     pynixd.storageSize = "1Gi";
 
+    # No builders. `builder-min = 1` is the default, and pynixd created two
+    # builder Jobs here that sat in ContainerCreating for the whole run --
+    # every path a workload asks for is already in the sandbox, so there is
+    # nothing for a builder to build and nowhere for it to pull an image from.
+    pynixd.controller.settings.builder-min = 0;
+
     # Keeps the Nix string context on the DaemonSet's store paths, so the node
     # environment is part of the manifest's closure. That is what carries it
     # into the sandbox at all, and `boot.uml.nixDatabase.extraRoots` in
