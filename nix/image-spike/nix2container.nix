@@ -14,11 +14,14 @@
 {
   pkgs,
   sources,
-  app ? pkgs.nixkube,
+
+  app ? null,
 }:
 let
   n2c = (import sources.nix2container { inherit pkgs; }).nix2container;
-  policy = import ./policy.nix { inherit pkgs app; };
+  policy = import ./policy.nix (
+    { inherit pkgs; } // pkgs.lib.optionalAttrs (app != null) { inherit app; }
+  );
 
   # Fold the groups into a chain, each link listing the ones before it.
   chain = builtins.foldl' (

@@ -21,6 +21,15 @@
 # problem: the layer budget goes to the paths that cost nothing to send again,
 # and there is none left for the ones that do.
 #
+# The closure work lives in the packages, not here, so this policy overrides
+# nothing. Measured on `pkgs.nixkube` as each step landed:
+#
+#   218 paths  844 MiB   stock
+#   184 paths  634 MiB   `lib.getBin` on nix, openssh, util-linuxMinimal
+#   176 paths  589 MiB   the codegen tools out of csi-proto-python
+#   167 paths  534 MiB   googleapis-common-protos out, taking the protoc
+#                        plugins of the C++ grpc with it
+#
 # The order is base first, application last. Every layer dedupes against the
 # ones before it, so a package named here carries only what no earlier layer
 # already holds. A change to a layer invalidates every layer after it and
@@ -30,14 +39,17 @@
   # What stands in for "the application changed". A rebuild with a different
   # value here is the stability measurement: how many layers move when only
   # the top one should.
-  app ? pkgs.nixkube,
+  # `null` means "whatever the policy picks", which is `pkgs.nixkube`. A
+  # default argument cannot name a binding of the body.
+  app ? null,
+  # The second application. It shares python3 and glibc with the first, so it
+  # costs only what is unique to it.
+  pynixd ? pkgs.pynixd-nixkube,
 }:
 rec {
   fakeNss = pkgs.dockerTools.fakeNss.override {
     extraGroupLines = [ "nixbld:x:30000:" ];
   };
-
-  inherit app;
 
   runtimeInputs = [
     pkgs.coreutils
@@ -104,11 +116,27 @@ rec {
         pkgs.rsync
       ];
     }
+    # **Everything the two applications import, without the applications.**
+    # This is what makes a release cheap. `nixkube`'s own output is 0.68 MiB
+    # and `pynixd`'s is 0.27 MiB; the 192 MiB under them is kr8s, pyzmq,
+    # cryptography, grpc and the rest, and none of it moves when this
+    # repository releases. It moves when nixpkgs does, and that is the bump
+    # where re-sending everything is expected anyway.
+    {
+      name = "python-deps";
+      deps = (effectiveApp.propagatedBuildInputs or [ ]) ++ (pynixd.propagatedBuildInputs or [ ]);
+    }
+    {
+      name = "pynixd";
+      deps = [ pynixd ];
+    }
     {
       name = "app";
-      deps = [ app ];
+      deps = [ effectiveApp ];
     }
   ];
+
+  effectiveApp = if app != null then app else pkgs.nixkube;
 
   # How many layers the remainder gets. Everything not named above lands
   # here: the small paths that hold 23 MiB together and cost 81 layers today.
