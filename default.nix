@@ -19,7 +19,7 @@ rec {
 
   # This repository's Python projects, built by pyproject.nix rather than by
   # nixpkgs' Python builders. nix/python-set.nix says why. Issue #50.
-  pythonSet = import ./nix/python-set.nix { inherit lib pkgs sources; };
+  inherit (pkgs) pythonSet;
   pythonTests = import ./nix/tests.nix { inherit lib pkgs pythonSet; };
 
   easykubenix = import sources.easykubenix;

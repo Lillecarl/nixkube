@@ -15,16 +15,41 @@ self: pkgs: {
         nix-store --option store local --dump-db "$@" | NIX_STATE_DIR="$NSD" nix-store --load-db --option store local
       '';
 
-  nixkube = pkgs.python3Packages.callPackage ./nixkube {
-    inherit (self)
-      csi-proto-python
-      cri-proto-python
-      nri-proto-python
-      grpclib-nri
-      kr8s
-      nri-wait
-      ;
-    coreutils = pkgs.pkgsStatic.coreutils;
+  # This repository's Python projects, built by pyproject.nix. `self` and not
+  # `pkgs`, because the set lifts `kr8s`, `shellous` and `pynixd` from this
+  # overlay. There is no cycle: the set reads those three and none of the
+  # applications below.
+  pythonSet = import ../nix/python-set.nix {
+    inherit (self) lib;
+    pkgs = self;
+    sources = import ../nix/sources.nix;
+  };
+
+  mkApp = self.callPackage ../nix/mk-app.nix {
+    inherit (import (import ../nix/sources.nix).nanopynix { inherit pkgs; }) mkApp;
+  };
+
+  nixkube = self.mkApp {
+    name = "nixkube";
+    inherit (self) pythonSet;
+    # Found with `shutil.which`, every one of them. `coreutils` is the static
+    # multicall binary: the NRI hook chroots into the host store and runs it
+    # there, so it cannot depend on the container's loader.
+    pathInputs = [
+      pkgs.pkgsStatic.coreutils
+      pkgs.gitMinimal
+      (pkgs.lib.getBin pkgs.nix)
+      self.nix_init_db
+      (pkgs.lib.getBin pkgs.openssh)
+      (pkgs.lib.getBin pkgs.util-linuxMinimal)
+      self.nri-wait
+    ];
+    # `startup.py` hardlinks all three into the container root.
+    env = {
+      SETUP_BINSH = pkgs.dockerTools.binSh;
+      SETUP_CACERTS = pkgs.dockerTools.caCertificates;
+      SETUP_USRBINENV = pkgs.dockerTools.usrBinEnv;
+    };
   };
 
   # kluctl = pkgs.kluctl.override {
@@ -75,7 +100,10 @@ self: pkgs: {
 
   # NRI wait Python application for OCI hooks
   # Runs inside chroot(/var/lib/nix-csi), uses pyzmq for communication
-  nri-wait = pkgs.python3Packages.callPackage ./nri-wait { };
+  nri-wait = self.mkApp {
+    name = "nri-wait";
+    inherit (self) pythonSet;
+  };
 
   ci-debug = pkgs.callPackage ./ci-debug { inherit pkgs; };
 
@@ -102,8 +130,20 @@ self: pkgs: {
   # fetches it, in CI and in a working copy alike. The old comment here asked
   # for exactly this.
   pynixd = (import (import ../nix/sources.nix).pynixd { inherit pkgs; }).library;
-  pynixd-nixkube = pkgs.python3Packages.callPackage ./pynixd-nixkube {
-    inherit (self) pynixd kr8s;
-    inherit (pkgs) dockerTools;
+  pynixd-nixkube-fake-nss = pkgs.callPackage ./pynixd-nixkube/fake-nss.nix { };
+
+  pynixd-nixkube = self.mkApp {
+    name = "pynixd-nixkube";
+    inherit (self) pythonSet;
+    # `pynixd_nixkube/setup.py` reads both at import time, so an unset one is
+    # a `KeyError` on the first import rather than a missing file later.
+    env = {
+      FAKE_NSS = self.pynixd-nixkube-fake-nss;
+      CA_CERTS = pkgs.dockerTools.caCertificates;
+    };
+    # `environments/cache` installs the same passwd and group files into the
+    # container root, and reads them off the application so the two cannot
+    # name different ones.
+    passthru.fakeNss = self.pynixd-nixkube-fake-nss;
   };
 }
