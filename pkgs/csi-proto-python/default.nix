@@ -13,6 +13,9 @@
   mypy-protobuf,
   python,
   pythonRelaxDepsHook,
+  # The C++ protobuf, which carries `bin/protoc`. The `protobuf` above is the
+  # Python package and has no binary, so the two are not interchangeable.
+  protoc,
 }:
 let
   version = "1.11.0";
@@ -30,15 +33,19 @@ buildPythonPackage {
   src = lib.cleanPythonSource ./.;
 
   build-system = [ hatchling ];
+  # Build tooling only. `protoc` and its two plugins run here and are not
+  # imported by anything the consumer loads, so they must not be propagated.
   nativeBuildInputs = [
+    protoc
     grpclib
     mypy-protobuf
     grpcio-tools
   ];
 
+  # What the generated modules import at runtime, and nothing else.
   dependencies = [
     grpclib
-    mypy-protobuf
+    protobuf
   ];
 
   format = "pyproject";

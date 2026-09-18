@@ -63,7 +63,9 @@ self: pkgs: {
   grpclib-nri = pkgs.python3Packages.callPackage ./grpclib-nri {
     inherit (self) grpclib-ttrpc nri-proto-python;
   };
-  csi-proto-python = pkgs.python3Packages.callPackage ./csi-proto-python { };
+  csi-proto-python = pkgs.python3Packages.callPackage ./csi-proto-python {
+    protoc = pkgs.protobuf;
+  };
   cri-proto-python = pkgs.python3Packages.callPackage ./cri-proto-python { };
   nri-proto-python = pkgs.python3Packages.callPackage ./nri-proto-python { };
   ttrpc-proto-python = pkgs.python3Packages.callPackage ./ttrpc-proto-python { };

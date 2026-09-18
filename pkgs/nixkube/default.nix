@@ -11,7 +11,6 @@
   csi-proto-python, # CSI gRPC bindings
   nri-proto-python, # NRI ttRPC bindings
   grpclib-nri, # NRI protocol utilities
-  googleapis-common-protos, # Google Errors
   gitMinimal,
   kr8s, # Kubernetes API
   shellous, # subprocessing
@@ -47,14 +46,18 @@ buildPythonApplication {
     csi-proto-python
     nri-proto-python
     grpclib-nri
-    googleapis-common-protos
     gitMinimal
     kr8s
     shellous
-    nix
+    # **`lib.getBin`, not the package.** A Python package's `dependencies` are
+    # `propagatedBuildInputs`, and a multi-output C++ package propagated that
+    # way brings its `dev` output. `nix` brought `nix-2.34.8-dev`, and with it
+    # boost's headers (147 MiB) and perl (55 MiB). The daemon runs the
+    # binaries and reads none of the headers.
+    (lib.getBin nix)
     nix_init_db
-    openssh
-    util-linuxMinimal
+    (lib.getBin openssh)
+    (lib.getBin util-linuxMinimal)
     pyzmq
     nri-wait
     prometheus-client
