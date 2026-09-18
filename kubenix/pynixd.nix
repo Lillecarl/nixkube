@@ -168,6 +168,27 @@ in
       default = null;
       example = "fast-ssd";
     };
+    storageSize = lib.mkOption {
+      description = ''
+        Size of the pynixd PVC.
+
+        It holds the store pynixd serves *and* the one it boots from --
+        `appstarter init` fills this claim, and `cacheEnv` alone is about
+        512 MiB. The default leaves room for what a cluster then pushes into
+        it.
+
+        Lower it for a test. A single-node guest with a 4 GiB disk cannot
+        honour the default, and a claim that large against a small disk only
+        looks satisfied because a `hostPath` volume enforces nothing.
+
+        **volumeClaimTemplates are immutable after creation.** Changing this
+        on a live StatefulSet needs the StatefulSet deleted with
+        `--cascade=orphan` and the PVC resized by hand.
+      '';
+      type = lib.types.str;
+      default = "10Gi";
+      example = "1Gi";
+    };
     loadBalancerPort = lib.mkOption {
       description = ''
         External SSH port for the pynixd LoadBalancer Service.
@@ -486,7 +507,7 @@ in
               metadata.name = "nix-store";
               spec = {
                 accessModes = [ "ReadWriteOnce" ];
-                resources.requests.storage = "10Gi";
+                resources.requests.storage = cfg.pynixd.storageSize;
               }
               # Omitted when null, and not rendered as `storageClassName: null`.
               #
