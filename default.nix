@@ -815,6 +815,13 @@ rec {
   nixImage = pkgs.callPackage ./niximage.nix { };
   scratchImage = pkgs.callPackage ./scratchimage.nix { };
 
+  # Two spikes on how the image is layered. Nothing in CI reads these, and
+  # `niximage.nix` is untouched. nixkube issue #47.
+  spike = {
+    n2c = import ./nix/image-spike/nix2container.nix { inherit pkgs sources; };
+    dockertools = import ./nix/image-spike/dockertools.nix { inherit pkgs; };
+  };
+
   # Every image the node DaemonSet names, as a tarball a UML guest can import.
   # There is no registry in a Nix build sandbox. See nix/uml/images.nix.
   umlImages = pkgs.callPackage ./nix/uml/images.nix { inherit nixImage scratchImage; };
