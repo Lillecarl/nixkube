@@ -10,9 +10,9 @@
 #
 # Four images, from three different shapes:
 #
-#   nix       `streamLayeredImage`, so a script that writes a tar to stdout.
-#             Its tag also carries an `-x86_64-linux` suffix, because the
-#             thing the DaemonSet names is a manifest list built from the
+#   nix       `nix2container`, so a JSON manifest that only its own skopeo
+#             reads. Its tag also carries an `-x86_64-linux` suffix, because
+#             the thing the DaemonSet names is a manifest list built from the
 #             per-arch tags at push time. There is no manifest list here, so
 #             the suffix has to come off.
 #   scratch   an OCI layout directory built by umoci, tagged by architecture.
@@ -48,9 +48,19 @@ let
           ${source} "docker-archive:$out:${tag}"
       '';
 
-  # The streamed image has to become a file before skopeo can read it.
-  # `streamLayeredImage` is the executable itself, not a package holding one.
-  nixTar = pkgs.runCommand "nix-image-streamed.tar" { } "${nixImage.images.${system}} > $out";
+  # nix2container writes a JSON manifest naming store paths, and only its own
+  # skopeo reads that. `convert` uses the stock one, so the image becomes a
+  # docker-archive here first.
+  nixTar =
+    pkgs.runCommand "nix-image.tar"
+      {
+        nativeBuildInputs = [ nixImage.skopeo ];
+      }
+      ''
+        skopeo --insecure-policy --tmpdir "$TMPDIR" copy \
+          nix:${nixImage.images.${system}} \
+          "docker-archive:$out:${nixImage.imageRef system}"
+      '';
 
   # The same place niximage.nix reads it from, so the two cannot drift.
   nixkubeVersion =
@@ -104,7 +114,7 @@ rec {
 
     `nix` and `scratch` are not here. skopeo writes an uncompressed tar, so
     those two are scanned like any other file and carry their own
-    references -- measured: `init-copy` and its whole closure resolve
+    references -- measured: `appstarter` and its whole closure resolve
     inside the guest.
   */
   runtimeInputs = [
