@@ -817,7 +817,7 @@ rec {
 
   nixkube-docs = pkgs.python3Packages.callPackage ./nix/docs.nix { };
 
-  nixImage = pkgs.callPackage ./niximage.nix { };
+  nixImage = pkgs.callPackage ./niximage.nix { inherit (sources) dinix; };
   scratchImage = pkgs.callPackage ./scratchimage.nix { };
 
   # Two spikes on how the image is layered. Nothing in CI reads these, and

@@ -49,7 +49,7 @@ writeShellApplication {
       == Phase 1: Pod & Controller Health ==
       1. \`kubectl get pods -A -o wide\` — all pods, their nodes and IPs
       2. \`kubectl describe pod -n nixkube -l app.kubernetes.io/component=node\` — node pod Init Containers (exit codes, restart reasons, crash loop)
-      3. \`kubectl logs -n nixkube -l app.kubernetes.io/component=node -c initcopy --tail=200 --timestamps --previous\` — init container crash logs
+      3. \`kubectl logs -n nixkube -l app.kubernetes.io/component=node -c appstarter-init --tail=200 --timestamps --previous\` — init container crash logs
       4. \`kubectl logs -n nixkube -l app.kubernetes.io/component=node --tail=100 --timestamps\` — node main container (nixkube) logs
       5. \`kubectl get daemonset,statefulset,job -n nixkube\` — controller state
 
@@ -77,11 +77,12 @@ writeShellApplication {
       18. \`kubectl get events -n nixkube | grep -E 'Nix|Build|Mount' | tail -30\` — nixkube-specific error events
 
       Key diagnostic patterns to look for:
-      - Init container CrashLoopBackOff with exit code 1 in initcopy → nix build failure (check initcopy logs for the exact error)
+      - Init container CrashLoopBackOff with exit code 1 in appstarter-init → nix build failure (check appstarter-init logs for the exact error)
       - Init container CrashLoopBackOff with exit code 143 in main container → SIGTERM from resource limits or liveness probe
       - \"driver name nixkube not found\" in FailedMount events → CSI driver not registered, check csinode
-      - \"cannot get /nix/store/...\" in initcopy logs → read the \`pynixd:\` line under it. \`unreachable\` means pynixd never answered and served nothing, so the path had to come from a cache and did not; \`answered\` means pynixd is reachable and lacks the path, which is not a connectivity problem; \`disabled\` means a cache is the only source. See issue #27
-      - \"no substituter that can build it\" with no \`cannot get\` line → an older node image, before initcopy said which of those three it was. Same three causes, no way to tell them apart from the log
+      - \"cannot get /nix/store/...\" in appstarter-init logs → read the \`fetching ... (pynixd: ...)\` line above it. \`unreachable\` means pynixd never answered and served nothing, so the path had to come from a cache and did not; \`answered\` means pynixd is reachable and lacks the path, which is not a connectivity problem; \`disabled\` means a cache is the only source. See issue #27
+      - \"seeding /nix/store/... from the image instead\" in appstarter-init logs → the fetch failed and the node started on the image's own copy. It runs, and it is behind. The nix-node logs carry both store paths. See issue #49
+      - \"no substituter that can build it\" with no \`cannot get\` line → an older node image, before appstarter said which of those three it was. Same three causes, no way to tell them apart from the log
       - Test jobs in Pending state → CSI volume can't be published, check node events
       - pynixd pod not ready → check init-store CSI volume mount, PVC status
       - \"Operation not permitted\" on SSH → network policy or Cilium blocking, check CiliumNetworkPolicy

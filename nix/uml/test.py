@@ -615,7 +615,7 @@ async def report(cp):
         timeout=120,
     )
     for pod in pods[1].split():
-        for container in ("initcopy", "nix-node"):
+        for container in ("appstarter-init", "nix-node"):
             for flags in ("", " --previous"):
                 rc, out = await cp.execute(
                     f"kubectl logs --namespace {NAMESPACE} {pod}"

@@ -136,16 +136,30 @@ in
                   priorityClassName = "system-node-critical";
                   initContainers = lib.mkNumberedList {
                     "1" = {
-                      name = "initcopy";
+                      name = "appstarter-init";
                       image = "ghcr.io/lillecarl/nix-csi/nix:${curPkgs.nix.version}-${cfg.version}";
                       imagePullPolicy = "Always";
                       securityContext.privileged = true; # chroot store
+                      command = [
+                        "appstarter"
+                        "init"
+                      ];
                       env = lib.mkNamedList {
-                        NODE_ENV.value = builtins.toJSON (lib.mapAttrs (_: sysPkgs: "${sysPkgs.nixkube-node-env}") csiPkgs);
-                        # `nix-node` has had this and initcopy has not, so
-                        # initcopy could not tell a pynixd that is off by
-                        # choice from one that is down. It reported the same
-                        # failure for both. See issue #27.
+                        # One environment per enabled architecture, because
+                        # one DaemonSet runs on all of them. `appstarter`
+                        # picks its own.
+                        APPSTARTER_WANTED.value = builtins.toJSON (
+                          lib.mapAttrs (_: sysPkgs: "${sysPkgs.nixkube-node-env}") csiPkgs
+                        );
+                        # Which of the image's fallbacks to take when the
+                        # fetch fails. The image carries one per role and
+                        # names them itself -- a fallback named here comes out
+                        # of this same evaluation, so it would be the path
+                        # above and would fall back to nothing.
+                        APPSTARTER_ROLE.value = "node";
+                        # Without this `appstarter` cannot tell a pynixd that
+                        # is off by choice from one that is down, and reports
+                        # the same failure for both. See issue #27.
                         PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
                       };
                       volumeMounts = lib.mkNamedList {
@@ -167,9 +181,16 @@ in
                   containers = lib.mkNamedList {
                     nix-node = {
                       image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
+                      # `appstarter run` execs nixkube, so tini's child stays
+                      # the application and signals and reaping keep working.
+                      # It also puts the two store paths in nixkube's
+                      # environment, which is how a node that is behind says
+                      # so. Issue #49.
                       command = [
                         "tini"
                         "--"
+                        "appstarter"
+                        "run"
                         "nixkube"
                       ];
                       securityContext.privileged = true;
@@ -309,9 +330,9 @@ in
 
                           A plain hostPath mount is handed to the runtime as a
                           path instead, and resolves against the host tree. That
-                          is also why initcopy sees a populated store while
-                          nix-node does not: initcopy writes through the plain
-                          mount at /nix-volume.
+                          is also why appstarter-init sees a populated store
+                          while nix-node does not: appstarter-init writes
+                          through the plain mount at /nix-volume.
 
                           kubeadm runs its kubelet in the host mount namespace, so
                           no test with a kubeadm control plane can see this.
@@ -430,7 +451,7 @@ in
                     #
                     # DirectoryOrCreate is required, not a convenience: the
                     # kubelet checks hostPath type when it sets up pod volumes,
-                    # which happens before initcopy runs. `Directory` would fail
+                    # which happens before appstarter-init runs. `Directory` would fail
                     # on a node that has no store yet.
                     nix-root.hostPath = {
                       path = "${cfg.hostMountPath}/nix";
