@@ -20,6 +20,7 @@ rec {
   # This repository's Python projects, built by pyproject.nix rather than by
   # nixpkgs' Python builders. nix/python-set.nix says why. Issue #50.
   pythonSet = import ./nix/python-set.nix { inherit lib pkgs sources; };
+  pythonTests = import ./nix/tests.nix { inherit lib pkgs pythonSet; };
 
   easykubenix = import sources.easykubenix;
 
@@ -972,15 +973,13 @@ rec {
       probeWatchHasRbac
       umlImagesMatch
       ;
-    # The Python suite, which runs in this derivation's checkPhase.
-    #
-    # It was missing, and that cost a red CI: a test asserting the probe Job
-    # carries `nodeName` failed after the probe moved to a nodeAffinity, and
-    # `checks.all` passed locally the whole time because it never ran pytest.
-    # The suite only ran inside `build-amd64`, so the feedback came after a
-    # full environment build rather than in seconds.
-    pynixd-nixkube-tests = pkgs.pynixd-nixkube;
-  };
+  }
+  # The four Python suites, each its own member.
+  #
+  # **A member here is a test result, not a package.** Naming a package whose
+  # build happens to run a suite answers "does the package build", and a suite
+  # that stops running then looks exactly like a suite that passes.
+  // pythonTests;
 
   checks = checkMembers // {
     all = pkgs.runCommand "nixkube-checks" {
