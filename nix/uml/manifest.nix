@@ -54,10 +54,28 @@ in
       aarch64-linux = false;
     };
 
-    # No cache StatefulSet. It exists to coordinate distributed builds, and
-    # nothing is built here -- every path a workload asks for is already in
-    # the sandbox because the test derivation named it.
-    pynixd.enable = false;
+    /*
+      The cache StatefulSet, for how it starts rather than for what it does.
+
+      Nothing is built here -- every path a workload asks for is already in
+      the sandbox because the test derivation named it -- so pynixd
+      coordinates no distributed build in this test. What it does do is boot:
+      an `appstarter-init` initContainer fills its PVC, and the pod runs
+      `appstarter run` out of it. That path has no other test. `test-kind-cache`
+      needs a cluster and a published image; this needs neither. Issue #49.
+
+      The claim binds against `services.uml-k8s.persistentVolumes` in
+      ./default.nix. `storageClassName` stays null, which means the cluster
+      default, which is the `standard` class that option creates.
+    */
+    pynixd.enable = true;
+
+    # The guest's whole disk is 4 GiB (`boot.uml.diskSize`), and the node's
+    # own store is already on it. `cacheEnv` is about 512 MiB, so this is what
+    # pynixd actually writes here plus room to see it grow. The 10Gi default
+    # is for a cluster; against this disk it would only look satisfied,
+    # because a hostPath volume enforces no size at all.
+    pynixd.storageSize = "1Gi";
 
     # Keeps the Nix string context on the DaemonSet's store paths, so the node
     # environment is part of the manifest's closure. That is what carries it

@@ -120,6 +120,12 @@ uml.mkTest {
         # no error when it is not -- so without this the plugin waits, the
         # pods that need it start without a /nix, and nothing says why.
         nri = true;
+
+        # One, for pynixd's `nix-store` claim. The StorageClass it creates is
+        # `standard`, annotated as the cluster default, which is what
+        # `nixkube.pynixd.storageClassName = null` asks for. `bring_up`
+        # applies it. Issue #49.
+        persistentVolumes = 1;
       };
 
       boot.uml = {

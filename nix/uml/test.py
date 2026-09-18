@@ -16,6 +16,7 @@ from uml_runner.cluster import KUBE_PROXY, bring_up, get_json, kubectl, until
 
 NAMESPACE = "nixkube"
 DAEMONSET = "nix-node"
+STATEFULSET = "pynixd"
 
 # The jobs ./workloads.nix adds, by name.
 WORKLOADS = ("csi-path", "csi-shared")
@@ -125,6 +126,48 @@ async def wait_for_driver(cp: Machine) -> None:
             f"[cp] the API server serves no nixkube CSIDriver:\n{drivers}"
         )
     print(f"[nixkube] csidrivers:\n{drivers}", flush=True)
+
+
+async def wait_for_pynixd(cp: Machine) -> None:
+    """pynixd reaches Ready, out of the store its own initContainer filled.
+
+    This is the only test of that path. `appstarter init` writes the PVC at
+    /nix-volume, the pod mounts the same claim at /data and at /nix, and
+    `appstarter run` execs out of it. Nothing built it here: the guest's own
+    store holds `cacheEnv`, so the fetch is a local one.
+
+    Ready means the startup probe answered on port 22, which is pynixd's own
+    SSH server and therefore the process, not the container. Issue #49.
+    """
+
+    async def ready():
+        data = await get_json(
+            cp, f"get statefulset {STATEFULSET} --namespace {NAMESPACE}"
+        )
+        status = data.get("status", {})
+        want = status.get("replicas", 0)
+        got = status.get("readyReplicas", 0)
+        pods = await kubectl(
+            cp,
+            f"get pods --namespace {NAMESPACE}"
+            " --selector app.kubernetes.io/component=pynixd --no-headers",
+        )
+        return bool(want) and got == want, f"{got}/{want} ready, {pod_summary(pods)}"
+
+    await until("the pynixd StatefulSet", ready, READY_TIMEOUT, cp)
+
+    # Which version it started, and whether that is the one asked for. An
+    # `appstarter init` that fell back to the image leaves these different,
+    # and a pod that is Ready either way would not say so.
+    logs = await kubectl(
+        cp,
+        f"logs --namespace {NAMESPACE} {STATEFULSET}-0 --container appstarter-init",
+    )
+    print(f"[nixkube] pynixd is Ready; appstarter-init said:\n{logs}", flush=True)
+    if "store holds" not in logs:
+        raise MachineError(
+            f"[cp] pynixd started, and appstarter-init never said what it holds:\n{logs}"
+        )
 
 
 async def check_workloads(cp: Machine) -> None:
@@ -601,32 +644,37 @@ async def report(cp: Machine) -> None:
     )
     print(f"[nixkube] what nri-wait said (rc={rc}):\n{out}", flush=True)
 
-    # Every container of the DaemonSet's pod, by name, from the API server.
+    # Every container of the node's and pynixd's pods, by name, from the API
+    # server.
     #
     # `diagnose` tails the log files off the node, which works but competes
     # for a line budget with everything else running. Asking kubelet for one
     # container's output is exact, and `--previous` is the only way to see a
     # container that has already exited -- which a crash-looping init
     # container always has by the time anybody looks.
-    pods = await cp.execute(
-        f"kubectl get pods --namespace {NAMESPACE}"
-        " --selector app.kubernetes.io/component=node"
-        " --output jsonpath={.items[*].metadata.name}",
-        timeout=120,
-    )
-    for pod in pods[1].split():
-        for container in ("appstarter-init", "nix-node"):
-            for flags in ("", " --previous"):
-                rc, out = await cp.execute(
-                    f"kubectl logs --namespace {NAMESPACE} {pod}"
-                    f" --container {container}{flags} --tail 60",
-                    timeout=120,
-                )
-                if rc == 0 and out.strip():
-                    print(
-                        f"[nixkube] logs {pod} {container}{flags}:\n{out}",
-                        flush=True,
+    for component, containers in (
+        ("node", ("appstarter-init", "nix-node")),
+        ("pynixd", ("appstarter-init", "pynixd")),
+    ):
+        pods = await cp.execute(
+            f"kubectl get pods --namespace {NAMESPACE}"
+            f" --selector app.kubernetes.io/component={component}"
+            " --output jsonpath={.items[*].metadata.name}",
+            timeout=120,
+        )
+        for pod in pods[1].split():
+            for container in containers:
+                for flags in ("", " --previous"):
+                    rc, out = await cp.execute(
+                        f"kubectl logs --namespace {NAMESPACE} {pod}"
+                        f" --container {container}{flags} --tail 60",
+                        timeout=120,
                     )
+                    if rc == 0 and out.strip():
+                        print(
+                            f"[nixkube] logs {pod} {container}{flags}:\n{out}",
+                            flush=True,
+                        )
 
     # What the workloads said. A job that fails here fails for one of two
     # reasons -- the driver did not mount, or the thing it mounted is not
@@ -657,6 +705,7 @@ async def test(vms: Machines) -> None:
     try:
         await deploy(cp, settings)
         await wait_for_driver(cp)
+        await wait_for_pynixd(cp)
         await check_workloads(cp)
         await probe(cp, settings, "a clean start")
         await check_resident(cp, settings, "a clean start")
