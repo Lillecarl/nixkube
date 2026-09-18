@@ -91,7 +91,7 @@ in
                 serviceAccountName = "nixkube";
                 containers = lib.mkNamedList {
                   init = {
-                    image = "ghcr.io/lillecarl/nix-csi/nix:${curPkgs.nix.version}-${cfg.version}";
+                    image = "ghcr.io/lillecarl/nix-csi/nix:${cfg.version}-${curPkgs.nix.version}";
                     imagePullPolicy = "Always";
                     command = [ "init-secrets" ];
                     volumeMounts = lib.mkNamedList {

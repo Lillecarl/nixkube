@@ -65,7 +65,7 @@ rec {
     in
     pkgs.dockerTools.streamLayeredImage {
       name = "${repo}/nix";
-      tag = "${sysPkgs.nix.version}-${nixkubeVersion}-${sysPkgs.stdenv.hostPlatform.system}";
+      tag = "${nixkubeVersion}-${sysPkgs.nix.version}-${sysPkgs.stdenv.hostPlatform.system}";
       architecture = sysPkgs.go.GOARCH;
 
       maxLayers = 125;
@@ -137,7 +137,7 @@ rec {
           echo "present: $ref"
         done
 
-        regctl index create ${repo}/nix:${pkgs.nix.version}-${nixkubeVersion} \
+        regctl index create ${repo}/nix:${nixkubeVersion}-${pkgs.nix.version} \
           --ref ${imageRef "aarch64-linux"} \
           --ref ${imageRef "x86_64-linux"}
         regctl index create ${repo}/nix:latest \

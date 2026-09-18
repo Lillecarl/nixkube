@@ -137,7 +137,7 @@ in
                   initContainers = lib.mkNumberedList {
                     "1" = {
                       name = "appstarter-init";
-                      image = "ghcr.io/lillecarl/nix-csi/nix:${curPkgs.nix.version}-${cfg.version}";
+                      image = "ghcr.io/lillecarl/nix-csi/nix:${cfg.version}-${curPkgs.nix.version}";
                       imagePullPolicy = "Always";
                       securityContext.privileged = true; # chroot store
                       command = [
