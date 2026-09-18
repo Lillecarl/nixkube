@@ -11,4 +11,6 @@ authors = [
 ]
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+# What protoc writes imports: `cri_grpc.py` imports grpclib, `cri_pb2.py`
+# imports google.protobuf.
+dependencies = ["grpclib", "protobuf"]

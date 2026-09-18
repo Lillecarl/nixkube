@@ -13,6 +13,9 @@ dependencies = [
   "pyzmq",
 ]
 
+[project.optional-dependencies]
+test = ["pytest"]
+
 [project.scripts]
 wait = "nri_wait.__main__:main"
 

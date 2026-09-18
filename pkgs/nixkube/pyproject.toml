@@ -16,6 +16,11 @@ dependencies = [
   "csi",
   "nri",
   "cri",
+  # Imported directly, not only through the three above: `errors.py` and
+  # `cri.py` use `grpclib` itself, and `csi/identity.py` uses
+  # `google.protobuf`.
+  "grpclib",
+  "protobuf",
   "grpclib-nri",
   "pyzmq",
   "cachetools",

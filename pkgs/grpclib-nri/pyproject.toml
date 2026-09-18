@@ -11,6 +11,10 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
   "grpclib-ttrpc",
+  # Imported directly, not only through grpclib-ttrpc.
+  "grpclib",
+  "ttrpc",
+  "nri",
   "structlog",
   "typing_extensions",
 ]

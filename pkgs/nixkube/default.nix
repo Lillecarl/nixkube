@@ -6,10 +6,11 @@
   dockerTools, # binSh, caCertificates, usrBinEnv for container setup
   hatchling, # Build system
   coreutils, # ln
-  cryptography, # ssh-keygen Python
   cri-proto-python, # CRI gRPC bindings
   csi-proto-python, # CSI gRPC bindings
   nri-proto-python, # NRI ttRPC bindings
+  grpclib, # GRPCError and grpclib.client, imported directly
+  protobuf, # google.protobuf.wrappers_pb2, imported directly
   grpclib-nri, # NRI protocol utilities
   gitMinimal,
   kr8s, # Kubernetes API
@@ -41,10 +42,11 @@ buildPythonApplication {
   dependencies = [
     anyio
     coreutils
-    cryptography
     cri-proto-python
     csi-proto-python
     nri-proto-python
+    grpclib
+    protobuf
     grpclib-nri
     gitMinimal
     kr8s

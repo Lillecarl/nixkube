@@ -11,7 +11,14 @@ dependencies = [
     "pynixd",
     "kr8s",
     "structlog",
+    # `ssh_keys.py` watches the mounted key with inotify; `config.py` reads
+    # its settings through pydantic-settings.
+    "asyncinotify",
+    "pydantic-settings",
 ]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-asyncio"]
 
 [project.scripts]
 pynixd-nixkube = "pynixd_nixkube.__main__:main"
