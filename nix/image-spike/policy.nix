@@ -116,6 +116,20 @@ rec {
         pkgs.rsync
       ];
     }
+    # **What `nixkube` runs as subprocesses, rather than imports.** These are
+    # on the wrapper's PATH, so without a layer of their own they land in the
+    # application's layer and 27 MiB goes out on every release. They belong
+    # with the base: `nri-wait` moves when this repository does, and the other
+    # three only when nixpkgs does.
+    {
+      name = "tools";
+      deps = [
+        pkgs.pkgsStatic.coreutils
+        pkgs.util-linuxMinimal
+        pkgs.nix_init_db
+        pkgs.nri-wait
+      ];
+    }
     # **Everything the two applications import, without the applications.**
     # This is what makes a release cheap. `nixkube`'s own output is 0.68 MiB
     # and `pynixd`'s is 0.27 MiB; the 192 MiB under them is kr8s, pyzmq,
@@ -124,7 +138,7 @@ rec {
     # where re-sending everything is expected anyway.
     {
       name = "python-deps";
-      deps = (effectiveApp.propagatedBuildInputs or [ ]) ++ (pynixd.propagatedBuildInputs or [ ]);
+      deps = dependenciesOf effectiveApp ++ dependenciesOf pynixd;
     }
     {
       name = "pynixd";
@@ -137,6 +151,18 @@ rec {
   ];
 
   effectiveApp = if app != null then app else pkgs.nixkube;
+
+  # **`passthru.dependencies`, not `propagatedBuildInputs`.** These
+  # applications are pyproject.nix venvs, and the builders propagate nothing,
+  # so `propagatedBuildInputs` is the empty list. Reading it here would make
+  # the layer above empty with no error, and put all 169 MiB back into the
+  # layer that moves on every release.
+  #
+  # The attribute names are distribution names, resolved in the set the
+  # applications are built from. `buildLayer` takes each path's closure, so
+  # the direct dependencies are enough.
+  dependenciesOf =
+    app: map (name: pkgs.pythonSet.${name}) (builtins.attrNames (app.passthru.dependencies or { }));
 
   # How many layers the remainder gets. Everything not named above lands
   # here: the small paths that hold 23 MiB together and cost 81 layers today.
