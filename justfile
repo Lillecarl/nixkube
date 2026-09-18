@@ -53,7 +53,6 @@ deploy:
 # Run linter/type checker on Python code
 lint:
     direnv exec . pyright pkgs/nixkube/src
-    direnv exec . ty check pkgs/nixkube/src
 
 # Check formatted code without changes
 check-fmt:

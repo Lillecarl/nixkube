@@ -63,7 +63,6 @@ pkgs.mkShell {
     pkgs.regctl
     pkgs.ruff
     pkgs.rustc
-    pkgs.ty
     pkgs.skopeo
     pkgs.stern
     pkgs.dive
