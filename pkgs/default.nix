@@ -82,18 +82,10 @@ self: pkgs: {
   # trade. Anything that wants to skip those checks locally has to do it
   # without changing the hash of what CI publishes.
 
-  grpclib-ttrpc = pkgs.python3Packages.callPackage ./grpclib-ttrpc {
-    inherit (self) ttrpc-proto-python;
-  };
-  grpclib-nri = pkgs.python3Packages.callPackage ./grpclib-nri {
-    inherit (self) grpclib-ttrpc nri-proto-python;
-  };
-  csi-proto-python = pkgs.python3Packages.callPackage ./csi-proto-python {
-    protoc = pkgs.protobuf;
-  };
-  cri-proto-python = pkgs.python3Packages.callPackage ./cri-proto-python { };
-  nri-proto-python = pkgs.python3Packages.callPackage ./nri-proto-python { };
-  ttrpc-proto-python = pkgs.python3Packages.callPackage ./ttrpc-proto-python { };
+  # The libraries the applications import are members of `pythonSet`, not
+  # attributes here. They have no consumer outside that set, and a nixpkgs
+  # build of one beside its venv build would be a second package that nothing
+  # keeps in step.
   python-jsonpath = pkgs.python3Packages.callPackage ./python-jsonpath.nix { };
   kr8s = pkgs.python3Packages.callPackage ./kr8s.nix { inherit (self) python-jsonpath; };
   shellous = pkgs.python3Packages.callPackage ./shellous.nix { };
