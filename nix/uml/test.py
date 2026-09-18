@@ -11,7 +11,7 @@ the manifest names -- and `boot.uml.nixDatabase` is what makes Nix agree they
 are real rather than go looking for them.
 """
 
-from uml_runner import MachineError, run_test
+from uml_runner import Machine, MachineError, Machines, run_test
 from uml_runner.cluster import KUBE_PROXY, bring_up, get_json, kubectl, until
 
 NAMESPACE = "nixkube"
@@ -27,7 +27,7 @@ WORKLOADS = ("csi-path", "csi-shared")
 PROBES = (("ro", "probeRo"), ("rw", "probeRw"))
 
 
-def pod_summary(out):
+def pod_summary(out: str) -> str:
     """`kubectl get pods --no-headers` with the clocks taken out.
 
     `until` reports how long its evidence has been *unchanged*, and that
@@ -47,7 +47,7 @@ def pod_summary(out):
     return " | ".join(f"{r[0]}={r[1]} {r[2]}" for r in rows if len(r) > 2) or "no pods"
 
 
-def nix_mount(mountinfo):
+def nix_mount(mountinfo: str) -> tuple[str, str] | None:
     """The line for the container's own /nix, from /proc/self/mountinfo.
 
     Fields up to the `-` separator are fixed: id, parent, device, root,
@@ -81,7 +81,7 @@ APPLY_TIMEOUT = 5 * 60
 READY_TIMEOUT = 5 * 60
 
 
-async def deploy(cp, settings):
+async def deploy(cp: Machine, settings: dict) -> None:
     """Apply the manifest, the way the NixOS test does."""
     print("[nixkube] applying the manifest", flush=True)
     out = await kubectl(
@@ -92,7 +92,7 @@ async def deploy(cp, settings):
     print(out, flush=True)
 
 
-async def wait_for_driver(cp):
+async def wait_for_driver(cp: Machine) -> None:
     """The DaemonSet's pod reaches Ready, and kubelet knows the driver.
 
     Reported together because either alone is misleading: a Ready pod whose
@@ -127,7 +127,7 @@ async def wait_for_driver(cp):
     print(f"[nixkube] csidrivers:\n{drivers}", flush=True)
 
 
-async def check_workloads(cp):
+async def check_workloads(cp: Machine) -> None:
     """The driver mounts a store path where the pod asked for it.
 
     Both jobs run /mnt/csi/nix/store/...-hello/bin/hello -- through the
@@ -185,7 +185,7 @@ async def check_workloads(cp):
     print(f"[nixkube] {', '.join(WORKLOADS)} ran out of the volume", flush=True)
 
 
-async def probe(cp, settings, why):
+async def probe(cp: Machine, settings: dict, why: str) -> None:
     """Create one pod that wants both mount paths, and see that it gets them.
 
     This is the question every chaos scenario asks: after that, can a pod
@@ -210,7 +210,7 @@ async def probe(cp, settings, why):
         )
         name = created.strip().splitlines()[-1].split("/")[-1]
 
-        async def done(name=name, want=want):
+        async def done(name: str = name, want: str = want) -> tuple[bool, str]:
             data = await get_json(cp, f"get job {name} --namespace {NAMESPACE}")
             status = data.get("status", {})
             if status.get("failed"):
@@ -265,7 +265,7 @@ async def probe(cp, settings, why):
         print(f"[nixkube] a {want} probe got both mounts after {why}", flush=True)
 
 
-def state_dirs(settings):
+def state_dirs(settings: dict) -> dict[str, str]:
     """Where the driver's own state lands on the node.
 
     The driver's constants are pod paths -- CSI_ROOT is `/nix/var/nix-csi`
@@ -288,7 +288,7 @@ def state_dirs(settings):
 # store. The invariant is instead the one the driver's own garbage collection
 # claims to keep: an entry for a container the CRI no longer lists, or a
 # volume kubelet no longer records, is a leak.
-def reconciled(settings):
+def reconciled(settings: dict) -> str:
     """Everything the driver holds that the node no longer has.
 
     Not "the directories are empty". With NRI on, every container whose
@@ -329,7 +329,7 @@ def reconciled(settings):
 """
 
 
-async def check_reconciled(cp, settings, what):
+async def check_reconciled(cp: Machine, settings: dict, what: str) -> None:
     """Nothing the driver kept outlives what the node still has."""
 
     async def clean():
@@ -341,7 +341,7 @@ async def check_reconciled(cp, settings, what):
     print(f"[nixkube] nothing stale on the node after {what}", flush=True)
 
 
-async def on_node(cp, command, timeout=120):
+async def on_node(cp: Machine, command: str, timeout: int = 120) -> tuple[int, str]:
     """Do something to the node, and say what came of it.
 
     `execute` rather than `succeed`: several of these are expected to return
@@ -360,25 +360,25 @@ NODE_CONTAINER = "$(crictl ps --quiet --name '^nix-node$')"
 NODE_SANDBOX = "$(crictl pods --quiet --name '^nix-node-')"
 
 
-async def kubernetes_deletes_the_pod(cp, settings):
+async def kubernetes_deletes_the_pod(cp: Machine, settings: dict) -> None:
     await kubectl(
         cp, f"delete pod --namespace {NAMESPACE} {NODE_SELECTOR} --wait=false"
     )
 
 
-async def crictl_stops_the_container(cp, settings):
+async def crictl_stops_the_container(cp: Machine, settings: dict) -> None:
     await on_node(cp, f"crictl stop {NODE_CONTAINER}")
 
 
-async def crictl_removes_the_container(cp, settings):
+async def crictl_removes_the_container(cp: Machine, settings: dict) -> None:
     await on_node(cp, f"crictl rm --force {NODE_CONTAINER}")
 
 
-async def crictl_removes_the_sandbox(cp, settings):
+async def crictl_removes_the_sandbox(cp: Machine, settings: dict) -> None:
     await on_node(cp, f"crictl rmp --force {NODE_SANDBOX}")
 
 
-async def the_process_is_killed(cp, settings):
+async def the_process_is_killed(cp: Machine, settings: dict) -> None:
     # By pid from the CRI, not by name. The guest is the node, so a pattern
     # match would find the test's own tooling as readily as the driver.
     await on_node(
@@ -387,22 +387,22 @@ async def the_process_is_killed(cp, settings):
     )
 
 
-async def kubelet_restarts(cp, settings):
+async def kubelet_restarts(cp: Machine, settings: dict) -> None:
     await on_node(cp, "systemctl restart kubelet")
 
 
-async def containerd_restarts(cp, settings):
+async def containerd_restarts(cp: Machine, settings: dict) -> None:
     # The big one. Every container on the node dies, including the control
     # plane, and the NRI connection the plugin holds goes with it. A
     # containerd upgrade does exactly this.
     await on_node(cp, "systemctl restart containerd")
 
 
-async def the_csi_socket_is_deleted(cp, settings):
+async def the_csi_socket_is_deleted(cp: Machine, settings: dict) -> None:
     await on_node(cp, "rm -f /var/lib/kubelet/plugins/nixkube/csi.sock")
 
 
-async def the_state_is_wiped(cp, settings):
+async def the_state_is_wiped(cp: Machine, settings: dict) -> None:
     d = state_dirs(settings)
     await on_node(cp, f"rm -rf {d['volumes']}/* {d['containers']}/*")
 
@@ -435,7 +435,7 @@ SCENARIOS = (
 )
 
 
-async def wait_for_apiserver(cp):
+async def wait_for_apiserver(cp: Machine) -> None:
     """The API server answers again.
 
     `kubectl` through `succeed` raises, and half of these scenarios take the
@@ -449,7 +449,7 @@ async def wait_for_apiserver(cp):
     await until("the api server to answer", up, READY_TIMEOUT, cp)
 
 
-async def chaos(cp, settings):
+async def chaos(cp: Machine, settings: dict) -> None:
     """Break the driver every way there is, and ask if a pod can still start.
 
     nixkube is not a component a node can do without: a pod that wants a
@@ -481,7 +481,7 @@ async def chaos(cp, settings):
 RESIDENT = "--selector app.kubernetes.io/component=uml-resident"
 
 
-async def check_resident(cp, settings, why):
+async def check_resident(cp: Machine, settings: dict, why: str) -> None:
     """The pod that was already running still has what it was given.
 
     A driver that comes back but leaves the pods it was serving without
@@ -535,7 +535,7 @@ async def check_resident(cp, settings, why):
     print(f"[nixkube] {name} still has both mounts after {why}", flush=True)
 
 
-async def check_unmount(cp, settings):
+async def check_unmount(cp: Machine, settings: dict) -> None:
     """The mounts go away when the pods do.
 
     A driver that mounts and never unmounts looks exactly like a working
@@ -556,7 +556,7 @@ async def check_unmount(cp, settings):
     await check_reconciled(cp, settings, "the workload jobs are deleted")
 
 
-async def report(cp):
+async def report(cp: Machine) -> None:
     """What the driver's own containers said, pass or fail.
 
     This runs for an hour on a builder. A log that says only "passed" makes
@@ -640,7 +640,7 @@ async def report(cp):
         print(f"[nixkube] logs job/{job} (rc={rc}):\n{out}", flush=True)
 
 
-async def test(vms):
+async def test(vms: Machines) -> None:
     settings = vms.settings
     print(
         f"[nixkube] kubernetes {settings['kubernetesVersion']},"
