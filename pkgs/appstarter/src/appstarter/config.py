@@ -42,6 +42,28 @@ def store_path_for(value: str) -> str:
     return by_system[system]
 
 
+def fallback() -> str | None:
+    """The image's own copy of the environment, to seed from when a fetch fails.
+
+    One image serves every workload, so it carries one fallback per role and
+    `APPSTARTER_ROLE` from the pod spec picks between them.
+    `APPSTARTER_FALLBACK` overrides that, which is what a test or a
+    single-workload deployment sets.
+
+    The image sets these, never the pod spec. A pod spec comes out of the same
+    evaluation as `APPSTARTER_WANTED`, so a fallback named there is the same
+    path and falls back to nothing. The image's copy is useful because it lags.
+    """
+    direct = os.environ.get("APPSTARTER_FALLBACK")
+    if direct:
+        return direct
+
+    role = os.environ.get("APPSTARTER_ROLE")
+    if not role:
+        return None
+    return os.environ.get(f"APPSTARTER_FALLBACK_{role.upper()}")
+
+
 @dataclass(frozen=True)
 class State:
     """What `init` did, for `run` to report."""

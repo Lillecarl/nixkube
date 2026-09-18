@@ -109,6 +109,16 @@ self: pkgs: {
       (pkgs.lib.getBin pkgs.openssh)
       pkgs.gitMinimal
     ];
+    # `setup.py` installs these three files into the container root, so that
+    # `nix build` resolves a user at all.
+    env.FAKE_NSS = self.appstarter-fake-nss;
+    passthru.fakeNss = self.appstarter-fake-nss;
+  };
+
+  # The group alone, with no `nixbld` users under it. `appstarter init`
+  # builds with `--option sandbox false`, so every build runs as root.
+  appstarter-fake-nss = pkgs.dockerTools.fakeNss.override {
+    extraGroupLines = [ "nixbld:x:30000:" ];
   };
 
   ci-debug = pkgs.callPackage ./ci-debug { inherit pkgs; };

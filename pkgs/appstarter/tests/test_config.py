@@ -22,6 +22,38 @@ def test_a_map_without_this_system_is_an_error(monkeypatch):
         config.store_path_for(json.dumps({"x86_64-linux": "/nix/store/x"}))
 
 
+def test_the_role_picks_one_of_the_images_fallbacks(monkeypatch):
+    monkeypatch.setenv("APPSTARTER_ROLE", "node")
+    monkeypatch.setenv("APPSTARTER_FALLBACK_NODE", "/nix/store/n")
+    monkeypatch.setenv("APPSTARTER_FALLBACK_CACHE", "/nix/store/c")
+    assert config.fallback() == "/nix/store/n"
+
+
+def test_an_explicit_fallback_wins_over_the_role(monkeypatch):
+    monkeypatch.setenv("APPSTARTER_ROLE", "node")
+    monkeypatch.setenv("APPSTARTER_FALLBACK_NODE", "/nix/store/n")
+    monkeypatch.setenv("APPSTARTER_FALLBACK", "/nix/store/explicit")
+    assert config.fallback() == "/nix/store/explicit"
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {},
+        {"APPSTARTER_ROLE": "node"},
+        {"APPSTARTER_FALLBACK_NODE": "/nix/store/n"},
+        {"APPSTARTER_ROLE": "builder", "APPSTARTER_FALLBACK_NODE": "/nix/store/n"},
+    ],
+)
+def test_no_fallback_is_none_rather_than_a_guess(monkeypatch, environment):
+    """`init` fails loudly instead. A wrong environment starts a wrong node."""
+    for name in ("APPSTARTER_FALLBACK", "APPSTARTER_ROLE", "APPSTARTER_FALLBACK_NODE"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    assert config.fallback() is None
+
+
 def test_state_survives_a_round_trip(tmp_path):
     config.State(wanted="/nix/store/w", running="/nix/store/w").write(tmp_path)
     assert config.State.read(tmp_path) == config.State("/nix/store/w", "/nix/store/w")

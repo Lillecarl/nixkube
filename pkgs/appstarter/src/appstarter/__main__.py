@@ -7,13 +7,21 @@ import os
 import sys
 from pathlib import Path
 
-from . import seed, start, store
+from . import config, seed, setup, start, store
 
-# The initContainer sees the node's store here, because the image's own store
-# is at /nix and a container cannot have two. The main container sees the same
-# store at /nix, because by then it is the only one that matters.
+# Both modes take the prefix a `/nix/...` path resolves under, and the two
+# containers of a pod see the same store under different ones.
+#
+# The initContainer mounts the whole node directory at /nix-volume, because
+# the image already has its own store at /nix and a container cannot have two.
+# It is therefore a chroot store, and `/nix/var/result` is really
+# /nix-volume/nix/var/result.
+#
+# The main container mounts only the store, at /nix, so the same path needs no
+# prefix at all. Setting this to "/nix" reads that store at /nix/nix and finds
+# nothing.
 _INIT_STORE = Path("/nix-volume")
-_RUN_STORE = Path("/nix")
+_RUN_STORE = Path("/")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,13 +35,18 @@ def _parser() -> argparse.ArgumentParser:
         "--store",
         type=Path,
         default=Path(os.environ.get("APPSTARTER_STORE", _INIT_STORE)),
-        help="where the node's store is mounted",
+        help="the prefix the node's store paths resolve under",
     )
 
     run = modes.add_parser("run", help="start the application the store holds")
     run.add_argument("program", help="the program to exec out of the store")
     run.add_argument("argv", nargs=argparse.REMAINDER, help="its arguments")
-    run.add_argument("--store", type=Path, default=_RUN_STORE)
+    run.add_argument(
+        "--store",
+        type=Path,
+        default=Path(os.environ.get("APPSTARTER_STORE", _RUN_STORE)),
+        help="the prefix the store paths resolve under",
+    )
 
     return parser
 
@@ -53,8 +66,9 @@ def main(argv: list[str] | None = None) -> int:
         print("APPSTARTER_WANTED is unset; nothing to fetch", file=sys.stderr)
         return 2
     try:
-        return seed.run(wanted, os.environ.get("APPSTARTER_FALLBACK"), args.store)
-    except (store.StoreError, KeyError, ValueError) as error:
+        setup.prepare()
+        return seed.run(wanted, config.fallback(), args.store)
+    except (store.StoreError, KeyError, ValueError, OSError) as error:
         print(f"appstarter init: {error}", file=sys.stderr)
         return 1
 

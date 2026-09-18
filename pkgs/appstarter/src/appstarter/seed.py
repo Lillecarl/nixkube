@@ -63,12 +63,7 @@ def _fetch(wanted: str, into: Path, out_link: Path) -> None:
 def run(wanted_spec: str, fallback: str | None, store_root: Path) -> int:
     """Fetch `wanted_spec` into `store_root`, or seed it from the image.
 
-    The fallback is `APPSTARTER_FALLBACK`, and it comes from the **image**
-    rather than from the pod spec. A pod spec is rendered by the same
-    evaluation that produces `wanted`, so a fallback named there would be the
-    same path -- and then there is no fallback. What makes the image's copy
-    useful is exactly that it lags: it is whatever was current when the image
-    was built.
+    `config.fallback` says where the fallback comes from and why.
     """
     wanted = store_path_for(wanted_spec)
     out_link = store_root / RESULT_PATH
