@@ -81,6 +81,13 @@ in
     spec.nri-wait = [ "test" ];
   };
 
+  grpclib-ttrpc-tests = mkSuite {
+    name = "grpclib-ttrpc";
+    projectRoot = ../pkgs/grpclib-ttrpc;
+    spec.grpclib-ttrpc = [ "test" ];
+    env.TTRPC_TEST_SERVER = lib.getExe (pkgs.callPackage ../pkgs/grpclib-ttrpc/test-server.nix { });
+  };
+
   grpclib-nri-tests = mkSuite {
     name = "grpclib-nri";
     projectRoot = ../pkgs/grpclib-nri;

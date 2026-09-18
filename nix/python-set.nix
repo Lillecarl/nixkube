@@ -115,5 +115,23 @@ ps.mkPythonSet {
   };
 
   overlay =
-    pySelf: _pyPrev: lib.mapAttrs (name: root: pySelf.callPackage (project name root) { }) projects;
+    pySelf: pyPrev:
+    {
+      # **nixpkgs under-declares `grpclib`.** Its `dependencies` are `h2` and
+      # `multidict`, and `grpclib/_typing.py` imports `typing_extensions` at
+      # the top with no guard. Lifting derives the metadata from those
+      # declarations, so a venv holding `grpclib` without
+      # `typing-extensions` fails on the first import of `grpclib.server`.
+      #
+      # It hides in nixpkgs because `pythonImportsCheck` names `grpclib`, and
+      # `grpclib/__init__.py` does not reach `_typing`.
+      grpclib = pyPrev.grpclib.overrideAttrs (old: {
+        passthru = old.passthru // {
+          dependencies = old.passthru.dependencies // {
+            typing-extensions = [ ];
+          };
+        };
+      });
+    }
+    // lib.mapAttrs (name: root: pySelf.callPackage (project name root) { }) projects;
 }

@@ -15,3 +15,6 @@ dependencies = [
   "structlog",
   "ttrpc",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.24"]
