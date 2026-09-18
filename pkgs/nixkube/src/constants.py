@@ -148,6 +148,17 @@ GC_PATH_INFO_TIMEOUT_SECONDS: int = _parse_int_env(
 )
 GC_DELETE_TIMEOUT_SECONDS: int = _parse_int_env("GC_DELETE_TIMEOUT_SECONDS", "1800")
 
+# How long to wait for pynixd to answer a ping before treating it as absent.
+#
+# **Short on purpose.** Every `NodePublishVolume` asks this before it builds,
+# so the wait is paid per mount, and the only thing the answer decides is
+# whether to pass `--extra-substituters`. A pynixd that needs more than a few
+# seconds to say hello is not one a mount should wait on: the node builds or
+# substitutes from elsewhere instead, which is slower for that path and
+# faster than the alternative. An in-cluster SSH ping answers in well under a
+# second when pynixd is there at all.
+CACHE_PING_TIMEOUT_SECONDS: float = _parse_float_env("CACHE_PING_TIMEOUT_SECONDS", "5")
+
 # Cycles without one completing before the loop says so at error level. Both
 # failures of #38 were silent, and on a Talos node the first visible symptom
 # is the kubelet evicting pods for disk.

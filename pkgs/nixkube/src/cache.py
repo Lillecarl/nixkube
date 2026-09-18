@@ -8,7 +8,11 @@ from pathlib import Path
 
 import structlog
 
-from .constants import GC_COPY_TIMEOUT_SECONDS, PYNIXD_ENABLED
+from .constants import (
+    CACHE_PING_TIMEOUT_SECONDS,
+    GC_COPY_TIMEOUT_SECONDS,
+    PYNIXD_ENABLED,
+)
 from .subprocessing import run_captured
 
 logger = structlog.get_logger("nixkube.cache")
@@ -21,35 +25,69 @@ copy_lock: defaultdict[frozenset[Path], Semaphore] = defaultdict(Semaphore)
 
 
 async def check_cache_connectivity() -> bool:
-    """Check if the cache is reachable via SSH."""
+    """Whether pynixd can serve as a substituter right now.
+
+    **Only success is success, and failure is not fatal.** The one caller is
+    `get_build_args`, and the only thing this decides is whether to pass
+    `--extra-substituters`. So every way of not getting a clean answer -- the
+    ping timed out, the name did not resolve, `nix` exited non-zero, the
+    output was not the JSON it promised -- is the same answer: no.
+
+    The alternative is what this used to do. `CommandTimeoutError` escaped,
+    and because every `NodePublishVolume` calls this, a pynixd that did not
+    answer stopped the node mounting any volume at all. Measured in the UML
+    test, which runs no CoreDNS: `ssh-ng://nix@pynixd` never resolved, the
+    ping ran to its timeout on every mount, and each workload sat in
+    ContainerCreating until the test gave up. The visible symptom was
+    `NixInternalError: CommandTimeoutError`, which names neither pynixd nor
+    the cache.
+
+    Saying no costs that mount its substituter. It does not cost the mount.
+    """
     if not PYNIXD_ENABLED:
         return False
 
+    logger.debug("cache_connectivity_check")
     try:
-        logger.debug("cache_connectivity_check")
-        result = await asyncio.wait_for(
-            run_captured(
-                "nix",
-                "store",
-                "ping",
-                "--json",
-                "--store",
-                "ssh-ng://nix@pynixd",
-            ),
-            timeout=10.0,
+        # The timeout goes to `run_captured`, which owns one. Wrapping this in
+        # `asyncio.wait_for` as well gave two, and the outer one cancelled the
+        # inner: shellous suppresses the cancellation and sets `cancelled`, so
+        # what came out was `CommandTimeoutError` rather than the
+        # `asyncio.TimeoutError` the caller was watching for.
+        result = await run_captured(
+            "nix",
+            "store",
+            "ping",
+            "--json",
+            "--store",
+            "ssh-ng://nix@pynixd",
+            timeout=CACHE_PING_TIMEOUT_SECONDS,
         )
-        if result.returncode != 0:
-            logger.warning("cache_connectivity_failed", stderr=result.stderr)
-            return False
-        try:
-            ping_data = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            ping_data = {}
-        logger.debug("cache_connectivity_ok", **ping_data)
-        return True
-    except (OSError, asyncio.TimeoutError):
-        logger.warning("cache_connectivity_failed")
+    except Exception:
+        # Deliberately every exception. This answers a yes/no question about
+        # something outside the node, and there is no failure of it that a
+        # mount should be made to care about.
+        logger.warning("cache_connectivity_failed", exc_info=True)
         return False
+
+    if result.returncode != 0:
+        logger.warning(
+            "cache_connectivity_failed",
+            returncode=result.returncode,
+            stderr=result.stderr,
+        )
+        return False
+
+    try:
+        ping_data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        # `nix store ping --json` that answers with something else is a nix
+        # this code does not understand, not a cache that works.
+        logger.warning("cache_connectivity_unparsable", stdout=result.stdout[:200])
+        return False
+
+    logger.debug("cache_connectivity_ok", **ping_data)
+    return True
 
 
 def get_substituter_args() -> list[str]:

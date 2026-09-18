@@ -4,6 +4,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from src.cache import check_cache_connectivity
+from src.constants import CACHE_PING_TIMEOUT_SECONDS
+from src.errors import CommandTimeoutError
 from src.subprocessing import SubprocessResult
 
 STORE_PATH = Path("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test-1.0")
@@ -181,3 +184,94 @@ class TestCopyToCacheWithoutPynixd:
 
         mock_run.assert_not_called()
         mock_sleep.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        CommandTimeoutError(
+            returncode=124,
+            stdout="",
+            stderr="",
+            combined="",
+            command=["nix", "store", "ping"],
+        ),
+        OSError("no such host"),
+        TimeoutError(),
+        RuntimeError("something nobody predicted"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_raising_ping_is_false_and_not_an_error(error):
+    """Every `NodePublishVolume` asks this, so raising stops every mount.
+
+    `CommandTimeoutError` is the one that fires in practice: shellous
+    suppresses the TimeoutError and `run_captured` raises rc=124 instead.
+    A cluster with no DNS for `pynixd` left every workload in
+    ContainerCreating until the UML test gave up.
+    """
+
+    async def raises(*_args, **_kwargs):
+        raise error
+
+    with (
+        patch("src.cache.PYNIXD_ENABLED", True),
+        patch("src.cache.run_captured", new=AsyncMock(side_effect=raises)),
+    ):
+        assert await check_cache_connectivity() is False
+
+
+@pytest.mark.parametrize(
+    ("result", "why"),
+    [
+        (fail(), "nix exited non-zero"),
+        (ok("not json at all"), "the JSON it promised was not JSON"),
+        (ok(""), "it said nothing"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_only_a_clean_answer_is_yes(result, why):
+    """Anything short of success means "do not add pynixd as a substituter"."""
+    with (
+        patch("src.cache.PYNIXD_ENABLED", True),
+        patch("src.cache.run_captured", new=AsyncMock(return_value=result)),
+    ):
+        assert await check_cache_connectivity() is False, why
+
+
+@pytest.mark.asyncio
+async def test_a_cache_that_answers_is_true():
+    with (
+        patch("src.cache.PYNIXD_ENABLED", True),
+        patch("src.cache.run_captured", new=AsyncMock(return_value=ok("{}"))),
+    ):
+        assert await check_cache_connectivity() is True
+
+
+@pytest.mark.asyncio
+async def test_the_ping_carries_a_short_timeout():
+    """The wait is paid per mount, so it cannot be the build timeout."""
+    seen: dict[str, float | None] = {}
+
+    async def record(*_args, timeout=None, **_kwargs):
+        seen["timeout"] = timeout
+        return ok("{}")
+
+    with (
+        patch("src.cache.PYNIXD_ENABLED", True),
+        patch("src.cache.run_captured", side_effect=record),
+    ):
+        await check_cache_connectivity()
+
+    assert seen["timeout"] == CACHE_PING_TIMEOUT_SECONDS
+    assert 0 < CACHE_PING_TIMEOUT_SECONDS <= 15
+
+
+@pytest.mark.asyncio
+async def test_no_cache_asks_nothing():
+    with (
+        patch("src.cache.PYNIXD_ENABLED", False),
+        patch("src.cache.run_captured", new_callable=AsyncMock) as mock_run,
+    ):
+        assert await check_cache_connectivity() is False
+        mock_run.assert_not_called()
