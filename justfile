@@ -8,9 +8,10 @@ default:
 fmt:
     direnv exec . treefmt
 
-# Run Python tests
+# Run Python tests. `nix build --file ./checks.nix all` is the gate; this is
+# the fast loop, and it names every suite the gate does.
 test:
-    direnv exec . python -m pytest pkgs/nixkube/tests pkgs/nri-wait/tests -v
+    direnv exec . python -m pytest pkgs/nixkube/tests pkgs/nri-wait/tests pkgs/pynixd-nixkube/tests pkgs/grpclib-ttrpc/tests pkgs/grpclib-nri/tests -v
 
 # Build manifests only (local, fast)
 build-manifests:
