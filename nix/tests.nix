@@ -70,6 +70,13 @@ let
       '';
 in
 {
+  appstarter-tests = mkSuite {
+    name = "appstarter";
+    projectRoot = ../pkgs/appstarter;
+    spec.appstarter = [ "test" ];
+    importPackages = [ "appstarter" ];
+  };
+
   nixkube-tests = mkSuite {
     name = "nixkube";
     projectRoot = ../pkgs/nixkube;

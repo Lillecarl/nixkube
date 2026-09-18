@@ -43,6 +43,7 @@ let
   # what the set resolves. It is not the directory name: `pkgs/csi-proto-python`
   # ships a distribution called `csi`.
   projects = {
+    appstarter = ../pkgs/appstarter;
     csi = ../pkgs/csi-proto-python;
     cri = ../pkgs/cri-proto-python;
     nri = ../pkgs/nri-proto-python;

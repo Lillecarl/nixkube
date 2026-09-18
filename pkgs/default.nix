@@ -97,6 +97,20 @@ self: pkgs: {
     inherit (self) pythonSet;
   };
 
+  # **Its own PATH, and a short one.** This is what runs when the version the
+  # deployment asks for cannot be fetched, so it carries only the tools it
+  # calls itself. `gitMinimal` is here because Nix shells out to it for a
+  # flake reference, not because appstarter does.
+  appstarter = self.mkApp {
+    name = "appstarter";
+    inherit (self) pythonSet;
+    pathInputs = [
+      (pkgs.lib.getBin pkgs.nix)
+      (pkgs.lib.getBin pkgs.openssh)
+      pkgs.gitMinimal
+    ];
+  };
+
   ci-debug = pkgs.callPackage ./ci-debug { inherit pkgs; };
 
   # The two kubernetes-csi sidecars the node DaemonSet runs, and images for

@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+
+import json
+
+import pytest
+from appstarter import config
+
+
+def test_a_plain_store_path_passes_through():
+    assert config.store_path_for(" /nix/store/aaa-nodeEnv ") == "/nix/store/aaa-nodeEnv"
+
+
+def test_the_system_picks_one_out_of_the_map(monkeypatch):
+    monkeypatch.setattr(config, "nix_system", lambda: "aarch64-linux")
+    spec = json.dumps({"x86_64-linux": "/nix/store/x", "aarch64-linux": "/nix/store/a"})
+    assert config.store_path_for(spec) == "/nix/store/a"
+
+
+def test_a_map_without_this_system_is_an_error(monkeypatch):
+    monkeypatch.setattr(config, "nix_system", lambda: "riscv64-linux")
+    with pytest.raises(KeyError, match="riscv64-linux"):
+        config.store_path_for(json.dumps({"x86_64-linux": "/nix/store/x"}))
+
+
+def test_state_survives_a_round_trip(tmp_path):
+    config.State(wanted="/nix/store/w", running="/nix/store/w").write(tmp_path)
+    assert config.State.read(tmp_path) == config.State("/nix/store/w", "/nix/store/w")
+
+
+def test_state_is_degraded_when_the_two_differ(tmp_path):
+    config.State(wanted="/nix/store/w", running="/nix/store/f").write(tmp_path)
+    state = config.State.read(tmp_path)
+    assert state is not None
+    assert state.degraded
+
+
+@pytest.mark.parametrize(
+    "content", ["", "not json", "{}", '{"wanted": "/nix/store/w"}']
+)
+def test_unreadable_state_is_none_rather_than_an_error(tmp_path, content):
+    """`run` starts what the store holds either way. Only the report is lost."""
+    path = tmp_path / config.STATE_PATH
+    path.parent.mkdir(parents=True)
+    path.write_text(content)
+    assert config.State.read(tmp_path) is None
+
+
+def test_missing_state_is_none(tmp_path):
+    assert config.State.read(tmp_path) is None

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "appstarter"
+version = "0.1.0"
+description = "Seeds a node's Nix store and starts the application it holds"
+authors = [{ name = "lillecarl", email = "github@lillecarl.com" }]
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+# **No dependencies, deliberately.** This is what runs when the wanted version
+# cannot be fetched, so every import it makes is something that can keep the
+# node from starting at all. See src/appstarter/__init__.py.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+appstarter = "appstarter.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/appstarter"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
