@@ -36,6 +36,16 @@ let
       projectRoot,
       # `pythonSet.mkVirtualEnv`'s spec: which projects, with which extras.
       spec,
+      # Packages whose every module is imported before the suite runs.
+      #
+      # **A walk, not a list.** The builders have no `pythonImportsCheck`, and
+      # a module no test imports is a module nothing loads until a cluster
+      # does: `pynixd_nixkube` shipped four modules naming `pynixd.types.ids`
+      # after pynixd renamed it, so the package built and then died at
+      # start-up with `ModuleNotFoundError`. A hand-written list is the same
+      # check with a way to fall behind -- a module added and not listed is
+      # unchecked and says nothing.
+      importPackages ? [ ],
       env ? { },
       nativeBuildInputs ? [ ],
     }:
@@ -52,6 +62,9 @@ let
       ''
         cp -r ${suiteSource projectRoot}/. .
         chmod -R +w .
+        ${lib.optionalString (importPackages != [ ]) ''
+          python ${./import-walk.py} ${lib.escapeShellArgs importPackages}
+        ''}
         pytest -p no:cacheprovider tests
         touch "$out"
       '';
@@ -61,12 +74,14 @@ in
     name = "nixkube";
     projectRoot = ../pkgs/nixkube;
     spec.nixkube = [ "test" ];
+    importPackages = [ "src" ];
   };
 
   pynixd-nixkube-tests = mkSuite {
     name = "pynixd-nixkube";
     projectRoot = ../pkgs/pynixd-nixkube;
     spec.pynixd-nixkube = [ "test" ];
+    importPackages = [ "pynixd_nixkube" ];
     # `pynixd_nixkube/setup.py` reads both at import time, so a suite that
     # does not set them fails on collection rather than on an assertion.
     env = {
@@ -79,12 +94,14 @@ in
     name = "nri-wait";
     projectRoot = ../pkgs/nri-wait;
     spec.nri-wait = [ "test" ];
+    importPackages = [ "nri_wait" ];
   };
 
   grpclib-ttrpc-tests = mkSuite {
     name = "grpclib-ttrpc";
     projectRoot = ../pkgs/grpclib-ttrpc;
     spec.grpclib-ttrpc = [ "test" ];
+    importPackages = [ "grpclib_ttrpc" ];
     env.TTRPC_TEST_SERVER = lib.getExe (pkgs.callPackage ../pkgs/grpclib-ttrpc/test-server.nix { });
   };
 
@@ -92,6 +109,7 @@ in
     name = "grpclib-nri";
     projectRoot = ../pkgs/grpclib-nri;
     spec.grpclib-nri = [ "test" ];
+    importPackages = [ "grpclib_nri" ];
     env.NRI_TEST_SERVER = lib.getExe (pkgs.callPackage ../pkgs/grpclib-nri/test-server.nix { });
   };
 }
