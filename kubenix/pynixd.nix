@@ -13,6 +13,10 @@ let
 
   # Shared across pynixd central and builders
   image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
+
+  # What a builder mounts through the node's CSI driver. The central pod
+  # fills its own PVC from an initContainer instead -- a builder is created
+  # by a pynixd that is already serving, so the node has this path by then.
   storeVolumeAttributes = lib.mapAttrs (_: pkgs: pkgs.nixkube-pynixd-env) csiPkgs;
 
   # The controller and a builder answer the same way and take the same kind of
@@ -314,11 +318,68 @@ in
               serviceAccountName = "nixkube";
               priorityClassName = "system-cluster-critical";
 
+              /*
+                Fill the PVC before pynixd starts, the same way the node
+                DaemonSet fills its host store. Issue #49.
+
+                A CSI ephemeral volume from the node driver would serve
+                `cacheEnv` too, and it is not reliable enough to boot from:
+                nixkube garbage collects hard when a pod exits, so the
+                environment pynixd needs can be gone by the next start. It is
+                also the #27 cycle -- the node holds `cacheEnv` only once
+                pynixd has served it, and pynixd cannot start until the node
+                holds it.
+
+                The image's own `cacheEnv` breaks both. `appstarter init`
+                takes it when nothing else can serve the path, so pynixd
+                starts behind rather than not at all.
+
+                `PYNIXD_ENABLED` is false here whatever the deployment says.
+                The pynixd substituter is this pod, and it is not listening
+                yet.
+              */
+              initContainers = lib.mkNumberedList {
+                "1" = {
+                  name = "appstarter-init";
+                  image = "ghcr.io/lillecarl/nix-csi/nix:${cfg.version}-${curPkgs.nix.version}";
+                  imagePullPolicy = "Always";
+                  securityContext.privileged = true; # chroot store
+                  command = [
+                    "appstarter"
+                    "init"
+                  ];
+                  env = lib.mkNamedList {
+                    APPSTARTER_WANTED.value = builtins.toJSON (
+                      lib.mapAttrs (_: sysPkgs: "${sysPkgs.nixkube-pynixd-env}") csiPkgs
+                    );
+                    APPSTARTER_ROLE.value = "cache";
+                    PYNIXD_ENABLED.value = "false";
+                  };
+                  volumeMounts = lib.mkNamedList {
+                    nix-store.mountPath = "/nix-volume";
+                    nix-config.mountPath = "/etc/nix";
+                    nix-key.mountPath = "/etc/nix-key";
+
+                    ssh-config.mountPath = "/etc/ssh";
+                    ssh-key.mountPath = "/etc/ssh-key";
+                    ssh-dynauth.mountPath = "/etc/ssh-dynauth";
+                  };
+                  resources = {
+                    requests = {
+                      memory = "128Mi";
+                      cpu = "100m";
+                    };
+                  };
+                };
+              };
+
               containers = lib.mkNamedList {
                 pynixd = {
                   command = [
                     "tini"
                     "--"
+                    "appstarter"
+                    "run"
                     "pynixd-nixkube-central"
                   ];
                   inherit image;
@@ -352,24 +413,41 @@ in
                     ssh.containerPort = 22;
                   };
                   inherit (probes) readinessProbe livenessProbe startupProbe;
-                  volumeMounts = lib.mkNamedList (
-                    {
-                      nix-config.mountPath = "/etc/nix";
-                      nix-key.mountPath = "/etc/nix-key";
-                      nix-store.mountPath = "/data";
-                      init-store = {
+                  # A plain list, not `mkNamedList`. That helper keys on the
+                  # volume name and writes it into each entry, and the PVC
+                  # below is mounted twice under the one name.
+                  volumeMounts =
+                    lib.mapAttrsToList (name: mount: mount // { inherit name; }) (
+                      {
+                        nix-config.mountPath = "/etc/nix";
+                        nix-key.mountPath = "/etc/nix-key";
+                        nix-store.mountPath = "/data";
+
+                        ssh-config.mountPath = "/etc/ssh";
+                        ssh-dynauth.mountPath = "/etc/ssh-dynauth";
+                        ssh-key.mountPath = "/etc/ssh-key";
+                        pynixd-config.mountPath = "/etc/pynixd-config";
+                      }
+                      // cfg.pynixd.extraVolumeMounts
+                    )
+                    ++ [
+                      /*
+                        The PVC a second time, at the prefix a `/nix/...` path
+                        resolves under. /data is the chroot store root the
+                        initContainer filled, so /data/nix is exactly this.
+
+                        `subPath` is safe on a PVC. The kubelet performs the
+                        bind in its own mount namespace, and a PVC is already
+                        staged there. The node's store is a hostPath and is
+                        not, which is why `nix-root` is a volume of its own
+                        over there -- see issue #16.
+                      */
+                      {
+                        name = "nix-store";
                         mountPath = "/nix";
                         subPath = "nix";
-                        readOnly = true;
-                      };
-
-                      ssh-config.mountPath = "/etc/ssh";
-                      ssh-dynauth.mountPath = "/etc/ssh-dynauth";
-                      ssh-key.mountPath = "/etc/ssh-key";
-                      pynixd-config.mountPath = "/etc/pynixd-config";
-                    }
-                    // cfg.pynixd.extraVolumeMounts
-                  );
+                      }
+                    ];
                   resources = {
                     requests = {
                       memory = "64Mi";
@@ -382,11 +460,6 @@ in
                 {
                   nix-config.configMap.name = "pynixd";
                   nix-key.secret.secretName = "nix-key";
-                  init-store.csi = {
-                    driver = "nixkube";
-                    readOnly = true;
-                    volumeAttributes = storeVolumeAttributes;
-                  };
 
                   ssh-config.configMap = {
                     name = "ssh-config";

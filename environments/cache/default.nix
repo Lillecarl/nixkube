@@ -40,6 +40,10 @@ pkgs.buildEnv {
   name = "cacheEnv";
   paths = with pkgs; [
     dinixEval.config.containerWrapper
+    # `pynixd` starts as `appstarter run pynixd-nixkube-central`, out of this
+    # environment. The image's copy is shadowed: the PVC covers /nix once the
+    # pod runs, and nothing in the image can exec after that. Issue #49.
+    appstarter
     bash
     coreutils
     nix
