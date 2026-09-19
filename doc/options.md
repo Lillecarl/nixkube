@@ -141,6 +141,47 @@ absolute path
 
 
 
+## nixkube\.hostSystem
+
+
+
+Which architecture builds the host-side artefacts: the ` nix.conf ` and
+JSON config derivations, and the ` nix ` package that writes them\. They
+are built wherever the manifest is rendered, never on a node, so this
+is unrelated to ` systems ` – that names what the *nodes* run\.
+
+It falls back to the one enabled system when ` systems ` names exactly
+one, and otherwise has no answer to infer\. ` builtins.currentSystem `
+is not that answer: it is absent under ` --pure-eval `, so a module
+that reads it fails every pure consumer on “attribute
+‘currentSystem’ missing” before they reach anything of their own\.
+
+
+
+*Type:*
+string
+
+
+
+*Default:*
+
+```nix
+"x86_64-linux"
+```
+
+
+
+*Example:*
+
+```nix
+"x86_64-linux"
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
 ## nixkube\.imagePullPolicy
 
 

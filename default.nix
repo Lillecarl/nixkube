@@ -171,6 +171,11 @@ rec {
           config = {
             # Disabled by default so you can include the module in an easykubenix project
             nixkube.enable = true;
+            # The architecture rendering the manifest, which is this
+            # evaluation's own. The module cannot ask for it: `hostSystem`
+            # has to stay answerable under `--pure-eval`, and this file is
+            # the impure entry point where `system` is already a parameter.
+            nixkube.hostSystem = system;
             # Allow easily adding your pubkeys to the cache
             nixkube.pynixd.authorizedKeys = lib.pipe (lib.filesystem.listFilesRecursive ./keys) [
               (lib.filter (name: lib.hasSuffix ".pub" name))

@@ -308,6 +308,38 @@ in
         }
       '';
     };
+    hostSystem = lib.mkOption {
+      description = ''
+        Which architecture builds the host-side artefacts: the `nix.conf` and
+        JSON config derivations, and the `nix` package that writes them. They
+        are built wherever the manifest is rendered, never on a node, so this
+        is unrelated to `systems` -- that names what the *nodes* run.
+
+        It falls back to the one enabled system when `systems` names exactly
+        one, and otherwise has no answer to infer. `builtins.currentSystem`
+        is not that answer: it is absent under `--pure-eval`, so a module
+        that reads it fails every pure consumer on "attribute
+        'currentSystem' missing" before they reach anything of their own.
+      '';
+      type = lib.types.str;
+      default =
+        let
+          enabled = lib.attrNames (lib.filterAttrs (_: e: e) cfg.systems);
+        in
+        if lib.length enabled == 1 then
+          lib.head enabled
+        else
+          throw ''
+            nixkube.hostSystem: ${toString (lib.length enabled)} architectures are enabled, so
+            there is no host architecture to infer. Name the one that renders
+            the manifest:
+
+              nixkube.hostSystem = "x86_64-linux";
+
+            It is not a node architecture -- `nixkube.systems` stays as it is.
+          '';
+      example = "x86_64-linux";
+    };
 
     pkgs = lib.mkOption {
       type = lib.types.path;
@@ -411,7 +443,7 @@ in
           (lib.filterAttrs (_: enabled: enabled))
           (lib.mapAttrs (system: _: mkPkgs system))
         ];
-        curPkgs = mkPkgs builtins.currentSystem;
+        curPkgs = mkPkgs cfg.hostSystem;
         subPath = spath: lib.removePrefix "/" (toString spath);
       };
 
