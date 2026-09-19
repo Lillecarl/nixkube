@@ -40,6 +40,9 @@
   deployedJobs,
   assertedJobs,
   rejectedJobs,
+  # nixkube's own image, as a docker-archive tarball under the tag a pod
+  # asks for. ./images.nix builds it for the other cluster test.
+  umlImages,
   name,
   # The guest's own segment.  Two of these tests can run at once, so each
   # needs a network of its own -- see ./default.nix.
@@ -81,6 +84,24 @@ uml.mkTest {
         */
         images = "pull";
 
+        /*
+          Except nixkube's own, which is the thing under test.
+
+          Everything else a node needs still comes off the network, which is
+          the point of `pull` above. This one image does not: a pod names
+          `ghcr.io/lillecarl/nix-csi/nix:<version>-<nix>`, and pulling it
+          means the test runs whatever was published last, whatever this
+          checkout says. A change to `pkgs/appstarter` could not be tried
+          here at all -- and one that could never work shipped because of
+          it, `store.copy` calling `nix copy` with no `--from`.
+
+          The tarball carries that exact tag, so containerd already has the
+          name kubelet looks up. `nixkube.imagePullPolicy` is what stops
+          kubelet fetching the published one over the top of it; see
+          ./ci-guest.nix.
+        */
+        extraImages = [ umlImages.nix ];
+
         # The DaemonSet asks containerd for an NRI connection whether or
         # not containerd is listening, and gets no error when it is not.
         nri = true;
@@ -106,6 +127,11 @@ uml.mkTest {
         # of the two: 3.8G of 7.8G used, and pynixd's volume 8.3M of that.
         # The test prints `df` for this reason -- raise it from a
         # measurement, not from a guess.
+        #
+        # **This number is also the PV's capacity**, because a hostPath
+        # volume is a directory on this disk and nothing else bounds it. So
+        # a claim larger than it can never bind -- see the storage size in
+        # ./ci-guest.nix, which is the end that gives.
         diskSize = 8192;
         /*
           The API server, reachable from the host, because kluctl runs

@@ -141,6 +141,40 @@ absolute path
 
 
 
+## nixkube\.imagePullPolicy
+
+
+
+How every container that runs nixkube’s own image gets it\.
+
+` Always ` for a cluster: the tag moves, and a node holding an older
+image under the same name would run it forever\.
+
+` IfNotPresent ` for a test that imported the image this checkout
+built\. ` Always ` sends kubelet to the registry whatever is on the
+node, so the test then runs whatever was published last and cannot
+see a local change at all – which is how ` appstarter `’s image
+fallback shipped broken\. Only nixkube’s own containers take this;
+the CSI sidecars come from registry\.k8s\.io and still pull\.
+
+
+
+*Type:*
+one of “Always”, “IfNotPresent”, “Never”
+
+
+
+*Default:*
+
+```nix
+"Always"
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
 ## nixkube\.knownHosts
 
 

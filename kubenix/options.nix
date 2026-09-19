@@ -68,6 +68,27 @@ in
         in
         pyproject.project.version;
     };
+    imagePullPolicy = lib.mkOption {
+      description = ''
+        How every container that runs nixkube's own image gets it.
+
+        `Always` for a cluster: the tag moves, and a node holding an older
+        image under the same name would run it forever.
+
+        `IfNotPresent` for a test that imported the image this checkout
+        built. `Always` sends kubelet to the registry whatever is on the
+        node, so the test then runs whatever was published last and cannot
+        see a local change at all -- which is how `appstarter`'s image
+        fallback shipped broken. Only nixkube's own containers take this;
+        the CSI sidecars come from registry.k8s.io and still pull.
+      '';
+      type = lib.types.enum [
+        "Always"
+        "IfNotPresent"
+        "Never"
+      ];
+      default = "Always";
+    };
     nix = {
       package = lib.mkOption {
         description = "Nix package to use for nix.conf generation and daemon";

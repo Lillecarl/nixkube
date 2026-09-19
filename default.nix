@@ -25,8 +25,13 @@ rec {
   easykubenix = import sources.easykubenix;
 
   kubenixApply = kubenixInstance { };
-  kubenixCI1 = kubenixInstance {
-    module.imports = [
+
+  # The two CI deployments as module lists, because each one is deployed
+  # twice: once as itself, and once by a guest test that adds a single
+  # setting. Naming the list is what stops the guest's copy drifting from
+  # what CI deploys -- see `kubenixCIGuest` below.
+  ciModules = {
+    one = [
       ./kubenix/ci
       {
         nixkube.systems = {
@@ -35,11 +40,7 @@ rec {
         };
       }
     ];
-  };
-  # kubenixCI2 is used by tests/nixos/integration.nix for the containerd nixos test.
-  # Disables aarch64-linux to avoid needing cross-compilation support.
-  kubenixCI2 = kubenixInstance {
-    module.imports = [
+    two = [
       ./kubenix/ci
       (
         { config, pkgs, ... }:
@@ -72,6 +73,27 @@ rec {
       )
     ];
   };
+
+  /*
+    The same deployment, adapted to a guest.
+
+    Two settings: nixkube's own image comes from this checkout rather than
+    from ghcr.io, and pynixd's claim fits the guest's disk.
+    ./nix/uml/ci-guest.nix carries the reason and the measurement for each.
+
+    The rest is the list above, so this cannot become a second definition
+    of what CI deploys.
+  */
+  kubenixCIGuest =
+    modules:
+    kubenixInstance {
+      module.imports = modules ++ [ ./nix/uml/ci-guest.nix ];
+    };
+
+  kubenixCI1 = kubenixInstance { module.imports = ciModules.one; };
+  # kubenixCI2 is used by tests/nixos/integration.nix for the containerd nixos test.
+  # Disables aarch64-linux to avoid needing cross-compilation support.
+  kubenixCI2 = kubenixInstance { module.imports = ciModules.two; };
   # Separate instance for test workload Jobs, deployed after infrastructure
   # is fully rolled out so CSI and NRI are ready before pods start.
   kubenixCITest = easykubenix {
@@ -878,9 +900,9 @@ rec {
   testJobs = import ./ci/test-jobs.nix;
 
   ciTest = pkgs.callPackage ./nix/uml/ci.nix {
-    inherit sources;
+    inherit sources umlImages;
     name = "nixkube-ci";
-    instance = kubenixCI2;
+    instance = kubenixCIGuest ciModules.two;
     workloads = kubenixCITest;
     deployedJobs = testJobs.deployed;
     assertedJobs = testJobs.asserted;
@@ -892,9 +914,9 @@ rec {
   };
 
   ciTestCache = pkgs.callPackage ./nix/uml/ci.nix {
-    inherit sources;
+    inherit sources umlImages;
     name = "nixkube-ci-cache";
-    instance = kubenixCI1;
+    instance = kubenixCIGuest ciModules.one;
     workloads = kubenixCITest;
     deployedJobs = testJobs.deployed;
     assertedJobs = testJobs.asserted;

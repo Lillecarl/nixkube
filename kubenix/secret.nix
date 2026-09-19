@@ -92,7 +92,7 @@ in
                 containers = lib.mkNamedList {
                   init = {
                     image = "ghcr.io/lillecarl/nix-csi/nix:${cfg.version}-${curPkgs.nix.version}";
-                    imagePullPolicy = "Always";
+                    inherit (cfg) imagePullPolicy;
                     command = [ "init-secrets" ];
                     volumeMounts = lib.mkNamedList {
                       nix-config.mountPath = "/etc/nix";

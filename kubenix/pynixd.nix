@@ -363,7 +363,7 @@ in
                 "1" = {
                   name = "appstarter-init";
                   image = "ghcr.io/lillecarl/nix-csi/nix:${cfg.version}-${curPkgs.nix.version}";
-                  imagePullPolicy = "Always";
+                  inherit (cfg) imagePullPolicy;
                   securityContext.privileged = true; # chroot store
                   command = [
                     "appstarter"
