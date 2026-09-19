@@ -333,11 +333,7 @@ rec {
   # The module options as CommonMark. `genModDoc` writes it into the tree and
   # `docOptionsCheck` compares the tree against it, so both read one binding.
   optionsDocs = pkgs.nixosOptionsDoc {
-    # `passthru.eval`, not `eval`. easykubenix moved it under passthru and
-    # this line kept the old path, so `nix run --file . genModDoc` has
-    # failed with "attribute 'eval' missing" ever since -- which takes
-    # `just precommit` with it, because that runs gendoc.
-    inherit (kubenixCI1.passthru.eval) options;
+    inherit (kubenixCI1) options;
     warningsAreErrors = false;
     transformOptions =
       opt:
