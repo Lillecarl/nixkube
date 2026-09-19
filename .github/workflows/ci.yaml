@@ -19,7 +19,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -53,7 +54,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -89,7 +91,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -133,7 +136,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -178,7 +182,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -227,7 +232,8 @@ jobs:
       pages: write
     runs-on: ubuntu-24.04
     steps:
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - id: deployment
@@ -249,7 +255,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -284,7 +291,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -348,7 +356,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -407,7 +416,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -438,7 +448,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -469,7 +480,8 @@ jobs:
     steps:
       - timeout-minutes: 10
         uses: actions/checkout@main
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
@@ -495,7 +507,8 @@ jobs:
       rev: ${{ steps.resolve.outputs.rev }}
     runs-on: ubuntu-24.04
     steps:
-      - name: Make room on the runner
+      - if: runner.os == 'Linux'
+        name: Make room on the runner
         run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - uses: actions/checkout@v4
