@@ -17,12 +17,7 @@ jobs:
       - timeout-minutes: 10
         uses: actions/checkout@main
       - name: Make room on the runner
-        run: |
-          df -h /
-          sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
-          docker system prune --all --force
-          docker builder prune --all --force
-          df -h /
+        run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - timeout-minutes: 15
         uses: cachix/install-nix-action@master
@@ -61,12 +56,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Make room on the runner
-        run: |
-          df -h /
-          sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox
-          docker system prune --all --force
-          docker builder prune --all --force
-          df -h /
+        run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /opt/hostedtoolcache /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
         timeout-minutes: 10
       - uses: actions/checkout@v4
         with:
