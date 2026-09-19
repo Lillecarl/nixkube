@@ -19,7 +19,11 @@ _MAX_ATTEMPTS = 5
 _BACKOFF_STEP = 10.0
 
 _PYNIXD_STORE = "ssh-ng://nix@pynixd"
-_LOCAL = "local?trusted=true"
+
+# The same store as `store.LOCAL_STORE`, asked for as a *substituter*.
+# `trusted=true` belongs only here: it says a path may be taken without a
+# signature, which is a question about substitution and not about reading.
+_LOCAL = f"{store.LOCAL_STORE}?trusted=true"
 
 
 def _substituters() -> tuple[list[str], str]:

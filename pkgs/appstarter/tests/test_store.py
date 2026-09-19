@@ -61,6 +61,32 @@ def test_build_reports_what_nix_said(tmp_path, monkeypatch):
         store.build("/nix/store/aaa", tmp_path, ["local"], tmp_path / "result")
 
 
+def test_copy_reads_and_writes_local_stores(tmp_path, monkeypatch):
+    """Both ends are local, because `appstarter init` runs no Nix daemon.
+
+    Without `--from`, `nix copy` reads the default store and goes through
+    the daemon socket, which is not there. The fallback then dies on a
+    missing socket -- the one path that exists to survive a store the node
+    cannot reach.
+    """
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(store, "_run", lambda *a, **_k: seen.append(a) or _completed(0))
+
+    store.copy("/nix/store/aaa", tmp_path, tmp_path / "result")
+
+    args = seen[0]
+    assert args[args.index("--from") + 1] == store.LOCAL_STORE
+    assert args[args.index("--to") + 1] == str(tmp_path)
+
+
+def test_copy_reports_what_nix_said(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        store, "_run", lambda *a, **k: _completed(1, stderr="cannot connect\n")
+    )
+    with pytest.raises(store.StoreError, match="cannot connect"):
+        store.copy("/nix/store/aaa", tmp_path, tmp_path / "result")
+
+
 def test_ping_treats_a_timeout_as_no_answer(monkeypatch):
     def timeout(*_args, **_kwargs):
         raise subprocess.TimeoutExpired(cmd="nix", timeout=1)

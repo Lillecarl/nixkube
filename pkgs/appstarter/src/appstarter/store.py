@@ -8,6 +8,15 @@ from pathlib import Path
 
 log = logging.getLogger("appstarter.store")
 
+# This container's own `/nix/store`, opened as a store in its own right.
+#
+# **`appstarter init` runs no Nix daemon.** `local` is the store that reads
+# `/nix/store` directly; `auto` and `daemon` both go through
+# `/nix/var/nix/daemon-socket/socket`, which does not exist here. Anything
+# this module hands to Nix as a store has to be a local one -- this, or the
+# path of the node's own store.
+LOCAL_STORE = "local"
+
 
 class StoreError(RuntimeError):
     """A Nix operation failed, or left the store incomplete."""
@@ -71,8 +80,24 @@ def copy(target: str, into: Path, out_link: Path) -> None:
 
     The fallback. It reads no substituter and cannot fail for a reason outside
     this pod, which is the whole point of it.
+
+    **Both ends are local stores, and `--from` has to say so.** Without it
+    `nix copy` reads the default store, which goes through the daemon socket
+    -- and there is none here. Measured on nixkube's `test-qemu-ci-cache`:
+    `cannot copy <path>: error: cannot connect to socket at
+    '/nix/var/nix/daemon-socket/socket'`, on the one path that exists to
+    survive a store the node cannot reach.
     """
-    result = _run("nix", "copy", "--no-check-sigs", "--to", str(into), target)
+    result = _run(
+        "nix",
+        "copy",
+        "--no-check-sigs",
+        "--from",
+        LOCAL_STORE,
+        "--to",
+        str(into),
+        target,
+    )
     if result.returncode != 0:
         raise StoreError(f"cannot copy {target}: {result.stderr.strip()}")
     link(target, out_link)
