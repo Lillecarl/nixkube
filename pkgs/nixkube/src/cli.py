@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 
-import asyncio
 import json
 import logging
 import sys
@@ -146,8 +145,11 @@ async def async_main():
     Loads logging configuration from /etc/nix/logging.json (ConfigMap-mounted).
     Runs run_setup() synchronously first, then spawns supervised tasks for
     nix-daemon, GC loop, CSI server(s), and optionally the NRI plugin.
-    CrashLoopError from any task propagates through asyncio.gather(), cancels
-    siblings, and exits the process (Kubernetes restarts the pod with backoff).
+
+    One task group holds all of them, so a `CrashLoopError` out of any one
+    cancels the rest and exits the process, and Kubernetes restarts the pod
+    with backoff. That is what the group buys over `asyncio.gather`, which
+    propagates the first exception and leaves its siblings running.
     """
     config: dict = {}
     # `anyio.Path`, not `pathlib.Path`: `open()` in an async function blocks
@@ -191,48 +193,37 @@ async def async_main():
 
     await run_setup()
 
-    tasks: list[asyncio.Task] = [
-        asyncio.create_task(supervise_nix_daemon(), name="nix-daemon"),
-        asyncio.create_task(gc_loop(), name="gc"),
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(supervise_nix_daemon, name="nix-daemon")
+        tg.start_soon(gc_loop, name="gc")
         # Not supervised. It has nothing to crash on, and a restart loop
         # around a sampler would report on itself.
-        asyncio.create_task(metrics.LoopLagMonitor().run(), name="loop-lag"),
-        asyncio.create_task(
-            supervised(
-                lambda: csi_serve(
-                    plugin_name="nixkube", socket_path=Path("/csi/nixkube/csi.sock")
-                ),
-                "csi",
+        tg.start_soon(metrics.LoopLagMonitor().run, name="loop-lag")
+        tg.start_soon(
+            supervised,
+            lambda: csi_serve(
+                plugin_name="nixkube", socket_path=Path("/csi/nixkube/csi.sock")
             ),
+            "csi",
             name="csi",
-        ),
-    ]
-    if ENABLE_COMPAT_DRIVER:
-        tasks.append(
-            asyncio.create_task(
-                supervised(
-                    lambda: csi_serve(
-                        plugin_name="nix.csi.store",
-                        socket_path=Path("/csi/nix.csi.store/csi.sock"),
-                    ),
-                    "csi-compat",
+        )
+        if ENABLE_COMPAT_DRIVER:
+            tg.start_soon(
+                supervised,
+                lambda: csi_serve(
+                    plugin_name="nix.csi.store",
+                    socket_path=Path("/csi/nix.csi.store/csi.sock"),
                 ),
+                "csi-compat",
                 name="csi-compat",
             )
-        )
-    if NRI_ENABLED:
-        tasks.append(
-            asyncio.create_task(
-                supervised(lambda: nri_serve(), "nri"),
-                name="nri",
-            )
-        )
-    await asyncio.gather(*tasks)
+        if NRI_ENABLED:
+            tg.start_soon(supervised, nri_serve, "nri", name="nri")
 
 
 def main():
     """Entry point for the nixkube daemon."""
-    asyncio.run(async_main())
+    anyio.run(async_main, backend="asyncio")
 
 
 if __name__ == "__main__":
