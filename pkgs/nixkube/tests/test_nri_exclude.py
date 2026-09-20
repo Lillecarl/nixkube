@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 from nri.nri_pb2 import CreateContainerRequest, CreateContainerResponse
+
 from src.nri import server as nri_server
 
 

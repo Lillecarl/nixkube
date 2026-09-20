@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from cachetools import TTLCache
@@ -152,7 +152,7 @@ async def report_event(
 
     logger.debug("report_event", reason=reason, pod=pod.metadata.name)
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         now_iso = now.isoformat()
 
         # Format the final note with message and optional logs

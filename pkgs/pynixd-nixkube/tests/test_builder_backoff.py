@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 import anyio
 import pytest
+
 from pynixd_nixkube import builder_manager
 from pynixd_nixkube.builder_manager import (
     _BACKOFF_BASE_SECONDS,

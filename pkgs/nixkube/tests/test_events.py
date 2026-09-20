@@ -2,6 +2,7 @@
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
+
 from src.events import _format_event_note
 
 

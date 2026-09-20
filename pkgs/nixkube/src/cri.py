@@ -8,6 +8,7 @@ from pathlib import Path
 import grpclib.client
 import kr8s
 import structlog
+
 from cri import cri_grpc, cri_pb2
 
 logger = structlog.get_logger("nixkube.cri")

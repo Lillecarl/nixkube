@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import prometheus_client
+
 from src import metrics
 
 

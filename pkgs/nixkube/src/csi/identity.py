@@ -2,10 +2,11 @@
 
 from pathlib import Path
 
-from csi import csi_grpc, csi_pb2
 from google.protobuf.wrappers_pb2 import BoolValue
 from grpclib import GRPCError
 from grpclib.const import Status
+
+from csi import csi_grpc, csi_pb2
 
 from ..constants import CSI_PLUGIN_NAME, CSI_VENDOR_VERSION
 

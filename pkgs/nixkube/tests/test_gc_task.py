@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock
 
 import anyio
 import pytest
+
 from src import gc_task
 from src.gc_task import _count_deleted, _select_old_paths
 

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import anyio
 import pytest
+
 from src.nix.database import pipe_commands
 
 # `sys.executable`, not "python3": the environment a test runs in is not

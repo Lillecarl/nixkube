@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 import pytest
+
 from src.errors import CommandTimeoutError, SubprocessError
 from src.subprocessing import run_captured, try_captured, try_console
 

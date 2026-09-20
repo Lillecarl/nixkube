@@ -15,8 +15,9 @@ from __future__ import annotations
 import anyio
 import anyio.lowlevel
 import pytest
-from pynixd_nixkube.builder_manager import BuilderManager
 from structlog.testing import capture_logs
+
+from pynixd_nixkube.builder_manager import BuilderManager
 
 
 def manager(**kwargs) -> BuilderManager:
