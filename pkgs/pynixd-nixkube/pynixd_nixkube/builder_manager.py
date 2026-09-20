@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: MIT
 
-import asyncio
 import contextlib
 import hashlib
 import socket
 import time
 import uuid
+from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
+import anyio.abc
 import kr8s.asyncio as k8s
 import structlog
 from kr8s.asyncio.objects import Job, PodTemplate, new_class
@@ -107,7 +109,7 @@ def _job_age_seconds(job_raw: dict, now: datetime) -> float | None:
     except ValueError:
         return None
     if started.tzinfo is None:
-        started = started.replace(tzinfo=timezone.utc)
+        started = started.replace(tzinfo=UTC)
     return (now - started).total_seconds()
 
 
@@ -166,7 +168,7 @@ class BuilderManager:
         self._job_names: dict[str, str] = {}
         self._available_systems: set[str] = set()
         self._pending_probes: set[str] = set()
-        self._task: asyncio.Task | None = None
+        self._tasks: anyio.abc.TaskGroup | None = None
         # Consecutive failed builders per system, and when that system may
         # create another. A builder that reaches Ready clears both.
         self._failures: dict[str, int] = {}
@@ -186,47 +188,85 @@ class BuilderManager:
         # unregistered, both fetch the Pod and both add the same store. A Job
         # MODIFIED event fires exactly when a new builder's Pod gets an IP,
         # which is when the tick is most likely to be looking at it.
-        self._reconcile_lock = asyncio.Lock()
+        self._reconcile_lock = anyio.Lock()
 
-    async def start(self) -> None:
+    @contextlib.asynccontextmanager
+    async def running(self) -> AsyncIterator["BuilderManager"]:
+        """Run the five loops for as long as the block lasts.
+
+        A block, and not `start()` / `stop()`: a task group's lifetime *is* a
+        block, and holding one open across two calls needs a task whose only
+        job is to keep the block from closing.
+
+        Each loop catches its own `Exception` and retries, so none of them
+        reaches the group. One that did would cancel the other four and end
+        the process, which is the right answer for a bug nobody anticipated.
+        """
         await self._reap_orphaned_builder_pods()
         self._available_systems = set(self.systems)
         await self._sync_dynamic_features()
-        self._task = asyncio.create_task(self._run())
-        log.info(
-            "builder_manager_started",
-            namespace=self.namespace,
-            max_builders=self.max_builders,
-            min_builders=self.min_builders,
-            systems=list(self._available_systems),
-        )
 
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
-        log.info("builder_manager_stopped")
+        async with anyio.create_task_group() as tasks:
+            self._tasks = tasks
+            for loop in (
+                self._watch_jobs,
+                self._watch_queue,
+                self._reap_idle,
+                self._watch_nodes,
+                self._periodic_reconcile,
+            ):
+                tasks.start_soon(loop, name=loop.__name__)
+            log.info(
+                "builder_manager_started",
+                namespace=self.namespace,
+                max_builders=self.max_builders,
+                min_builders=self.min_builders,
+                systems=list(self._available_systems),
+            )
+            try:
+                yield self
+            finally:
+                tasks.cancel_scope.cancel()
+                self._tasks = None
+                log.info("builder_manager_stopped")
 
-    async def _run(self) -> None:
-        await asyncio.gather(
-            self._watch_jobs(),
-            self._watch_queue(),
-            self._reap_idle(),
-            self._watch_nodes(),
-            self._periodic_reconcile(),
-        )
+    def _detach(
+        self,
+        func: Callable[..., Coroutine[Any, Any, None]],
+        *args: Any,
+        name: str,
+    ) -> None:
+        """Start one-off work in the manager's group, and keep its failure in.
+
+        A task group cancels every sibling when a child raises, and this group
+        holds the five loops. A probe failing on one node is not a reason to
+        stop watching the cluster.
+
+        It is also the first time such a failure is visible: these ran as bare
+        `create_task` with no callback, so the traceback went wherever the
+        garbage collector put it.
+        """
+        if self._tasks is None:
+            log.warning("builder_task_not_started", task=name)
+            return
+
+        async def guarded() -> None:
+            try:
+                await func(*args)
+            except anyio.get_cancelled_exc_class():
+                raise
+            except Exception:
+                log.exception("builder_task_failed", task=name)
+
+        self._tasks.start_soon(guarded, name=name)
 
     async def _periodic_reconcile(self) -> None:
         while True:
-            await asyncio.sleep(_RECONCILE_INTERVAL)
+            await anyio.sleep(_RECONCILE_INTERVAL)
             try:
                 async with self._reconcile_lock:
                     await self._resync_jobs()
                     await self._ensure_min_builders()
-            except asyncio.CancelledError:
-                return
             except Exception:
                 log.warning("builder_periodic_reconcile_error", exc_info=True)
 
@@ -337,7 +377,7 @@ class BuilderManager:
     async def _expire_slow_starter(self, job: Any, system: str, pod: PodState) -> bool:
         """End a builder whose Pod never started. True when it did."""
         job_name = job.metadata.name
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if not self._startup_expired(job.raw, job_name, pod.phase, now):
             return False
 
@@ -406,7 +446,7 @@ class BuilderManager:
                     "reportingController": "nixkube-builder-manager",
                     "reportingInstance": socket.gethostname(),
                     "note": note[:1000],
-                    "eventTime": datetime.now(timezone.utc).isoformat(),
+                    "eventTime": datetime.now(UTC).isoformat(),
                 },
                 namespace=self.namespace,
             )
@@ -513,12 +553,17 @@ class BuilderManager:
                         )
                         continue
                     self._pending_probes.add(node_name)
-                    asyncio.create_task(self._probe_node(node_name, nix_system))
-            except asyncio.CancelledError:
+                    self._detach(
+                        self._probe_node,
+                        node_name,
+                        nix_system,
+                        name=f"probe:{node_name}",
+                    )
+            except anyio.get_cancelled_exc_class():
                 raise
             except Exception:
                 log.warning("node_watch_error", exc_info=True)
-                await asyncio.sleep(10)
+                await anyio.sleep(10)
 
     async def _get_node(self, node_name: str) -> Any | None:
         try:
@@ -607,13 +652,16 @@ class BuilderManager:
             # excluded from the watchdog. `_pending_probes` then blocked
             # every later probe of that node.
             store_id = f"builder-{job_name}"
-            deadline = time.monotonic() + self.startup_timeout
+            # `anyio.current_time`, not `time.monotonic`: this deadline is
+            # what the `fail_after` below is measured against, and that scope
+            # uses the event loop's own clock.
+            deadline = anyio.current_time() + self.startup_timeout
             store = None
-            while time.monotonic() < deadline:
+            while anyio.current_time() < deadline:
                 store = self.server.stores.get(store_id)  # type: ignore[arg-type]
                 if store is not None:
                     break
-                await asyncio.sleep(1)
+                await anyio.sleep(1)
 
             if store is None:
                 log.warning(
@@ -625,10 +673,8 @@ class BuilderManager:
                 return
 
             try:
-                await asyncio.wait_for(
-                    store._probe_event.wait(),
-                    timeout=max(deadline - time.monotonic(), 0.0),
-                )
+                with anyio.fail_after(max(deadline - anyio.current_time(), 0.0)):
+                    await store._probe_event.wait()
             except TimeoutError:
                 log.warning(
                     "probe_no_answer",
@@ -812,12 +858,10 @@ class BuilderManager:
                         elif event_type in ("ADDED", "MODIFIED"):
                             await self._reconcile_job(job)
                             await self._ensure_min_builders()
-            except asyncio.CancelledError:
-                return
             except Exception as e:  # noqa: BLE001 -- watch loop: any failure is retried after _RECONNECT_DELAY
                 log.warning("builder_watch_error", error=f"{type(e).__name__}: {e}")
 
-            await asyncio.sleep(_RECONNECT_DELAY)
+            await anyio.sleep(_RECONNECT_DELAY)
 
     async def _reconcile_job(self, job: Any) -> None:
         job_name = job.metadata.name
@@ -1052,7 +1096,7 @@ class BuilderManager:
             )
             await self._create_builder_job(system=system)
             total_active += 1
-            await asyncio.sleep(0.5)
+            await anyio.sleep(0.5)
 
     async def _maybe_create_builder(self, system: str) -> None:
         now = time.monotonic()
@@ -1108,7 +1152,7 @@ class BuilderManager:
             try:
                 total = len(self._registered)
                 if total <= self.min_builders:
-                    await asyncio.sleep(60)
+                    await anyio.sleep(60)
                     continue
 
                 now = time.monotonic()
@@ -1138,7 +1182,7 @@ class BuilderManager:
             except Exception:
                 log.exception("builder_idle_reap_error")
 
-            await asyncio.sleep(60)
+            await anyio.sleep(60)
 
     async def _delete_job(self, job: Any) -> None:
         try:
@@ -1189,7 +1233,7 @@ class BuilderManager:
                         needed_systems.add(build.platform)
 
                 if not needed_systems:
-                    await asyncio.sleep(5)
+                    await anyio.sleep(5)
                     continue
 
                 active_per_system: dict[str, int] = {}
@@ -1218,7 +1262,7 @@ class BuilderManager:
             except Exception:
                 log.exception("builder_queue_watch_error")
 
-            await asyncio.sleep(5)
+            await anyio.sleep(5)
 
     # ---- Job creation ----
 

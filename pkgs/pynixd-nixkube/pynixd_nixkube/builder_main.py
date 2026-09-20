@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 
-import asyncio
 from pathlib import Path
 
+import anyio
 import structlog
 from pynixd.config import LocalSocketStoreSpec, PynixdSettings
 from pynixd.instance import Server
@@ -54,6 +54,6 @@ async def _main() -> None:
 
 def main() -> None:
     try:
-        asyncio.run(_main())
+        anyio.run(_main, backend="asyncio")
     except KeyboardInterrupt:
         pass

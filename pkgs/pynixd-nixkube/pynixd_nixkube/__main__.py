@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 
-import asyncio
 from pathlib import Path
 
+import anyio
 import structlog
 from pynixd.config import LocalSocketStoreSpec, PynixdSettings
 from pynixd.instance import Server
@@ -33,15 +33,21 @@ async def _main():
 
     server = Server(stores={StoreId("local"): local_store}, settings=settings)
 
-    async with server:
-        keys_watch = asyncio.create_task(watch_authorized_keys(server))
-        server.background_tasks.append(keys_watch)
+    # The watcher gets a group, rather than `server.background_tasks`: that
+    # list is typed `asyncio.Task` and the server cancels it at the end of its
+    # own shutdown. A group says the lifetime here, where the reader is. It is
+    # inside `server`, so it closes first.
+    async with server, anyio.create_task_group() as tasks:
+        tasks.start_soon(watch_authorized_keys, server, name="authorized-keys")
         log.info("pynixd_nixkube_running")
-        await server.wait_finished()
+        try:
+            await server.wait_finished()
+        finally:
+            tasks.cancel_scope.cancel()
 
 
 def main():
     try:
-        asyncio.run(_main())
+        anyio.run(_main, backend="asyncio")
     except KeyboardInterrupt:
         pass

@@ -6,10 +6,10 @@ The arithmetic and the state transitions are pure, so they are testable on
 their own. Everything that talks to the API server is not tested here.
 """
 
-import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import anyio
 import pytest
 from pynixd_nixkube import builder_manager
 from pynixd_nixkube.builder_manager import (
@@ -111,7 +111,7 @@ def test_pod_is_ready_reads_the_condition():
 
 
 def test_job_age_prefers_start_time():
-    now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
     raw = {
         "metadata": {"creationTimestamp": "2026-09-10T11:00:00Z"},
         "status": {"startTime": "2026-09-10T11:59:00Z"},
@@ -121,13 +121,13 @@ def test_job_age_prefers_start_time():
 
 def test_job_age_falls_back_to_creation():
     """A Job has a creationTimestamp before the controller writes a status."""
-    now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
     raw = {"metadata": {"creationTimestamp": "2026-09-10T11:55:00Z"}, "status": {}}
     assert _job_age_seconds(raw, now) == 300.0
 
 
 def test_job_age_is_none_without_a_timestamp():
-    now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
     assert _job_age_seconds({}, now) is None
     assert _job_age_seconds({"status": {"startTime": "not a date"}}, now) is None
 
@@ -136,7 +136,7 @@ def job_raw(started: str, uid: str = "uid-1") -> dict:
     return {"metadata": {"uid": uid}, "status": {"startTime": started}}
 
 
-NOW = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
 
 
 def test_a_young_builder_is_left_alone():
@@ -292,7 +292,7 @@ class _FakeStore:
     """Just enough of an SSHSubprocessStore for the probe path."""
 
     def __init__(self, features: dict | None = None) -> None:
-        self._probe_event = asyncio.Event()
+        self._probe_event = anyio.Event()
         self.feature_matrix = features or {}
 
 

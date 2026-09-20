@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
 
-import asyncio
+import contextlib
 from pathlib import Path
 
+import anyio
 import structlog
 from pynixd.config import LocalSocketStoreSpec, PynixdSettings
 from pynixd.instance import Server
@@ -43,35 +44,40 @@ async def _main() -> None:
 
     server = Server(stores=stores, settings=pynixd_settings)
 
-    builder_manager: BuilderManager | None = None
+    async with server, contextlib.AsyncExitStack() as stack:
+        # The watcher's own group, rather than `server.background_tasks`:
+        # that list is typed `asyncio.Task` and the server cancels it at the
+        # end of its own shutdown. A group says the lifetime here.
+        tasks = await stack.enter_async_context(anyio.create_task_group())
+        tasks.start_soon(watch_authorized_keys, server, name="authorized-keys")
 
-    async with server:
-        keys_watch = asyncio.create_task(watch_authorized_keys(server))
-        server.background_tasks.append(keys_watch)
-
+        # A stack, because the manager is conditional and its lifetime is a
+        # block. Entered after the watcher, so it is cancelled first.
         if settings.kube_namespace:
-            builder_manager = BuilderManager(
-                server=server,
-                namespace=settings.kube_namespace,
-                max_builders=settings.builder_max,
-                min_builders=settings.builder_min,
-                idle_timeout=settings.idle_timeout,
-                systems=[s.strip() for s in settings.systems.split(",") if s.strip()],
-                startup_timeout=settings.builder_startup_timeout,
-                backoff_cap=settings.builder_backoff_cap,
+            await stack.enter_async_context(
+                BuilderManager(
+                    server=server,
+                    namespace=settings.kube_namespace,
+                    max_builders=settings.builder_max,
+                    min_builders=settings.builder_min,
+                    idle_timeout=settings.idle_timeout,
+                    systems=[
+                        s.strip() for s in settings.systems.split(",") if s.strip()
+                    ],
+                    startup_timeout=settings.builder_startup_timeout,
+                    backoff_cap=settings.builder_backoff_cap,
+                ).running()
             )
-            await builder_manager.start()
 
         log.info("pynixd_nixkube_central_running")
         try:
             await server.wait_finished()
         finally:
-            if builder_manager:
-                await builder_manager.stop()
+            tasks.cancel_scope.cancel()
 
 
 def main() -> None:
     try:
-        asyncio.run(_main())
+        anyio.run(_main, backend="asyncio")
     except KeyboardInterrupt:
         pass
