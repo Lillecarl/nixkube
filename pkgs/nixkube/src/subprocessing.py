@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: MIT
 
-import asyncio
 import logging  # for log level constants (logging.DEBUG, logging.NOTSET, etc.)
 import shlex
+import subprocess
 import time
+from collections.abc import AsyncIterator
 from typing import NamedTuple
 
 import anyio
 import structlog
-from shellous import sh
+from anyio.abc import ByteReceiveStream
 
 from .errors import CommandTimeoutError, SubprocessError
 from .metrics import SUBPROCESS_CALLS, SUBPROCESS_DURATION, command_label
@@ -115,43 +116,26 @@ async def run_console(
 
     try:
         with anyio.fail_after(timeout):
-            # Use shellous's byte-by-byte (low level) API for direct stream access
-            cmd = sh(*[str(arg) for arg in args]).stdout(sh.CAPTURE).stderr(sh.CAPTURE)
-            async with cmd as run:
-                # Multiplex streams while maintaining interleaved order for combined output
-                # We explicitly called .stdout(sh.CAPTURE) and .stderr(sh.CAPTURE),
-                # so stdout and stderr should not be None
-                assert run.stdout is not None and run.stderr is not None
+            async with await anyio.open_process(
+                [str(arg) for arg in args],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            ) as proc:
+                # Both are PIPE above, so neither is None.
+                assert proc.stdout is not None and proc.stderr is not None
+                # Read both while the process runs. A pipe that nobody drains
+                # fills at 64KB and stops the child there, so this is what lets
+                # a chatty command finish at all -- and reading them together is
+                # what makes `combined` interleaved rather than concatenated.
                 async with anyio.create_task_group() as tg:
                     tg.start_soon(
-                        _read_stream, run.stdout, stdout_data, combined_data, log_level
+                        _read_stream, proc.stdout, stdout_data, combined_data, log_level
                     )
                     tg.start_soon(
-                        _read_stream, run.stderr, stderr_data, combined_data, log_level
+                        _read_stream, proc.stderr, stderr_data, combined_data, log_level
                     )
-            # Use check=False to get exit code without raising on non-zero status
-            # (error checking is done by try_captured/try_console)
-            result = run.result(check=False)
-            returncode = result.exit_code
-
-            # Check if the command was cancelled due to timeout (shellous suppresses
-            # the TimeoutError but sets cancelled=True in the Result)
-            if result.cancelled:
-                raise CommandTimeoutError(
-                    returncode=124,
-                    stdout="\n".join(stdout_data).strip(),
-                    stderr="\n".join(stderr_data).strip(),
-                    combined="\n".join(combined_data).strip(),
-                    command=list(args),
-                )
-    except CommandTimeoutError:
-        # Raised above when shellous reports the run as cancelled. It is the
-        # same outcome as the deadline below, so it counts the same way.
-        SUBPROCESS_CALLS.labels(command=label, result="timeout").inc()
-        SUBPROCESS_DURATION.labels(command=label).observe(
-            time.perf_counter() - start_time
-        )
-        raise
+                # Not raised on non-zero: try_captured/try_console decide that.
+                returncode = await proc.wait()
     except TimeoutError:
         # `anyio.fail_after` raises TimeoutError when the deadline is reached.
         # Use return code 124 (conventional timeout code).
@@ -199,36 +183,35 @@ async def run_console(
     )
 
 
+async def iter_lines(stream: ByteReceiveStream) -> AsyncIterator[str]:
+    """The stream's lines, split here and with no length limit.
+
+    `nix path-info --all --json` writes the whole store as one line, and
+    300,000 characters is an ordinary size for it. A reader that caps a line
+    -- asyncio's `StreamReader` raises `ValueError` past 64KB -- has to drain
+    and rejoin the rest, which is a second code path that only the giant line
+    ever takes.
+    """
+    pending = b""
+    async for chunk in stream:
+        pending += chunk
+        *lines, pending = pending.split(b"\n")
+        for raw in lines:
+            yield raw.decode(errors="replace")
+    if pending:
+        yield pending.decode(errors="replace")
+
+
 async def _read_stream(
-    stream: asyncio.StreamReader,
+    stream: ByteReceiveStream,
     stream_buffer: list[str],
     combined_buffer: list[str],
     log_level: int,
 ) -> None:
     """Read lines from a stream and append to both stream-specific and combined buffers."""
     try:
-        while True:
-            try:
-                raw = await stream.readline()
-                if not raw:
-                    break
-            except ValueError:
-                # Line exceeds the 64KB StreamReader limit shellous inherits
-                # from asyncio (e.g. nix path-info --json).
-                # Drain the rest of the oversized line in chunks until newline or EOF.
-                chunks: list[bytes] = []
-                while True:
-                    chunk = await stream.read(65536)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    if b"\n" in chunk:
-                        break
-                if not chunks:
-                    break
-                raw = b"".join(chunks)
-
-            decoded = raw.decode(errors="replace").strip()
+        async for line in iter_lines(stream):
+            decoded = line.strip()
             stream_buffer.append(decoded)
             combined_buffer.append(decoded)
             if log_level != logging.NOTSET:

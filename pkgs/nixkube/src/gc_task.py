@@ -12,16 +12,15 @@ one call that never returns ends collection on that node. Issue #38 measured
 that: 33 hours on a four-node cluster, zero completed cycles.
 """
 
-import asyncio
 import json
 import random
+import subprocess
 import tempfile
 import time
 from pathlib import Path
 
 import anyio
 import structlog
-from shellous import sh
 
 from .cache import copy_to_cache
 from .constants import (
@@ -94,27 +93,29 @@ async def _read_path_info(work: Path) -> dict[str, dict]:
     """Every path in the store, keyed by path, with its registration time.
 
     **To a file, and not to a pipe.** `nix path-info --all --json` writes the
-    whole store as one JSON line. A capture that reads lines cannot take it:
-    measured, `sh(...).stdout(sh.CAPTURE)` awaited over a single 300,000
-    character line did not return in 20 s, and over a short one it answers the
-    empty string rather than the output. Both are silent. A file redirect took
-    the same 300,000 characters with no deadline at all.
+    whole store as one JSON line, 300,000 characters and more. The kernel
+    gives the process one file descriptor either way, so nothing in between
+    has to hold the line.
 
     `--json-format 2` is not a way out. It is also one line, and it keys on the
     base name instead of the path.
     """
     out = work / "path-info.json"
-    async with asyncio.timeout(GC_PATH_INFO_TIMEOUT_SECONDS):
-        await sh(
-            "nix",
-            "path-info",
-            "--store",
-            "local",
-            "--all",
-            "--json",
-            "--json-format",
-            "1",
-        ).stdout(out)
+    with anyio.fail_after(GC_PATH_INFO_TIMEOUT_SECONDS):
+        with out.open("wb") as handle:
+            await anyio.run_process(
+                [
+                    "nix",
+                    "path-info",
+                    "--store",
+                    "local",
+                    "--all",
+                    "--json",
+                    "--json-format",
+                    "1",
+                ],
+                stdout=handle,
+            )
     return json.loads(out.read_text())
 
 
@@ -182,20 +183,27 @@ def _count_deleted(lines: list[str]) -> int:
 
 async def _delete(work: Path, old_paths: list[str]) -> int:
     """Offer the old paths to Nix, and answer how many it took."""
-    paths_file = work / "paths.txt"
     # The trailing newline is deliberate: `"\n".join(...)` leaves the last path
-    # without one.
-    paths_file.write_text("\n".join(old_paths) + "\n")
+    # without one, and `--stdin` reads one path per line.
+    offered = ("\n".join(old_paths) + "\n").encode()
 
     out = work / "delete.log"
-    async with asyncio.timeout(GC_DELETE_TIMEOUT_SECONDS):
-        await (
-            sh("nix", "store", "delete", "--store", "local", "--stdin")
-            .stdin(paths_file)
-            .stdout(out)
-            .stderr(sh.STDOUT)
-            .set(exit_codes={0, 1})
-        )
+    with anyio.fail_after(GC_DELETE_TIMEOUT_SECONDS):
+        with out.open("wb") as handle:
+            completed = await anyio.run_process(
+                ["nix", "store", "delete", "--store", "local", "--stdin"],
+                input=offered,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+    # 1 is the normal outcome, not a failure: Nix exits 1 whenever it refused
+    # any offered path, and most of them are still in use. `_count_deleted`
+    # reads the log and decides which refusals are ordinary. Anything past 1
+    # never reached that log.
+    if completed.returncode not in (0, 1):
+        raise RuntimeError(f"nix store delete exited {completed.returncode}")
 
     return _count_deleted(out.read_text().splitlines())
 

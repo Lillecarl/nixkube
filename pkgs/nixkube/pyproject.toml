@@ -24,7 +24,6 @@ dependencies = [
   "grpclib-nri",
   "pyzmq",
   "cachetools",
-  "shellous",
   "structlog",
   "rich",
   "prometheus-client",

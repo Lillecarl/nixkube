@@ -7,14 +7,15 @@ forwards its structured JSON log lines through structlog, and restarts on exit
 with crash-loop detection via CrashLoopTracker.
 """
 
-import asyncio
 import json
 import re
+import subprocess
 
 import anyio
 import structlog
-from shellous import sh
+from anyio.abc import ByteReceiveStream
 
+from .subprocessing import iter_lines
 from .supervision import CrashLoopTracker
 
 logger = structlog.get_logger("nixkube.nix_daemon")
@@ -44,8 +45,8 @@ async def supervise_nix_daemon() -> None:
 
     while True:
         logger.info("nix_daemon_starting")
-        cmd = (
-            sh(
+        async with await anyio.open_process(
+            [
                 "nix",
                 "daemon",
                 "--store",
@@ -53,17 +54,15 @@ async def supervise_nix_daemon() -> None:
                 "--log-format",
                 "internal-json",
                 "--debug",
-            )
-            .stdout(sh.CAPTURE)
-            .stderr(sh.CAPTURE)
-        )
-        async with cmd as run:
-            assert run.stdout is not None and run.stderr is not None
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ) as proc:
+            assert proc.stdout is not None and proc.stderr is not None
             async with anyio.create_task_group() as tg:
-                tg.start_soon(_pipe_nix_logs, run.stdout)
-                tg.start_soon(_pipe_nix_logs, run.stderr)
-        result = run.result(check=False)
-        rc = result.exit_code
+                tg.start_soon(_pipe_nix_logs, proc.stdout)
+                tg.start_soon(_pipe_nix_logs, proc.stderr)
+            rc = await proc.wait()
 
         logger.warning("nix_daemon_exited", returncode=rc)
         tracker.record_and_check()
@@ -71,35 +70,15 @@ async def supervise_nix_daemon() -> None:
         await anyio.sleep(1)
 
 
-async def _pipe_nix_logs(stream: asyncio.StreamReader) -> None:
+async def _pipe_nix_logs(stream: ByteReceiveStream) -> None:
     """Forward nix daemon log lines through structlog.
 
     Lines prefixed with `@nix ` carry internal-json structured data.
     Other lines are logged as debug.
     """
     try:
-        while True:
-            try:
-                raw = await stream.readline()
-                if not raw:
-                    break
-            except ValueError:
-                # Line exceeds the 64KB StreamReader limit shellous inherits
-                # from asyncio.
-                # Drain the rest of the oversized line in chunks until newline or EOF.
-                chunks: list[bytes] = []
-                while True:
-                    chunk = await stream.read(65536)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    if b"\n" in chunk:
-                        break
-                if not chunks:
-                    break
-                raw = b"".join(chunks)
-
-            line = raw.decode(errors="replace").rstrip()
+        async for raw_line in iter_lines(stream):
+            line = raw_line.rstrip()
             if line.startswith("@nix "):
                 payload = line.removeprefix("@nix ")
                 try:

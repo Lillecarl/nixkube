@@ -74,11 +74,9 @@ async def check_cache_connectivity() -> bool:
 
     logger.debug("cache_connectivity_check")
     try:
-        # The timeout goes to `run_captured`, which owns one. A second deadline
-        # around this call cancels the inner one, and shellous suppresses that
-        # cancellation and sets `cancelled`: what comes out is
-        # `CommandTimeoutError`, not the `TimeoutError` a `fail_after` here
-        # would promise.
+        # `run_captured` owns the deadline, and answers it as
+        # `CommandTimeoutError`. A second one around this call would only
+        # cancel the first before it can say that.
         result = await run_captured(
             "nix",
             "store",

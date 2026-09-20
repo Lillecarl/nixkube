@@ -16,9 +16,8 @@ self: pkgs: {
       '';
 
   # This repository's Python projects, built by pyproject.nix. `self` and not
-  # `pkgs`, because the set lifts `kr8s`, `shellous` and `pynixd` from this
-  # overlay. There is no cycle: the set reads those three and none of the
-  # applications below.
+  # `pkgs`, because the set lifts `kr8s` and `pynixd` from this overlay. There
+  # is no cycle: the set reads those two and none of the applications below.
   pythonSet = import ../nix/python-set.nix {
     inherit (self) lib;
     pkgs = self;
@@ -88,7 +87,6 @@ self: pkgs: {
   # keeps in step.
   python-jsonpath = pkgs.python3Packages.callPackage ./python-jsonpath.nix { };
   kr8s = pkgs.python3Packages.callPackage ./kr8s.nix { inherit (self) python-jsonpath; };
-  shellous = pkgs.python3Packages.callPackage ./shellous.nix { };
 
   # NRI wait Python application for OCI hooks
   # Runs inside chroot(/var/lib/nix-csi), uses pyzmq for communication

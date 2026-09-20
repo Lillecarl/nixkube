@@ -95,12 +95,11 @@ in
 ps.mkPythonSet {
   inherit python;
 
-  # `kr8s`, `shellous` and `pynixd` are nixpkgs Python packages, but this
-  # repository's own rather than the tree's, so they are lifted in as roots
-  # instead of being looked up by name.
+  # `kr8s` and `pynixd` are nixpkgs Python packages, but this repository's own
+  # rather than the tree's, so they are lifted in as roots instead of being
+  # looked up by name.
   nixpkgsRoots = [
     pkgs.kr8s
-    pkgs.shellous
     pkgs.pynixd
   ]
   ++ ps.nixpkgsRootsFor {
@@ -110,7 +109,6 @@ ps.mkPythonSet {
     # projects are not named after their directories.
     exclude = lib.attrNames projects ++ [
       "kr8s"
-      "shellous"
       "pynixd"
     ];
   };

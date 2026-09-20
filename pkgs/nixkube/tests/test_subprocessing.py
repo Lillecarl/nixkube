@@ -103,11 +103,11 @@ async def test_timeout_raised():
 
 @pytest.mark.asyncio
 async def test_the_caller_survives_a_timeout():
-    """The deadline is a cancel scope, and shellous swallows the cancellation
-    it delivers: it sets `cancelled` on the result instead of letting the
-    `CancelledError` out. A scope left half-exited would keep the caller in a
-    cancelling state, and the next `await` would raise rather than run. The
-    assertion above cannot see that, because both paths raise the same error."""
+    """The deadline is a cancel scope, and a scope left half-exited keeps the
+    caller in a cancelling state: the next `await` raises rather than runs.
+    `get_build_args` calls `run_captured` and then goes on to build, so a
+    caller that cannot continue past a timed-out cache ping is the failure.
+    The assertion above cannot see it -- both paths raise the same error."""
     with pytest.raises(CommandTimeoutError):
         await run_captured("sleep", "10", timeout=0.1)
 

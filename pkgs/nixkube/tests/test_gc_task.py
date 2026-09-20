@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -141,50 +142,21 @@ class TestTheCommands:
         """Record each argv, and answer as a successful nix would."""
         calls: list[list[str]] = []
 
-        class FakeCommand:
-            def __init__(self, args: tuple[str, ...]):
-                self.args = [str(a) for a in args]
-                self._out: Path | None = None
+        async def fake_run_process(command, *, stdout=None, **_kwargs):
+            argv = [str(arg) for arg in command]
+            calls.append(argv)
+            if stdout is not None:
+                if "path-info" in argv:
+                    stdout.write(
+                        json.dumps(
+                            {"/nix/store/aaa-old": {"registrationTime": 1}}
+                        ).encode()
+                    )
+                else:
+                    stdout.write(b"deleting '/nix/store/aaa-old'\n")
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
 
-            def stdin(self, _value):
-                return self
-
-            def stdout(self, value):
-                if isinstance(value, Path):
-                    self._out = value
-                return self
-
-            def stderr(self, _value):
-                return self
-
-            def set(self, **_kwargs):
-                return self
-
-            def __await__(self):
-                calls.append(self.args)
-                if self._out is not None:
-                    if "path-info" in self.args:
-                        self._out.write_text(
-                            json.dumps({"/nix/store/aaa-old": {"registrationTime": 1}})
-                        )
-                    else:
-                        self._out.write_text("deleting '/nix/store/aaa-old'\n")
-
-                async def done():
-                    return ""
-
-                return done().__await__()
-
-        class FakeSh:
-            """`sh` is called and also read for `sh.STDOUT`, so both must work."""
-
-            STDOUT = object()
-            CAPTURE = object()
-
-            def __call__(self, *args):
-                return FakeCommand(args)
-
-        monkeypatch.setattr(gc_task, "sh", FakeSh())
+        monkeypatch.setattr(gc_task.anyio, "run_process", fake_run_process)
         monkeypatch.setattr(gc_task, "PYNIXD_ENABLED", False)
         return calls
 
@@ -320,17 +292,10 @@ class TestTimeouts:
     async def test_a_path_info_that_never_returns_ends_the_cycle(self, monkeypatch):
         """The measured failure: the call hangs and the loop waits for ever."""
 
-        class Hang:
-            def stdout(self, _value):
-                return self
+        async def hang(*_args, **_kwargs):
+            await anyio.sleep(3600)
 
-            def __await__(self):
-                async def never():
-                    await anyio.sleep(3600)
-
-                return never().__await__()
-
-        monkeypatch.setattr(gc_task, "sh", lambda *_args: Hang())
+        monkeypatch.setattr(gc_task.anyio, "run_process", hang)
         monkeypatch.setattr(gc_task, "PYNIXD_ENABLED", False)
         monkeypatch.setattr(gc_task, "GC_PATH_INFO_TIMEOUT_SECONDS", 0.05)
 
@@ -338,29 +303,39 @@ class TestTimeouts:
             await gc_task._run_gc_cycle()
 
 
-class TestFileRedirect:
-    """`nix path-info --all --json` writes the whole store as one line.
+class TestRealProcesses:
+    """The two properties the GC loop needs from a subprocess, run for real.
 
-    Measured: `sh(...).stdout(sh.CAPTURE)` awaited over a single 300,000
-    character line did not return in 20 s, and over a short one it answers the
-    empty string rather than the output. Both are silent. A file takes it.
+    Both were broken at once before. `nix path-info --all --json` writes the
+    whole store as one line, 300,000 characters and more, and the reader that
+    was under this truncated it; the deadline around it did not fire at all.
     """
 
     @pytest.mark.asyncio
     async def test_a_giant_single_line_survives_a_file_redirect(self):
-        from shellous import sh
-
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "big.txt"
-            async with asyncio.timeout(20):
-                await sh("python3", "-c", "print('x' * 300000)").stdout(out)
+            with anyio.fail_after(20):
+                with out.open("wb") as handle:
+                    await anyio.run_process(
+                        ["python3", "-c", "print('x' * 300000)"], stdout=handle
+                    )
             assert out.stat().st_size == 300001
 
     @pytest.mark.asyncio
-    async def test_the_same_line_through_a_capture_does_not_arrive(self):
-        """The negative control. Without it the test above proves nothing."""
-        from shellous import sh
+    async def test_a_command_that_hangs_past_the_deadline_raises(self):
+        """The property the loop is built on, against a real process.
 
+        Every stop issue #38 counted was a nix call that never returned. A
+        deadline that expires silently puts the loop back there, and the fakes
+        above cannot tell the difference: they hang in Python, not in a child.
+        """
         with pytest.raises(TimeoutError):
-            async with asyncio.timeout(5):
-                await sh("python3", "-c", "print('x' * 300000)").stdout(sh.CAPTURE)
+            with anyio.fail_after(1):
+                await anyio.run_process(
+                    [
+                        "python3",
+                        "-c",
+                        "import time; print('x' * 300000); time.sleep(60)",
+                    ]
+                )

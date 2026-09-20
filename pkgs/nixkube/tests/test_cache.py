@@ -205,10 +205,9 @@ class TestCopyToCacheWithoutPynixd:
 async def test_a_raising_ping_is_false_and_not_an_error(error):
     """Every `NodePublishVolume` asks this, so raising stops every mount.
 
-    `CommandTimeoutError` is the one that fires in practice: shellous
-    suppresses the TimeoutError and `run_captured` raises rc=124 instead.
-    A cluster with no DNS for `pynixd` left every workload in
-    ContainerCreating until the UML test gave up.
+    `CommandTimeoutError` is the one that fires in practice: `run_captured`
+    turns its own deadline into rc=124. A cluster with no DNS for `pynixd`
+    left every workload in ContainerCreating until the UML test gave up.
     """
 
     async def raises(*_args, **_kwargs):
