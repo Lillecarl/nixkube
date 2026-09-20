@@ -1422,16 +1422,21 @@ positive integer, meaning >0
 
 
 
-How long the kubelet waits for the TCP dial of one probe\.
+How long the kubelet waits for one ` /healthz ` request\.
 
 **The kubelet’s own default is 1 second, and that is not enough\.**
 A pynixd busy ingesting a multi-hundred-megabyte store transfer does
-not answer a dial inside a second, so the liveness probe fails, the
-kubelet kills the container, and the push dies with it\. Measured
-twice on one cluster while pushing a 186 MiB path: ` Liveness probe failed: dial tcp ...: i/o timeout `, then ` exitCode: 143 `\.
+not answer inside a second, so the liveness probe fails, the kubelet
+kills the container, and the push dies with it\. Measured twice on one
+cluster while pushing a 186 MiB path: ` Liveness probe failed: dial tcp ...: i/o timeout `, then ` exitCode: 143 `\.
 
 The push does not report a probe failure\. It reports ` Nix daemon disconnected unexpectedly `, which sends the investigation towards
 the network instead\. Issue \#37\.
+
+This bounds how long the kubelet waits\. What counts as too long a
+stall is pynixd’s own ` health_loop_lag_max `, 5 seconds by default and
+settable through ` nixkube.pynixd.settings `\. Set it from
+` pynixd_event_loop_lag_seconds ` on ` /metrics `, not from a guess\.
 
 
 

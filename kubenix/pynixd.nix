@@ -25,21 +25,38 @@ let
   probes =
     let
       p = cfg.pynixd.probes;
-      tcp = {
-        tcpSocket.port = "ssh";
+      /*
+        `httpGet /healthz`, not a TCP dial.
+
+        A `tcpSocket` probe calls `connect()`, and the kernel completes that
+        from the listen backlog whether or not pynixd ever accepts. So it
+        passes against a pynixd that has stopped serving entirely, and fails
+        only when a stall outlasts `timeoutSeconds` -- which a pynixd that is
+        merely busy also does. It carries no information in either direction.
+        Issue #53, and #37 before it.
+
+        `/healthz` has to be answered by the event loop, so it cannot pass
+        while the loop is stalled, and pynixd checks its own interfaces and
+        loop lag behind it. A failure names the check in the response body.
+      */
+      http = {
+        httpGet = {
+          path = "/healthz";
+          port = "http";
+        };
         inherit (p) timeoutSeconds periodSeconds;
       };
     in
     {
-      readinessProbe = tcp // {
+      readinessProbe = http // {
         inherit (p) failureThreshold;
       };
-      livenessProbe = tcp // {
+      livenessProbe = http // {
         inherit (p) failureThreshold;
       };
       # Liveness and readiness do not run until this passes, so a cold pynixd
       # restoring its store is not killed part way through.
-      startupProbe = tcp // {
+      startupProbe = http // {
         failureThreshold = p.startupFailureThreshold;
       };
     };
@@ -121,18 +138,23 @@ in
     probes = {
       timeoutSeconds = lib.mkOption {
         description = ''
-          How long the kubelet waits for the TCP dial of one probe.
+          How long the kubelet waits for one `/healthz` request.
 
           **The kubelet's own default is 1 second, and that is not enough.**
           A pynixd busy ingesting a multi-hundred-megabyte store transfer does
-          not answer a dial inside a second, so the liveness probe fails, the
-          kubelet kills the container, and the push dies with it. Measured
-          twice on one cluster while pushing a 186 MiB path: `Liveness probe
-          failed: dial tcp ...: i/o timeout`, then `exitCode: 143`.
+          not answer inside a second, so the liveness probe fails, the kubelet
+          kills the container, and the push dies with it. Measured twice on one
+          cluster while pushing a 186 MiB path: `Liveness probe failed: dial
+          tcp ...: i/o timeout`, then `exitCode: 143`.
 
           The push does not report a probe failure. It reports `Nix daemon
           disconnected unexpectedly`, which sends the investigation towards
           the network instead. Issue #37.
+
+          This bounds how long the kubelet waits. What counts as too long a
+          stall is pynixd's own `health_loop_lag_max`, 5 seconds by default and
+          settable through `nixkube.pynixd.settings`. Set it from
+          `pynixd_event_loop_lag_seconds` on `/metrics`, not from a guess.
         '';
         type = lib.types.ints.positive;
         default = 10;
@@ -431,6 +453,8 @@ in
                   };
                   ports = lib.mkNamedList {
                     ssh.containerPort = 22;
+                    # The probes are httpGet on this port; see `probes` above.
+                    http.containerPort = 8080;
                   };
                   inherit (probes) readinessProbe livenessProbe startupProbe;
                   # A plain list, not `mkNamedList`. That helper keys on the
@@ -651,6 +675,8 @@ in
                 };
                 ports = lib.mkNamedList {
                   ssh.containerPort = 22;
+                  # The probes are httpGet on this port; see `probes` above.
+                  http.containerPort = 8080;
                 };
                 inherit (probes) readinessProbe livenessProbe startupProbe;
                 volumeMounts = lib.mkNamedList {
