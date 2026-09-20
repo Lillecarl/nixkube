@@ -420,6 +420,50 @@ rec {
     assert lib.any (p: p.name == "metrics") (nodeContainer on).ports;
     pkgs.runCommand "metrics-podmonitor-shape" { } "echo ok > $out";
 
+  /*
+    The same shape for the pynixd pods, which are not node pods.
+
+    `daemonset.nix`'s PodMonitor selects `component = node`, so it never
+    reaches the controller or a builder. Both serve `/metrics` on the same
+    aiohttp server that answers `/healthz`, and `http_metrics_no_auth`
+    defaults true, so the endpoint is readable. Without these two objects it
+    is readable and nothing reads it.
+
+    The port is named `http` here and `metrics` on a node, because pynixd
+    serves the binary cache, the health probe and the metrics on one port.
+    The endpoint names it, so a port of that name has to exist on the
+    container.
+  */
+  pynixdPodMonitorShape =
+    let
+      render =
+        podMonitor:
+        (kubenixInstance {
+          module = {
+            nixkube.pynixd.enable = true;
+            nixkube.metrics.podMonitor = podMonitor;
+          };
+        }).config;
+      off = render false;
+      on = render true;
+      nsOf = cfg: cfg.kubernetes.resources.nixkube;
+      podOf = cfg: (nsOf cfg).StatefulSet.pynixd.spec.template;
+      pynixdContainer = cfg: lib.head (lib.filter (c: c.name == "pynixd") (podOf cfg).spec.containers);
+      annotated = cfg: (podOf cfg).metadata.annotations ? "prometheus.io/scrape";
+      monitors = (nsOf on).PodMonitor;
+    in
+    assert !((nsOf off) ? PodMonitor);
+    assert annotated off;
+    assert !(annotated on);
+    assert monitors ? pynixd;
+    # A builder is a separate object: it is short-lived, and mixing it with
+    # the controller's series would hide which one stopped answering.
+    assert monitors ? pynixd-builder;
+    assert monitors.pynixd.spec.selector.matchLabels."app.kubernetes.io/component" == "pynixd";
+    assert (lib.head monitors.pynixd.spec.podMetricsEndpoints).port == "http";
+    assert lib.any (p: p.name == "http") (pynixdContainer on).ports;
+    pkgs.runCommand "pynixd-podmonitor-shape" { } "echo ok > $out";
+
   assertionsNullShape =
     let
       instance = kubenixInstance {
@@ -987,6 +1031,7 @@ rec {
       builderSettingsOverride
       metricsPodMonitorShape
       nodeDriverReadiness
+      pynixdPodMonitorShape
       pynixdProbesSurviveAPush
       sourcesAreLocked
       ciWorkflowCheck

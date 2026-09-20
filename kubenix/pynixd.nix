@@ -61,6 +61,11 @@ let
       };
     };
 
+  # The port pynixd's aiohttp server answers on: `/healthz`, `/metrics` and
+  # the binary cache. One binding, because the probes, the container port and
+  # the scrape discovery all have to name the same number.
+  pynixdHttpPort = 8080;
+
   pynixdLabels = cfg.labels // {
     "app.kubernetes.io/component" = "pynixd";
   };
@@ -339,6 +344,42 @@ in
     };
 
     kubernetes.resources.${cfg.namespace} = {
+      # The controller and the builders both serve `/metrics`, and neither is
+      # a node pod, so `daemonset.nix`'s PodMonitor does not select them.
+      # These two do, and they read the same `nixkube.metrics` options: an
+      # operator asked once for nixkube to be scraped.
+      #
+      # Two objects and not one. The controller and a builder answer for
+      # different work, and a builder is short-lived, so a shared selector
+      # would mix a steady series with a series that comes and goes.
+      PodMonitor = lib.mkIf (cfg.metrics.enable && cfg.metrics.podMonitor) {
+        pynixd = {
+          metadata.labels = pynixdLabels;
+          spec = {
+            selector.matchLabels = pynixdMatchLabels;
+            podMetricsEndpoints = [
+              {
+                # By name, not by number: the container declares the port
+                # under this name, so the two move together.
+                port = "http";
+                path = "/metrics";
+              }
+            ];
+          };
+        };
+        pynixd-builder = {
+          metadata.labels = builderLabels;
+          spec = {
+            selector.matchLabels = builderLabels;
+            podMetricsEndpoints = [
+              {
+                port = "http";
+                path = "/metrics";
+              }
+            ];
+          };
+        };
+      };
       StatefulSet.pynixd = {
         metadata.labels = pynixdLabels;
         metadata.annotations."nixkube/discard" = "true";
@@ -356,6 +397,11 @@ in
                 // nsRes.ConfigMap.ssh-config or { }
                 // nsRes.ConfigMap.pynixd-config or { }
               );
+            }
+            // lib.optionalAttrs (cfg.metrics.enable && cfg.metrics.annotations) {
+              "prometheus.io/scrape" = "true";
+              "prometheus.io/port" = toString pynixdHttpPort;
+              "prometheus.io/path" = "/metrics";
             };
             spec = {
               serviceAccountName = "nixkube";
@@ -430,7 +476,7 @@ in
                     # PYNIXD_SSH_HOST is deliberately absent. It is set in
                     # config.json instead -- see nixkube.pynixd.settings above.
                     PYNIXD_SSH_PORT.value = "22";
-                    PYNIXD_HTTP_PORT.value = "8080";
+                    PYNIXD_HTTP_PORT.value = toString pynixdHttpPort;
                     PYNIXD_SSH_HOST_KEY.value = "/etc/ssh-key/id_ed25519";
                     HOME.value = "/data/var/nix-csi/root";
                     PYNIXD_KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
@@ -453,8 +499,9 @@ in
                   };
                   ports = lib.mkNamedList {
                     ssh.containerPort = 22;
-                    # The probes are httpGet on this port; see `probes` above.
-                    http.containerPort = 8080;
+                    # The probes are httpGet on this port; see `probes` above,
+                    # and a PodMonitor scrapes `/metrics` on it by this name.
+                    http.containerPort = pynixdHttpPort;
                   };
                   inherit (probes) readinessProbe livenessProbe startupProbe;
                   # A plain list, not `mkNamedList`. That helper keys on the
@@ -620,6 +667,11 @@ in
         metadata.annotations."nixkube/discard" = "true";
         template = {
           metadata.labels = builderLabels;
+          metadata.annotations = lib.optionalAttrs (cfg.metrics.enable && cfg.metrics.annotations) {
+            "prometheus.io/scrape" = "true";
+            "prometheus.io/port" = toString pynixdHttpPort;
+            "prometheus.io/path" = "/metrics";
+          };
           spec = {
             serviceAccountName = "nixkube";
             restartPolicy = "Never";
@@ -648,7 +700,7 @@ in
                   # PYNIXD_SSH_HOST is deliberately absent, as on the
                   # controller. builder.settings carries it into config.json.
                   PYNIXD_SSH_PORT.value = "22";
-                  PYNIXD_HTTP_PORT.value = "8080";
+                  PYNIXD_HTTP_PORT.value = toString pynixdHttpPort;
                   # The key the controller already pins. Without this,
                   # `start_ssh_server` falls through to
                   # `generate_private_key("ssh-rsa", ...)` and a builder
@@ -675,8 +727,9 @@ in
                 };
                 ports = lib.mkNamedList {
                   ssh.containerPort = 22;
-                  # The probes are httpGet on this port; see `probes` above.
-                  http.containerPort = 8080;
+                  # The probes are httpGet on this port; see `probes` above,
+                  # and a PodMonitor scrapes `/metrics` on it by this name.
+                  http.containerPort = pynixdHttpPort;
                 };
                 inherit (probes) readinessProbe livenessProbe startupProbe;
                 volumeMounts = lib.mkNamedList {
