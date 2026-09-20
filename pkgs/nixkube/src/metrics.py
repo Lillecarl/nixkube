@@ -228,9 +228,29 @@ CACHE_REACHABLE = Gauge(
     "Whether the last connectivity check reached pynixd (1 = yes)",
 )
 
+# **Read this before alerting on `cache_reachable`.** The check runs before
+# a build and on no other schedule, so a node that has not built since it
+# started has never run one -- and an unset Gauge reads 0, which is the same
+# number a failed check writes. Measured on nixlab2 by solid-kubernetes:
+# all four nodes reported `reachable 0` while `cache_copies_total{ok}` was
+# rising on each of them. After a DaemonSet roll that is every node.
+#
+# So this timestamp is what separates the two. It is written by every
+# completed check, whatever the answer, and stays 0 while none has run.
+# A consumer that wants a real failure asks for both.
+CACHE_LAST_CHECK = Gauge(
+    "nixkube_cache_last_check_timestamp_seconds",
+    "When the last connectivity check finished, 0 if none has run",
+)
+
 # Without this, `cache_reachable == 0` fires on every cluster that runs no
 # pynixd, where it is the correct state and not a fault. The alert is
-# `configured == 1 and reachable == 0`.
+# `configured == 1 and reachable == 0 and last_check_timestamp_seconds > 0`,
+# and the third clause is not optional -- see `CACHE_LAST_CHECK`.
+#
+# `rate(cache_copy_attempts_total{result="error"}[15m])` needs none of this
+# and is the better first alert: it is an event that happened rather than a
+# state somebody has to have refreshed.
 CACHE_CONFIGURED = Gauge(
     "nixkube_cache_configured",
     "Whether this node is configured to use pynixd as a cache at all (1 = yes)",
@@ -285,9 +305,13 @@ EVENT_LOOP_LAG = Gauge(
     "Seconds the event loop went without running a ready callback, over the last window",
 )
 
+# Not alertable, and the name does not say so. This never decays, so a
+# threshold it crosses stays crossed until the process restarts. It answers
+# "did this ever stall"; `nixkube_event_loop_lag_seconds` above answers "is
+# it stalling now", and that is the one to alert on.
 EVENT_LOOP_LAG_MAX = Gauge(
     "nixkube_event_loop_lag_max_seconds",
-    "Largest event loop stall seen since the process started",
+    "Largest event loop stall seen since the process started; never decays",
 )
 
 # --- Build info ---

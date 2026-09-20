@@ -176,6 +176,33 @@ class TestTheNewCounters:
         whether zero is a fault."""
         assert "nixkube_cache_configured" in _series()
 
+    def test_a_completed_check_writes_the_answer_and_the_time(self):
+        """Both, or `reachable == 0` cannot be read at all: a node that has
+        not built since it started has never run the check, and an unset
+        gauge reads 0 -- the number a failure writes. Measured on nixlab2:
+        four nodes reporting unreachable while copies to that cache were
+        succeeding."""
+        from src import cache
+
+        cache._record(reachable=False)
+
+        series = _series()
+        assert series["nixkube_cache_reachable"] == 0
+        assert series["nixkube_cache_last_check_timestamp_seconds"] > 0
+
+    def test_the_timestamp_moves_with_a_later_check(self):
+        """A consumer bounds the age of the reading, so a stamp that never
+        advances is the same as no stamp at all."""
+        from src import cache
+
+        cache._record(reachable=False)
+        first = _series()["nixkube_cache_last_check_timestamp_seconds"]
+        cache._record(reachable=True)
+
+        series = _series()
+        assert series["nixkube_cache_last_check_timestamp_seconds"] >= first
+        assert series["nixkube_cache_reachable"] == 1
+
     def test_the_loop_lag_gauges_are_registered(self):
         """nixkube blocks its own loop, and a stalled loop looks exactly like
         a slow build from outside."""

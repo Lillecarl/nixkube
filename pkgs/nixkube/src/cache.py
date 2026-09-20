@@ -19,6 +19,7 @@ from .metrics import (
     CACHE_COPIES,
     CACHE_COPY_ATTEMPTS,
     CACHE_COPY_DURATION,
+    CACHE_LAST_CHECK,
     CACHE_REACHABLE,
 )
 from .subprocessing import run_captured
@@ -30,6 +31,18 @@ logger = structlog.get_logger("nixkube.cache")
 # and Semaphore as value (asyncio.Semaphore allows concurrent access limits).
 # Ensures only one copy_to_cache() call per unique path set can run at a time.
 copy_lock: defaultdict[frozenset[Path], Semaphore] = defaultdict(Semaphore)
+
+
+def _record(reachable: bool) -> None:
+    """Write the answer and the moment it was taken.
+
+    Both, together, at every exit. `CACHE_REACHABLE` alone cannot say
+    whether a 0 means "the check failed" or "no check has run", and a node
+    that has not built since it started is in the second state. Any branch
+    that sets one and not the other puts the gauge back in that hole.
+    """
+    CACHE_REACHABLE.set(1 if reachable else 0)
+    CACHE_LAST_CHECK.set(time.time())
 
 
 async def check_cache_connectivity() -> bool:
@@ -78,7 +91,7 @@ async def check_cache_connectivity() -> bool:
         # something outside the node, and there is no failure of it that a
         # mount should be made to care about.
         logger.warning("cache_connectivity_failed", exc_info=True)
-        CACHE_REACHABLE.set(0)
+        _record(reachable=False)
         return False
 
     if result.returncode != 0:
@@ -87,7 +100,7 @@ async def check_cache_connectivity() -> bool:
             returncode=result.returncode,
             stderr=result.stderr,
         )
-        CACHE_REACHABLE.set(0)
+        _record(reachable=False)
         return False
 
     try:
@@ -96,11 +109,11 @@ async def check_cache_connectivity() -> bool:
         # `nix store ping --json` that answers with something else is a nix
         # this code does not understand, not a cache that works.
         logger.warning("cache_connectivity_unparsable", stdout=result.stdout[:200])
-        CACHE_REACHABLE.set(0)
+        _record(reachable=False)
         return False
 
     logger.debug("cache_connectivity_ok", **ping_data)
-    CACHE_REACHABLE.set(1)
+    _record(reachable=True)
     return True
 
 
