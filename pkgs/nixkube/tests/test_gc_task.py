@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -321,6 +322,39 @@ class TestRealProcesses:
                         ["python3", "-c", "print('x' * 300000)"], stdout=handle
                     )
             assert out.stat().st_size == 300001
+
+    @pytest.mark.asyncio
+    async def test_the_delete_options_put_both_streams_in_one_file(
+        self, tmp_path: Path
+    ) -> None:
+        """`_delete`'s exact combination, against a real process.
+
+        `input=` with `stdout=<file>` and `stderr=STDOUT` is what puts the
+        `deleting '...'` lines and the `still alive` refusals in one log for
+        `_count_deleted` to read. A wrong combination here loses the refusals,
+        and the count silently becomes the offered length.
+        """
+        out = tmp_path / "delete.log"
+        script = (
+            "import sys; "
+            "print('from stdin: ' + sys.stdin.read().strip()); "
+            "print('to stderr', file=sys.stderr)"
+        )
+
+        with anyio.fail_after(30):
+            with out.open("wb") as handle:
+                completed = await anyio.run_process(
+                    [sys.executable, "-c", script],
+                    input=b"offered\n",
+                    stdout=handle,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
+
+        assert completed.returncode == 0
+        written = out.read_text()
+        assert "from stdin: offered" in written
+        assert "to stderr" in written
 
     @pytest.mark.asyncio
     async def test_a_command_that_hangs_past_the_deadline_raises(self):
