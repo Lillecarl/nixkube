@@ -85,6 +85,37 @@ class TestExtractStorePaths:
         result = extract_store_paths(path)
         assert result == {Path(path)}
 
+    def test_a_path_inside_json_stops_at_the_quote(self):
+        """Container env is JSON, and the name must not swallow its punctuation.
+
+        `APPSTARTER_WANTED` is `builtins.toJSON` of a map from system to store
+        path, and annotations.py feeds container env straight in. A name
+        matching "anything but whitespace or a slash" took the closing quote
+        and brace, and `nix build` fails on the whole argument list when one
+        member cannot exist -- `appstarter-init` then never starts.
+        """
+        env = '{"x86_64-linux":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cacheEnv"}'
+        result = extract_store_paths(env)
+        assert result == {Path("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-cacheEnv")}
+
+    def test_two_paths_in_one_json_object_stay_separate(self):
+        """The two-architecture shape the node actually receives."""
+        env = (
+            '{"aarch64-linux":"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-nodeEnv",'
+            '"x86_64-linux":"/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-nodeEnv"}'
+        )
+        result = extract_store_paths(env)
+        assert result == {
+            Path("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-nodeEnv"),
+            Path("/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-nodeEnv"),
+        }
+
+    def test_a_name_keeps_the_characters_nix_allows(self):
+        """`+`, `.`, `_`, `?` and `=` are legal in a store name; none may be cut."""
+        path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-gcc+wrapper-1.2.3_p1?x=y"
+        result = extract_store_paths(path)
+        assert result == {Path(path)}
+
     def test_path_objects_ignored(self):
         """Path objects should not be processed (handled as non-matching types)."""
         data = {

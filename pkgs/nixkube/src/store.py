@@ -5,7 +5,20 @@ from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-STORE_PATH_RE = re.compile(r"/nix/store/[a-z0-9]{32}-[^\s/]+")
+# The name charset Nix itself allows, and not "anything but whitespace or a
+# slash". The looser form swallowed whatever followed the path, and container
+# env is JSON now -- `APPSTARTER_WANTED` is `builtins.toJSON` of a map from
+# system to store path -- so it took the closing quote and brace with it:
+#
+#     {"x86_64-linux":"/nix/store/lqd2v8...-cacheEnv"}
+#       -> /nix/store/lqd2v8...-cacheEnv"}
+#
+# The clean path matches as well, so the mangled one is pure noise. It is not
+# harmless noise: `nix build` takes all of its arguments or none, so one path
+# that cannot exist fails the build that fetches a node's environment, and
+# `appstarter-init` never starts. Measured on a cluster as 240 restarts of
+# `Init:CrashLoopBackOff`.
+STORE_PATH_RE = re.compile(r"/nix/store/[a-z0-9]{32}-[a-zA-Z0-9+._?=-]+")
 
 
 def _extract_store_paths(value: Any) -> Iterator[Path]:
