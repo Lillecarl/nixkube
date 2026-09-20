@@ -6,7 +6,7 @@ of `async_main`. A DaemonSet pod answers for its own node, so every series
 here is about this node and not about the cluster.
 
 The server is the threaded one that `prometheus_client` ships. The daemon is
-asyncio and a thread is off-pattern, but the alternative is an ASGI server and
+async and a thread is off-pattern, but the alternative is an ASGI server and
 a second HTTP stack in the image for one read-only route. The values that
 thread reads are lock-protected by `prometheus_client`, so the loop writing
 them while it serves is safe.
@@ -24,11 +24,11 @@ already served. Do not add a gauge for any of them.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import time
 from importlib.metadata import PackageNotFoundError, version
 
+import anyio
 import structlog
 from prometheus_client import REGISTRY, Counter, Gauge, Histogram, start_http_server
 from prometheus_client.core import GaugeMetricFamily
@@ -408,7 +408,7 @@ class LoopLagMonitor:
         """Sample until cancelled. Intended to run as a background task."""
         while True:
             t0 = time.monotonic()
-            await asyncio.sleep(self._interval)
+            await anyio.sleep(self._interval)
             lag = time.monotonic() - t0 - self._interval
             if lag < 0:
                 # A sleep that returned early is not a stall, and recording it

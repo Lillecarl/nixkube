@@ -102,6 +102,22 @@ async def test_timeout_raised():
 
 
 @pytest.mark.asyncio
+async def test_the_caller_survives_a_timeout():
+    """The deadline is a cancel scope, and shellous swallows the cancellation
+    it delivers: it sets `cancelled` on the result instead of letting the
+    `CancelledError` out. A scope left half-exited would keep the caller in a
+    cancelling state, and the next `await` would raise rather than run. The
+    assertion above cannot see that, because both paths raise the same error."""
+    with pytest.raises(CommandTimeoutError):
+        await run_captured("sleep", "10", timeout=0.1)
+
+    result = await run_captured("echo", "after")
+
+    assert result.returncode == 0
+    assert result.stdout == "after"
+
+
+@pytest.mark.asyncio
 async def test_large_output():
     """Test handling of large output."""
     # Generate 1000 lines of output

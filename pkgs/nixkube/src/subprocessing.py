@@ -6,6 +6,7 @@ import shlex
 import time
 from typing import NamedTuple
 
+import anyio
 import structlog
 from shellous import sh
 
@@ -113,7 +114,7 @@ async def run_console(
     combined_data: list[str] = []
 
     try:
-        async with asyncio.timeout(timeout):
+        with anyio.fail_after(timeout):
             # Use shellous's byte-by-byte (low level) API for direct stream access
             cmd = sh(*[str(arg) for arg in args]).stdout(sh.CAPTURE).stderr(sh.CAPTURE)
             async with cmd as run:
@@ -121,11 +122,13 @@ async def run_console(
                 # We explicitly called .stdout(sh.CAPTURE) and .stderr(sh.CAPTURE),
                 # so stdout and stderr should not be None
                 assert run.stdout is not None and run.stderr is not None
-                tasks = [
-                    _read_stream(run.stdout, stdout_data, combined_data, log_level),
-                    _read_stream(run.stderr, stderr_data, combined_data, log_level),
-                ]
-                await asyncio.gather(*tasks)
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(
+                        _read_stream, run.stdout, stdout_data, combined_data, log_level
+                    )
+                    tg.start_soon(
+                        _read_stream, run.stderr, stderr_data, combined_data, log_level
+                    )
             # Use check=False to get exit code without raising on non-zero status
             # (error checking is done by try_captured/try_console)
             result = run.result(check=False)
@@ -149,8 +152,8 @@ async def run_console(
             time.perf_counter() - start_time
         )
         raise
-    except (asyncio.TimeoutError, TimeoutError):
-        # asyncio.timeout raises TimeoutError when the deadline is reached.
+    except TimeoutError:
+        # `anyio.fail_after` raises TimeoutError when the deadline is reached.
         # Use return code 124 (conventional timeout code).
         SUBPROCESS_CALLS.labels(command=label, result="timeout").inc()
         SUBPROCESS_DURATION.labels(command=label).observe(
@@ -210,7 +213,8 @@ async def _read_stream(
                 if not raw:
                     break
             except ValueError:
-                # Line exceeds asyncio's 64KB StreamReader limit (e.g. nix path-info --json).
+                # Line exceeds the 64KB StreamReader limit shellous inherits
+                # from asyncio (e.g. nix path-info --json).
                 # Drain the rest of the oversized line in chunks until newline or EOF.
                 chunks: list[bytes] = []
                 while True:

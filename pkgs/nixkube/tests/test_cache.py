@@ -69,7 +69,7 @@ class TestCopyToCacheRetry:
         mock_run = make_mock_run([ok()])
         with (
             patch("src.cache.run_captured", side_effect=mock_run),
-            patch("src.cache.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("src.cache.anyio.sleep", new_callable=AsyncMock) as mock_sleep,
         ):
             await copy_to_cache(PATHS)
             mock_sleep.assert_not_called()
@@ -82,7 +82,7 @@ class TestCopyToCacheRetry:
         mock_run = make_mock_run([fail()] * 6)
         with (
             patch("src.cache.run_captured", side_effect=mock_run),
-            patch("src.cache.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("src.cache.anyio.sleep", new_callable=AsyncMock) as mock_sleep,
         ):
             await copy_to_cache(PATHS)
             assert mock_sleep.call_count == 5
@@ -95,7 +95,7 @@ class TestCopyToCacheRetry:
         mock_run = make_mock_run([fail(), fail(), ok()])
         with (
             patch("src.cache.run_captured", side_effect=mock_run),
-            patch("src.cache.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("src.cache.anyio.sleep", new_callable=AsyncMock) as mock_sleep,
         ):
             await copy_to_cache(PATHS)
             assert mock_sleep.call_count == 2
@@ -113,7 +113,7 @@ class TestCopyToCacheRetry:
         mock_run = make_mock_run([fail()] * 6)
         with (
             patch("src.cache.run_captured", side_effect=mock_run),
-            patch("src.cache.sleep", side_effect=track_sleep),
+            patch("src.cache.anyio.sleep", side_effect=track_sleep),
         ):
             await copy_to_cache(PATHS)
 
@@ -142,7 +142,7 @@ class TestCopyToCacheRetry:
 
         with (
             patch("src.cache.run_captured", side_effect=mock_run),
-            patch("src.cache.sleep", new_callable=AsyncMock),
+            patch("src.cache.anyio.sleep", new_callable=AsyncMock),
         ):
             await copy_to_cache(PATHS)
 
@@ -164,7 +164,7 @@ class TestCopyToCacheWithoutPynixd:
 
         with (
             patch("src.cache.run_captured", new_callable=AsyncMock) as mock_run,
-            patch("src.cache.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("src.cache.anyio.sleep", new_callable=AsyncMock) as mock_sleep,
         ):
             await copy_to_cache(PATHS)
 
@@ -178,7 +178,7 @@ class TestCopyToCacheWithoutPynixd:
 
         with (
             patch("src.cache.run_captured", new_callable=AsyncMock) as mock_run,
-            patch("src.cache.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("src.cache.anyio.sleep", new_callable=AsyncMock) as mock_sleep,
         ):
             await copy_to_cache(None)
 

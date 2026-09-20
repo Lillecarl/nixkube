@@ -4,16 +4,17 @@
 
 Wraps coroutine factories with restart logic and crash-loop detection.
 A crash loop is defined as max_restarts failures within a sliding time window.
-When detected, CrashLoopError is raised, which propagates through asyncio.gather()
-to cancel siblings and exit the process (Kubernetes restarts the pod with backoff).
+When detected, CrashLoopError is raised. It leaves the task group that holds
+every service, which cancels the siblings and exits the process (Kubernetes
+restarts the pod with backoff).
 """
 
-import asyncio
 import time
 from collections import deque
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+import anyio
 import structlog
 
 from .metrics import SERVICE_CRASH_LOOPS, SERVICE_RESTARTS
@@ -76,7 +77,7 @@ async def supervised(
             await factory()
             # Coroutine returned without raising — treat as unexpected exit
             log.warning("service_exited_unexpectedly")
-        except asyncio.CancelledError:
+        except anyio.get_cancelled_exc_class():
             raise
         except CrashLoopError:
             raise
@@ -90,4 +91,4 @@ async def supervised(
             SERVICE_CRASH_LOOPS.labels(service=name).inc()
             raise
         log.info("service_restarting", backoff_seconds=1)
-        await asyncio.sleep(1)
+        await anyio.sleep(1)

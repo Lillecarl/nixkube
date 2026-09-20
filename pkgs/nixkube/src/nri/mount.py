@@ -58,7 +58,6 @@ via picklable arguments.
                       (Future: open_tree+move_mount before setns removes this dependency)
 """
 
-import asyncio
 import ctypes
 import errno
 import multiprocessing
@@ -67,6 +66,7 @@ import traceback
 from functools import cache
 from pathlib import Path
 
+import anyio.to_thread
 import structlog
 
 from ..constants import HOST_PROC_PATH, MS_BIND, MS_RDONLY, MS_REMOUNT
@@ -386,7 +386,10 @@ async def mount_in_container(
         daemon=True,
     )
     proc.start()
-    await asyncio.to_thread(proc.join)
+    # `abandon_on_cancel`: a cancelled mount must not wait for a worker that
+    # is itself stuck. The thread is left to finish against a daemon process
+    # that dies with the daemon.
+    await anyio.to_thread.run_sync(proc.join, abandon_on_cancel=True)
 
     result = result_queue.get_nowait()
     if isinstance(result, Exception):

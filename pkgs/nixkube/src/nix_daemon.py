@@ -11,6 +11,7 @@ import asyncio
 import json
 import re
 
+import anyio
 import structlog
 from shellous import sh
 
@@ -58,17 +59,16 @@ async def supervise_nix_daemon() -> None:
         )
         async with cmd as run:
             assert run.stdout is not None and run.stderr is not None
-            await asyncio.gather(
-                _pipe_nix_logs(run.stdout),
-                _pipe_nix_logs(run.stderr),
-            )
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(_pipe_nix_logs, run.stdout)
+                tg.start_soon(_pipe_nix_logs, run.stderr)
         result = run.result(check=False)
         rc = result.exit_code
 
         logger.warning("nix_daemon_exited", returncode=rc)
         tracker.record_and_check()
         logger.info("nix_daemon_restarting", backoff_seconds=1)
-        await asyncio.sleep(1)
+        await anyio.sleep(1)
 
 
 async def _pipe_nix_logs(stream: asyncio.StreamReader) -> None:
@@ -84,7 +84,8 @@ async def _pipe_nix_logs(stream: asyncio.StreamReader) -> None:
                 if not raw:
                     break
             except ValueError:
-                # Line exceeds asyncio's 64KB StreamReader limit.
+                # Line exceeds the 64KB StreamReader limit shellous inherits
+                # from asyncio.
                 # Drain the rest of the oversized line in chunks until newline or EOF.
                 chunks: list[bytes] = []
                 while True:

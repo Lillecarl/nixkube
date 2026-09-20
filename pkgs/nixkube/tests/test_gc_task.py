@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import anyio
 import pytest
 from src import gc_task
 from src.gc_task import _count_deleted, _select_old_paths
@@ -271,7 +272,7 @@ class TestLastSuccess:
         before = gc_task.GC_LAST_SUCCESS._value.get()
         # One pass of the loop body, then stop it at the sleep.
         monkeypatch.setattr(
-            gc_task.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError)
+            gc_task.anyio, "sleep", AsyncMock(side_effect=asyncio.CancelledError)
         )
         with pytest.raises(asyncio.CancelledError):
             await gc_task.gc_loop()
@@ -288,7 +289,7 @@ class TestLastSuccess:
         monkeypatch.setattr(gc_task, "_run_gc_cycle", cycle)
         gc_task.GC_LAST_SUCCESS.set(1000.0)
         monkeypatch.setattr(
-            gc_task.asyncio, "sleep", AsyncMock(side_effect=asyncio.CancelledError)
+            gc_task.anyio, "sleep", AsyncMock(side_effect=asyncio.CancelledError)
         )
         with pytest.raises(asyncio.CancelledError):
             await gc_task.gc_loop()
@@ -325,7 +326,7 @@ class TestTimeouts:
 
             def __await__(self):
                 async def never():
-                    await asyncio.sleep(3600)
+                    await anyio.sleep(3600)
 
                 return never().__await__()
 

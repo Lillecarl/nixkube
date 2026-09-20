@@ -2,12 +2,12 @@
 
 import socket
 import time
-from asyncio import Semaphore
 from collections import defaultdict
 from functools import wraps
 from pathlib import Path
 from typing import Any, ClassVar
 
+import anyio
 import structlog
 from csi import csi_grpc, csi_pb2
 from grpclib import GRPCError
@@ -150,7 +150,11 @@ def csi_error_handler(
 
 
 class NodeServicer(csi_grpc.NodeBase):
-    volume_locks: ClassVar[defaultdict[str, Semaphore]] = defaultdict(Semaphore)
+    # `NodePublishVolume` takes the volume lock and then, inside it, a lock
+    # keyed on the build and one keyed on the pod uid. Those three key spaces
+    # do not overlap. If one ever did, `anyio.Lock` raises where a semaphore of
+    # one hangs, and a handler that raises is one kubelet retries.
+    volume_locks: ClassVar[defaultdict[str, anyio.Lock]] = defaultdict(anyio.Lock)
 
     def __init__(self, system: str, plugin_name: str = "nixkube"):
         self.system = system

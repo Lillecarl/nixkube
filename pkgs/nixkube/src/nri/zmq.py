@@ -26,11 +26,11 @@ Design:
   subscribes and resets its timeout on each heartbeat.
 """
 
-import asyncio
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import anyio
 import structlog
 import zmq.asyncio
 from cachetools import TTLCache
@@ -44,7 +44,7 @@ class ContainerInfo:
 
     pid: int | None = None
     bundle: str | None = None
-    event: asyncio.Event = field(default_factory=asyncio.Event)
+    event: anyio.Event = field(default_factory=anyio.Event)
 
 
 class ZeroMQServer:
@@ -109,9 +109,9 @@ class ZeroMQServer:
         """Wait until nri-wait reports the container PID and bundle, then return (pid, bundle)."""
         log = logger.bind(container_id=container_id)
         info = self._get_info(container_id)
-        try:
-            await asyncio.wait_for(info.event.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
+        with anyio.move_on_after(timeout):
+            await info.event.wait()
+        if not info.event.is_set():
             log.warning("zmq_pid_timeout")
             return None
         if info.pid is None or info.bundle is None:
@@ -202,8 +202,11 @@ class ZeroMQServer:
                 except Exception:
                     logger.exception("zmq_rep_query_error")
                     await self.rep_socket.send(b'{"error":"internal error"}')
-        except asyncio.CancelledError:
+        except anyio.get_cancelled_exc_class():
+            # Re-raised, not swallowed. A cancellation that stops here makes a
+            # shutdown look like a clean return to whatever started this.
             logger.info("zmq_rep_handler_cancelled")
+            raise
         except Exception:
             logger.exception("zmq_rep_handler_error")
 

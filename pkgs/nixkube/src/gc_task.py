@@ -19,6 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import anyio
 import structlog
 from shellous import sh
 
@@ -68,7 +69,7 @@ async def gc_loop() -> None:
         started = time.monotonic()
         try:
             await _run_gc_cycle()
-        except asyncio.CancelledError:
+        except anyio.get_cancelled_exc_class():
             raise
         except Exception:
             # Counted, and not only logged. A cycle that fails every time
@@ -86,7 +87,7 @@ async def gc_loop() -> None:
 
         sleep_secs = random.uniform(GC_INTERVAL_SECONDS / 2, GC_INTERVAL_SECONDS)
         logger.debug("gc_sleeping", seconds=round(sleep_secs, 1))
-        await asyncio.sleep(sleep_secs)
+        await anyio.sleep(sleep_secs)
 
 
 async def _read_path_info(work: Path) -> dict[str, dict]:

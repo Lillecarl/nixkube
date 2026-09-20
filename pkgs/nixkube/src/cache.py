@@ -3,10 +3,10 @@
 import asyncio
 import json
 import time
-from asyncio import Semaphore, sleep
 from collections import defaultdict
 from pathlib import Path
 
+import anyio
 import structlog
 
 from .constants import (
@@ -22,15 +22,17 @@ from .metrics import (
     CACHE_LAST_CHECK,
     CACHE_REACHABLE,
 )
-from .subprocessing import run_captured
+from .subprocessing import SubprocessResult, run_captured
 
 logger = structlog.get_logger("nixkube.cache")
 
 # Prevent concurrent cache uploads of the same store paths.
-# Uses frozenset of paths as key (all paths in a copy operation are serialized together)
-# and Semaphore as value (asyncio.Semaphore allows concurrent access limits).
-# Ensures only one copy_to_cache() call per unique path set can run at a time.
-copy_lock: defaultdict[frozenset[Path], Semaphore] = defaultdict(Semaphore)
+# Uses frozenset of paths as key (all paths in a copy operation are serialized
+# together), so only one copy_to_cache() call per unique path set can run at a
+# time. `anyio.Lock` refuses a re-acquire by the task that holds it, where a
+# semaphore of one deadlocks; nothing here re-enters, so that is a better
+# failure and not a behaviour change.
+copy_lock: defaultdict[frozenset[Path], anyio.Lock] = defaultdict(anyio.Lock)
 
 
 def _record(reachable: bool) -> None:
@@ -72,11 +74,11 @@ async def check_cache_connectivity() -> bool:
 
     logger.debug("cache_connectivity_check")
     try:
-        # The timeout goes to `run_captured`, which owns one. Wrapping this in
-        # `asyncio.wait_for` as well gave two, and the outer one cancelled the
-        # inner: shellous suppresses the cancellation and sets `cancelled`, so
-        # what came out was `CommandTimeoutError` rather than the
-        # `asyncio.TimeoutError` the caller was watching for.
+        # The timeout goes to `run_captured`, which owns one. A second deadline
+        # around this call cancels the inner one, and shellous suppresses that
+        # cancellation and sets `cancelled`: what comes out is
+        # `CommandTimeoutError`, not the `TimeoutError` a `fail_after` here
+        # would promise.
         result = await run_captured(
             "nix",
             "store",
@@ -162,24 +164,23 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
             log = logger.bind(all=True)
         else:
             logger.debug("copy_to_cache_start", count=len(package_paths))
-            paths: set[Path] = {Path(p) for p in package_paths}
+            asked = set(package_paths)
+            paths: set[Path] = {Path(p) for p in asked}
 
             # Run path-info calls concurrently (regular + derivation)
-            path_info, path_info_drv = await asyncio.gather(
-                run_captured(
-                    "nix",
-                    "path-info",
-                    "--recursive",
-                    *package_paths,
-                ),
-                run_captured(
-                    "nix",
-                    "path-info",
-                    "--recursive",
-                    "--derivation",
-                    *package_paths,
-                ),
-            )
+            info: dict[str, SubprocessResult] = {}
+
+            async def _path_info(key: str, *extra: str) -> None:
+                info[key] = await run_captured(
+                    "nix", "path-info", "--recursive", *extra, *asked
+                )
+
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(_path_info, "plain")
+                tg.start_soon(_path_info, "drv", "--derivation")
+
+            path_info = info["plain"]
+            path_info_drv = info["drv"]
 
             # Get regular closure paths for all packages
             if path_info.returncode == 0:
@@ -224,7 +225,7 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
                     max_attempts=6,
                     backoff=exp_backoff,
                 )
-                await sleep(exp_backoff)
+                await anyio.sleep(exp_backoff)
 
             # The timeout is what makes the retry loop below reachable. With
             # no deadline, a copy to an unreachable cache never returned, and
