@@ -779,8 +779,25 @@ rec {
         controller = containerNamed res.StatefulSet.pynixd.spec.template.spec "pynixd";
         builder = containerNamed res.PodTemplate.nixkube-builder.template.spec "pynixd";
       };
+      # Every probe asks the event loop a question, over the port that
+      # answers it. A `tcpSocket` probe is completed by the kernel from the
+      # listen backlog, so it passes against a pynixd that has stopped serving
+      # -- issue #53. The port is named rather than numbered because the
+      # container, the probes and the scrape discovery all have to agree, and
+      # a name is the one spelling that cannot drift.
+      asks =
+        p:
+        assert p ? httpGet;
+        assert p.httpGet.path == "/healthz";
+        assert p.httpGet.port == "http";
+        true;
       ok =
         c:
+        assert lib.all asks [
+          c.livenessProbe
+          c.readinessProbe
+          c.startupProbe
+        ];
         # The whole of the defect: absent means 1.
         assert c.livenessProbe.timeoutSeconds > 1;
         assert c.readinessProbe.timeoutSeconds > 1;
