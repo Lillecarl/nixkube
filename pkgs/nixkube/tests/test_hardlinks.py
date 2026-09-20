@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: MIT
 
-import asyncio
 import os
 import tempfile
 from pathlib import Path
 
+import anyio
+import anyio.lowlevel
 import pytest
+
 from src.hardlinks import _YIELD_EVERY, deref_hardlink_tree, hardlink_tree
 
 
@@ -208,7 +210,7 @@ class TestEventLoopStaysAlive:
         async def ticker():
             nonlocal ticks
             while True:
-                await asyncio.sleep(0)
+                await anyio.lowlevel.checkpoint()
                 ticks += 1
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -218,8 +220,9 @@ class TestEventLoopStaysAlive:
             for i in range(_YIELD_EVERY * 3):
                 (src_dir / f"f{i:05d}").write_text("x")
 
-            pump = asyncio.create_task(ticker())
-            await hardlink_tree(src_dir, Path(tmpdir) / "dst")
-            pump.cancel()
+            async with anyio.create_task_group() as pump:
+                pump.start_soon(ticker)
+                await hardlink_tree(src_dir, Path(tmpdir) / "dst")
+                pump.cancel_scope.cancel()
 
         assert ticks > 0, "the walk never gave the loop a turn"
