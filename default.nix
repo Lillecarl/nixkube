@@ -465,34 +465,48 @@ rec {
     pkgs.runCommand "pynixd-podmonitor-shape" { } "echo ok > $out";
 
   /*
-    `appstarter-init` is exempt from NRI injection, and the exemption names it.
+    Every `appstarter-init` is exempt from NRI injection, and the exemption
+    names it.
 
-    The init container mounts the claim at `/nix-volume`, so the `/nix` check
-    in `CreateContainer` does not cover it, and it cannot mount `/nix`
-    instead — that shadows the image's own store, which is where its fallback
-    copy lives (issue #49). Without the annotation NRI reads
-    `APPSTARTER_WANTED` out of its environment and realises pynixd's closure
-    into the *node's* store, whose only substituter is the pynixd this pod is
-    starting. Measured on nixlab2: StartError 128 after nri-wait gave up, and
-    pynixd could not be rolled forward at all. Issue #55, issue #27's cycle.
+    Both pods run one, and both mount their store at `/nix-volume`, so the
+    `/nix` check in `CreateContainer` covers neither. Neither can mount
+    `/nix` instead: that shadows the image's own store, which is where
+    `appstarter`'s fallback copy lives (issue #49).
+
+    Without the annotation NRI reads `APPSTARTER_WANTED` out of the
+    container's environment and realises those paths into the *node's* store
+    through `fetch_packages`, which passes no `--store`. On the pynixd pod
+    the only substituter for that closure is the pynixd this pod is starting.
+    On the node it is the same store `appstarter init` is about to fill, so
+    the injection does that work first and without the fallback. Measured on
+    nixlab2: StartError 128 after nri-wait gave up. Issue #55, issue #27.
 
     The annotation keys on the container's name, so a rename breaks the
-    exemption silently. This asserts the two agree.
+    exemption silently. This asserts the two agree, on both pods.
   */
-  pynixdInitIsExemptFromInjection =
+  appstarterInitIsExemptFromInjection =
     let
       cfg = (kubenixInstance { module.nixkube.pynixd.enable = true; }).config;
-      pod = cfg.kubernetes.resources.nixkube.StatefulSet.pynixd.spec.template;
-      initNames = map (c: c.name) pod.spec.initContainers;
-      excluded = name: pod.metadata.annotations."nixkube/${name}-exclude" or null == "true";
+      res = cfg.kubernetes.resources.nixkube;
+      excluded = pod: name: pod.metadata.annotations."nixkube/${name}-exclude" or null == "true";
+      hasInit = pod: lib.elem "appstarter-init" (map (c: c.name) pod.spec.initContainers);
+      pynixdPod = res.StatefulSet.pynixd.spec.template;
+      nodePod = res.DaemonSet.nix-node.spec.template;
     in
-    assert lib.elem "appstarter-init" initNames;
-    assert excluded "appstarter-init";
-    # The main container is not exempt. It mounts `/nix`, so `CreateContainer`
-    # stands down for its own reason, and an annotation here would hide a
-    # regression in that check.
-    assert !(excluded "pynixd");
-    pkgs.runCommand "pynixd-init-is-exempt-from-injection" { } "echo ok > $out";
+    assert hasInit pynixdPod;
+    assert excluded pynixdPod "appstarter-init";
+    # Both pods, for the same reason and not by symmetry. The node's
+    # `/nix-volume` is its own store by hostPath, so injection there does
+    # `appstarter init`'s work before it runs and without its fallback --
+    # which is the only thing that rescues a node whose pynixd is down.
+    assert hasInit nodePod;
+    assert excluded nodePod "appstarter-init";
+    # Neither main container is exempt. Both mount `/nix`, so
+    # `CreateContainer` stands down for its own reason, and an annotation
+    # here would hide a regression in that check.
+    assert !(excluded pynixdPod "pynixd");
+    assert !(excluded nodePod "nix-node");
+    pkgs.runCommand "appstarter-init-is-exempt-from-injection" { } "echo ok > $out";
 
   assertionsNullShape =
     let
@@ -1061,7 +1075,7 @@ rec {
       builderSettingsOverride
       metricsPodMonitorShape
       nodeDriverReadiness
-      pynixdInitIsExemptFromInjection
+      appstarterInitIsExemptFromInjection
       pynixdPodMonitorShape
       pynixdProbesSurviveAPush
       sourcesAreLocked

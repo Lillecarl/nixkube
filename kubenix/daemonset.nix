@@ -116,6 +116,13 @@ in
               metadata.labels = labels;
               metadata.annotations = {
                 "kubectl.kubernetes.io/default-container" = "nix-node";
+                # `appstarter-init` fetches into `/nix-volume`, which is this
+                # node's own store by hostPath -- the same store NRI's
+                # `fetch_packages` targets. So injection here does
+                # `appstarter init`'s work before it runs, without its retry
+                # or its image fallback, and that fallback is the only thing
+                # that rescues a node whose pynixd is down. Issues #27, #55.
+                "nixkube/appstarter-init-exclude" = "true";
               }
               // lib.optionalAttrs (cfg.metrics.enable && cfg.metrics.annotations) {
                 "prometheus.io/scrape" = "true";
