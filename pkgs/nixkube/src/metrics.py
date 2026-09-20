@@ -447,6 +447,21 @@ class StoreSpaceCollector:
 REGISTRY.register(StoreSpaceCollector())
 
 
+IPV6_ANY = "::"
+IPV4_ANY = "0.0.0.0"
+
+
+def bind_candidates(addr: str) -> tuple[str, ...]:
+    """`addr`, and IPv4 after it when `addr` is the every-interface v6 form.
+
+    A `::` socket also serves IPv4 while the kernel keeps its default
+    `net.ipv6.bindv6only=0`, so one bind covers both families. A kernel with
+    IPv6 switched off refuses it outright, and that node is scrapable over
+    IPv4 or not at all.
+    """
+    return (addr, IPV4_ANY) if addr == IPV6_ANY else (addr,)
+
+
 def serve(port: int, addr: str) -> None:
     """Start the metrics endpoint, and let the daemon run without it on failure.
 
@@ -454,9 +469,13 @@ def serve(port: int, addr: str) -> None:
     and refusing to start one because the other is unavailable would turn an
     observability gap into an outage.
     """
-    try:
-        start_http_server(port, addr=addr)
-    except OSError:
-        logger.warning("metrics_server_failed", port=port, addr=addr, exc_info=True)
+    for candidate in bind_candidates(addr):
+        try:
+            start_http_server(port, addr=candidate)
+        except OSError:
+            logger.warning(
+                "metrics_server_failed", port=port, addr=candidate, exc_info=True
+            )
+            continue
+        logger.info("metrics_serving", port=port, addr=candidate)
         return
-    logger.info("metrics_serving", port=port, addr=addr)

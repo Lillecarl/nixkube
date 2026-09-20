@@ -317,6 +317,11 @@ in
         # value here keeps the behaviour and drops the phantom field. A string
         # inside a ConfigMap is not an EnvVar and survives.
         ssh_host = "";
+        # The same value for the HTTP server, and stated rather than left to
+        # the image's default: the probes are `httpGet` on this port, and an
+        # IPv4-only bind fails every one of them on a single-stack IPv6
+        # cluster. Stating it here fixes a running pod on a render alone.
+        http_host = "";
       })
       config.nixkube.pynixd.settings
     ];
@@ -332,8 +337,10 @@ in
         # ssh_host is here for the same reason it is on the controller: an
         # empty env var is dropped by the apiserver, and pynixd's own default
         # of 127.0.0.1 would leave the builder unreachable from the
-        # controller. See the controller block above.
+        # controller. See the controller block above. http_host is there for
+        # the probes, and a builder carries the same ones.
         ssh_host = "";
+        http_host = "";
       })
       config.nixkube.pynixd.settings
     ];

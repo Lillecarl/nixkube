@@ -222,3 +222,48 @@ class TestServe:
         monkeypatch.setattr(metrics, "start_http_server", refuse)
 
         metrics.serve(port=9099, addr="127.0.0.1")
+
+    def test_it_falls_back_to_ipv4_when_ipv6_is_off(self, monkeypatch):
+        """A `::` socket serves both families while the kernel keeps
+        `net.ipv6.bindv6only=0`. A kernel with IPv6 switched off refuses the
+        bind, and that node is scrapable over IPv4 or not at all."""
+        tried = []
+
+        def refuse_ipv6(_port, addr):
+            tried.append(addr)
+            if addr == "::":
+                raise OSError("cannot assign requested address")
+
+        monkeypatch.setattr(metrics, "start_http_server", refuse_ipv6)
+
+        metrics.serve(port=9099, addr="::")
+
+        assert tried == ["::", "0.0.0.0"]
+
+    def test_a_named_address_is_not_second_guessed(self, monkeypatch):
+        """An operator who set `METRICS_ADDR` gets that address and no
+        other. The fallback is for the every-interface default alone."""
+        tried = []
+
+        def refuse(_port, addr):
+            tried.append(addr)
+            raise OSError("address already in use")
+
+        monkeypatch.setattr(metrics, "start_http_server", refuse)
+
+        metrics.serve(port=9099, addr="127.0.0.1")
+
+        assert tried == ["127.0.0.1"]
+
+    def test_ipv4_is_not_tried_when_ipv6_bound(self, monkeypatch):
+        """Two sockets on one port is one of them failing, and the log would
+        say the daemon serves an address it does not."""
+        tried = []
+
+        monkeypatch.setattr(
+            metrics, "start_http_server", lambda _port, addr: tried.append(addr)
+        )
+
+        metrics.serve(port=9099, addr="::")
+
+        assert tried == ["::"]

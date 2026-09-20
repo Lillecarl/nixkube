@@ -86,9 +86,15 @@ ENABLE_COMPAT_DRIVER = os.environ.get("ENABLE_COMPAT_DRIVER", "false") == "true"
 # the endpoint is read-only and carries no cluster data -- every series is
 # about this node. `METRICS_ADDR` is every interface, because the scraper
 # reaches a pod over the pod network and not over localhost.
+#
+# `"::"` and not `"0.0.0.0"`: a single-stack IPv6 cluster gives the pod a v6
+# address and nothing else, and an IPv4 bind answers a scrape of it with
+# ECONNREFUSED. A v6 socket also serves IPv4 while the kernel keeps its
+# default `net.ipv6.bindv6only=0`, and `metrics.serve` falls back to IPv4
+# where it does not.
 METRICS_ENABLED = os.environ.get("METRICS_ENABLED", "true") == "true"
 METRICS_PORT = int(os.environ.get("METRICS_PORT", "9099"))
-METRICS_ADDR = os.environ.get("METRICS_ADDR", "0.0.0.0")
+METRICS_ADDR = os.environ.get("METRICS_ADDR", "::")
 
 # Verify store paths before mounting to detect corruption early
 # Set via VERIFY_STORE_PATHS environment variable

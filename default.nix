@@ -465,6 +465,34 @@ rec {
     pkgs.runCommand "pynixd-podmonitor-shape" { } "echo ok > $out";
 
   /*
+    Both pynixd config maps bind every interface, not IPv4 alone.
+
+    The probes are `httpGet` on the HTTP port. A single-stack IPv6 cluster
+    gives the Pod one v6 address, the kubelet dials that, and an
+    IPv4-only bind answers ECONNREFUSED -- the probe never passes and the
+    container restarts for ever. Measured on nixlab2: 61 failures in 14
+    minutes, with `0.0.0.0:8080` and `:::22` held by the same process.
+
+    Asserted on the rendered `config.json` rather than on the option,
+    because that string is what the container reads. `pynixd` defaults
+    both to the same value now; these lines are what keeps a deployment
+    right against an image that does not.
+  */
+  pynixdBindsEveryInterface =
+    let
+      resources =
+        (kubenixInstance {
+          module.nixkube.pynixd.enable = true;
+        }).config.kubernetes.resources.nixkube;
+      settings = name: builtins.fromJSON resources.ConfigMap.${name}.data."config.json";
+    in
+    assert (settings "pynixd-config").http_host == "";
+    assert (settings "pynixd-config").ssh_host == "";
+    assert (settings "builder-config").http_host == "";
+    assert (settings "builder-config").ssh_host == "";
+    pkgs.runCommand "pynixd-binds-every-interface" { } "echo ok > $out";
+
+  /*
     Every `appstarter-init` is exempt from NRI injection, and the exemption
     names it.
 
@@ -1077,6 +1105,7 @@ rec {
       nodeDriverReadiness
       appstarterInitIsExemptFromInjection
       pynixdPodMonitorShape
+      pynixdBindsEveryInterface
       pynixdProbesSurviveAPush
       sourcesAreLocked
       ciWorkflowCheck
