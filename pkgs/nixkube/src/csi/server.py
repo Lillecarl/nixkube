@@ -27,7 +27,12 @@ from ..constants import (
 )
 from ..errors import CSIError
 from ..events import report_event
-from ..metrics import VOLUME_MOUNTS, VOLUME_PREPARE_DURATION, VOLUME_UNMOUNTS
+from ..metrics import (
+    VOLUME_MOUNTS,
+    VOLUME_PREPARE_DURATION,
+    VOLUME_UNMOUNTS,
+    VOLUMES_PUBLISHED,
+)
 from ..nix import (
     build_pod_packages,
     build_primary_package,
@@ -310,6 +315,7 @@ class NodeServicer(csi_grpc.NodeBase):
                 # Report successful mount with closure size and elapsed time
                 elapsed = time.perf_counter() - start_time
                 VOLUME_MOUNTS.labels(result="ok").inc()
+                VOLUMES_PUBLISHED.inc()
                 # The whole publish, and not `mount_volume` alone: realising
                 # the closure is where the time goes, and a pod waits for all
                 # of it. `start_time` is the top of this handler.
@@ -376,6 +382,7 @@ class NodeServicer(csi_grpc.NodeBase):
                     VOLUME_UNMOUNTS.labels(result="error").inc()
                     raise
                 VOLUME_UNMOUNTS.labels(result="ok").inc()
+                VOLUMES_PUBLISHED.dec()
                 log.debug("unmounted")
             else:
                 # Not counted either way. Kubelet retries an unpublish, so a

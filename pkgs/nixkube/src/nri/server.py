@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 import asyncio
 import shutil
+import time
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,13 @@ from ..constants import (
 )
 from ..cri import get_cri_socket, list_container_ids
 from ..events import report_event
+from ..metrics import (
+    NRI_BUILD_DURATION,
+    NRI_BUILDS,
+    NRI_BUILDS_IN_FLIGHT,
+    NRI_CONTAINERS_SEEN,
+    NRI_STATE_CHANGES,
+)
 from ..nix import fetch_packages, get_build_args, get_current_system
 from ..volume import prepare_volume
 from .annotations import extract_container_store_paths, parse_nix_rw, parse_store_mounts
@@ -213,6 +221,7 @@ class NriPlugin(NriPluginBase):
         # Check if /nix is already mounted (e.g., by nix-csi) to avoid collision
         if any(m.destination == "/nix" for m in req.container.mounts):
             logger.debug("nix_already_mounted")
+            NRI_CONTAINERS_SEEN.labels(result="already_mounted").inc()
             resp = nri_pb2.CreateContainerResponse(adjust=nri_pb2.ContainerAdjustment())
             await stream.send_message(resp)
             return
@@ -327,8 +336,13 @@ class NriPlugin(NriPluginBase):
                 else:
                     logger.warning("build_already_pending")
 
+                NRI_CONTAINERS_SEEN.labels(result="injected").inc()
+
             except Exception:
+                NRI_CONTAINERS_SEEN.labels(result="error").inc()
                 logger.exception("volume_setup_failed")
+        else:
+            NRI_CONTAINERS_SEEN.labels(result="no_paths").inc()
 
         resp = nri_pb2.CreateContainerResponse(adjust=adjust)
         await stream.send_message(resp)
@@ -341,6 +355,8 @@ class NriPlugin(NriPluginBase):
         assert event is not None
 
         event_name = nri_pb2.Event.Name(event.event)
+        # The label is the enum's name, so the series count is the enum's size.
+        NRI_STATE_CHANGES.labels(event=event_name).inc()
         structlog.contextvars.bind_contextvars(
             nri_event=event_name,
             pod={"namespace": event.pod.namespace, "name": event.pod.name},
@@ -394,6 +410,8 @@ class NriPlugin(NriPluginBase):
         )
         log.info("build_task_started", count=len(store_paths))
         pump_task: asyncio.Task | None = None
+        started = time.monotonic()
+        NRI_BUILDS_IN_FLIGHT.inc()
         try:
             # If no store paths to build, just mark as done
             if not store_paths:
@@ -401,6 +419,7 @@ class NriPlugin(NriPluginBase):
                 self.zmq_server.build_status[container_id] = {"status": "done"}
                 await self.zmq_server.publish_build_complete(container_id)
                 self.zmq_server.pending_builds.discard(container_id)
+                NRI_BUILDS.labels(result="ok").inc()
                 return
 
             # Start progress pump to keep nri-wait timeout reset during long builds
@@ -463,7 +482,9 @@ class NriPlugin(NriPluginBase):
                 note=f"Successfully built {len(store_paths)} store path(s)",
                 event_type="Normal",
             )
+            NRI_BUILDS.labels(result="ok").inc()
         except Exception as e:
+            NRI_BUILDS.labels(result="error").inc()
             log.exception("build_task_failed")
             self.zmq_server.pending_builds.discard(container_id)
 
@@ -477,6 +498,8 @@ class NriPlugin(NriPluginBase):
             )
             raise
         finally:
+            NRI_BUILDS_IN_FLIGHT.dec()
+            NRI_BUILD_DURATION.observe(time.monotonic() - started)
             # Cancel progress pump if it's still running
             if pump_task is not None:
                 pump_task.cancel()

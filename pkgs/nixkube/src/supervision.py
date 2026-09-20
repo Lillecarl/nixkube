@@ -16,6 +16,8 @@ from typing import Any
 
 import structlog
 
+from .metrics import SERVICE_CRASH_LOOPS, SERVICE_RESTARTS
+
 logger = structlog.get_logger("nixkube.supervision")
 
 
@@ -81,6 +83,11 @@ async def supervised(
         except Exception:
             log.exception("service_crashed")
 
-        tracker.record_and_check()
+        SERVICE_RESTARTS.labels(service=name).inc()
+        try:
+            tracker.record_and_check()
+        except CrashLoopError:
+            SERVICE_CRASH_LOOPS.labels(service=name).inc()
+            raise
         log.info("service_restarting", backoff_seconds=1)
         await asyncio.sleep(1)

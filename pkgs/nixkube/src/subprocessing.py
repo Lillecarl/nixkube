@@ -10,6 +10,7 @@ import structlog
 from shellous import sh
 
 from .errors import CommandTimeoutError, SubprocessError
+from .metrics import SUBPROCESS_CALLS, SUBPROCESS_DURATION, command_label
 
 logger = structlog.get_logger("nixkube.subprocessing")
 
@@ -105,6 +106,7 @@ async def run_console(
     """
     start_time = time.perf_counter()
     log_command(*args, log_level=log_level)
+    label = command_label(args)
 
     stdout_data: list[str] = []
     stderr_data: list[str] = []
@@ -139,9 +141,21 @@ async def run_console(
                     combined="\n".join(combined_data).strip(),
                     command=list(args),
                 )
+    except CommandTimeoutError:
+        # Raised above when shellous reports the run as cancelled. It is the
+        # same outcome as the deadline below, so it counts the same way.
+        SUBPROCESS_CALLS.labels(command=label, result="timeout").inc()
+        SUBPROCESS_DURATION.labels(command=label).observe(
+            time.perf_counter() - start_time
+        )
+        raise
     except (asyncio.TimeoutError, TimeoutError):
         # asyncio.timeout raises TimeoutError when the deadline is reached.
         # Use return code 124 (conventional timeout code).
+        SUBPROCESS_CALLS.labels(command=label, result="timeout").inc()
+        SUBPROCESS_DURATION.labels(command=label).observe(
+            time.perf_counter() - start_time
+        )
         raise CommandTimeoutError(
             returncode=124,
             stdout="\n".join(stdout_data).strip(),
@@ -151,6 +165,10 @@ async def run_console(
         )
 
     elapsed_time = time.perf_counter() - start_time
+    SUBPROCESS_CALLS.labels(
+        command=label, result="ok" if returncode == 0 else "error"
+    ).inc()
+    SUBPROCESS_DURATION.labels(command=label).observe(elapsed_time)
     cmd_str = shlex.join([str(arg) for arg in args])
 
     # Log all command timings for profiling (skip if NOTSET = silent capture)

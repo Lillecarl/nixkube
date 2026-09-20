@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 import os
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import structlog
 from anyio.lowlevel import checkpoint
 
 from .errors import HardlinkClosureError
+from .metrics import HARDLINK_CLOSURE_DURATION, HARDLINK_CLOSURES, HARDLINK_PATHS
 
 logger = structlog.get_logger("nixkube.hardlinks")
 
@@ -75,6 +77,8 @@ async def hardlink_closure(store_paths: set[Path], dst: Path) -> None:
     result: dst/abc-foo/..., dst/def-bar/...
     """
     logger.debug("hardlink_closure", paths=store_paths, dst=dst)
+    started = time.monotonic()
+    HARDLINK_PATHS.inc(len(store_paths))
     try:
         dst.mkdir(parents=True, exist_ok=True)
 
@@ -85,6 +89,7 @@ async def hardlink_closure(store_paths: set[Path], dst: Path) -> None:
             try:
                 await hardlink_tree(store_path, target)
             except Exception as e:
+                HARDLINK_CLOSURES.labels(result="error").inc()
                 raise HardlinkClosureError(
                     f"Failed to hardlink {store_path.name}",
                     logs=str(e),
@@ -93,10 +98,15 @@ async def hardlink_closure(store_paths: set[Path], dst: Path) -> None:
         # Re-raise to prevent outer except Exception from double-wrapping
         raise
     except Exception as e:
+        HARDLINK_CLOSURES.labels(result="error").inc()
         raise HardlinkClosureError(
             "Failed to hardlink store paths to volume",
             logs=str(e),
         ) from e
+    else:
+        HARDLINK_CLOSURES.labels(result="ok").inc()
+    finally:
+        HARDLINK_CLOSURE_DURATION.observe(time.monotonic() - started)
 
 
 async def deref_hardlink_tree(src: Path, dst: Path) -> None:

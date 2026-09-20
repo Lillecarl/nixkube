@@ -7,18 +7,33 @@ here is about this node and not about the cluster.
 
 The server is the threaded one that `prometheus_client` ships. The daemon is
 asyncio and a thread is off-pattern, but the alternative is an ASGI server and
-a second HTTP stack in the image for one read-only route.
+a second HTTP stack in the image for one read-only route. The values that
+thread reads are lock-protected by `prometheus_client`, so the loop writing
+them while it serves is safe.
+
+**Every label here is bounded.** A store path, a container id or a pod name
+would give one series per value, and a node sees thousands of each. `result`,
+`kind`, `service` and `event` are written out in this file, and `command`
+comes from an allow-list.
+
+`prometheus_client` registers `ProcessCollector`, `PlatformCollector` and
+`GCCollector` on the default registry by itself, so `process_cpu_seconds_total`,
+`process_resident_memory_bytes`, `process_open_fds` and `python_gc_*` are
+already served. Do not add a gauge for any of them.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
+import time
+from importlib.metadata import PackageNotFoundError, version
 
 import structlog
 from prometheus_client import REGISTRY, Counter, Gauge, Histogram, start_http_server
 from prometheus_client.core import GaugeMetricFamily
 
-from .constants import NIX_ROOT
+from .constants import NIX_ROOT, PYNIXD_ENABLED
 
 logger = structlog.get_logger("nixkube.metrics")
 
@@ -101,6 +116,284 @@ VOLUME_PREPARE_DURATION = Histogram(
     "Time spent realising the closure of one volume before it is mounted",
     buckets=(0.5, 1, 5, 15, 30, 60, 120, 300),
 )
+
+# Mounts minus unmounts, kept here rather than derived in a query: a counter
+# difference across a restart is wrong, and this is the number that says
+# whether the node is leaking volumes.
+VOLUMES_PUBLISHED = Gauge(
+    "nixkube_volumes_published",
+    "Volumes this daemon has mounted and not yet unmounted",
+)
+
+# --- Hardlinking ---
+#
+# Irreducible work: linking a closure into a container's farm is a metadata
+# syscall per file and there is no cheaper way to do it. It also runs on the
+# loop that answers the NRI heartbeat, and `nri-wait` gives up after 30 s of
+# silence, so how long this takes decides whether a container starts.
+
+HARDLINK_CLOSURES = Counter(
+    "nixkube_hardlink_closures_total",
+    "Closures linked into a container's volume",
+    ["result"],  # ok, error
+)
+
+HARDLINK_CLOSURE_DURATION = Histogram(
+    "nixkube_hardlink_closure_duration_seconds",
+    "Time spent linking one closure into a volume",
+    buckets=(0.1, 0.5, 1, 5, 15, 30, 60, 120, 300),
+)
+
+HARDLINK_PATHS = Counter(
+    "nixkube_hardlink_paths_total",
+    "Store paths considered for linking, whether or not the volume already had them",
+)
+
+# --- Nix builds ---
+#
+# `kind` is which of the three volume attributes asked for this build, and
+# never the path or the expression itself.
+
+NIX_BUILDS = Counter(
+    "nixkube_nix_builds_total",
+    "Nix builds this daemon has run",
+    ["kind", "result"],  # kind: store_path, flake_ref, nix_expr, packages
+)
+
+NIX_BUILD_DURATION = Histogram(
+    "nixkube_nix_build_duration_seconds",
+    "Time one nix build took",
+    ["kind"],
+    buckets=(1, 5, 15, 30, 60, 120, 300, 600, 1800),
+)
+
+# --- Subprocesses ---
+#
+# Everything nixkube does to the store is a subprocess, and `run_console` is
+# the one funnel they all pass through.
+
+SUBPROCESS_CALLS = Counter(
+    "nixkube_subprocess_calls_total",
+    "Subprocesses this daemon has run",
+    ["command", "result"],  # result: ok, error, timeout
+)
+
+SUBPROCESS_DURATION = Histogram(
+    "nixkube_subprocess_duration_seconds",
+    "Time one subprocess took",
+    ["command"],
+    buckets=(0.05, 0.25, 1, 5, 15, 60, 300, 900),
+)
+
+# --- NRI ---
+
+# `NRI_CONTAINERS_SEEN`, because `constants.NRI_CONTAINERS` is the farm
+# directory and `nri/server.py` imports both.
+NRI_CONTAINERS_SEEN = Counter(
+    "nixkube_nri_containers_total",
+    "Containers this plugin has seen create",
+    ["result"],  # injected, no_paths, already_mounted, error
+)
+
+NRI_STATE_CHANGES = Counter(
+    "nixkube_nri_state_changes_total",
+    "State change events the runtime has sent",
+    ["event"],  # the NRI event name, which is an enum
+)
+
+NRI_BUILDS = Counter(
+    "nixkube_nri_builds_total",
+    "Build tasks this plugin has finished",
+    ["result"],  # ok, error
+)
+
+NRI_BUILDS_IN_FLIGHT = Gauge(
+    "nixkube_nri_builds_in_flight",
+    "Build tasks running now",
+)
+
+NRI_BUILD_DURATION = Histogram(
+    "nixkube_nri_build_duration_seconds",
+    "Time one build task took, from spawn to mounted",
+    buckets=(1, 5, 15, 30, 60, 120, 300, 600, 1800),
+)
+
+# --- The cache ---
+#
+# This is the node's own view of pynixd. A node whose builds are slow and
+# whose cache is unreachable has one fault and not two.
+
+CACHE_REACHABLE = Gauge(
+    "nixkube_cache_reachable",
+    "Whether the last connectivity check reached pynixd (1 = yes)",
+)
+
+# Without this, `cache_reachable == 0` fires on every cluster that runs no
+# pynixd, where it is the correct state and not a fault. The alert is
+# `configured == 1 and reachable == 0`.
+CACHE_CONFIGURED = Gauge(
+    "nixkube_cache_configured",
+    "Whether this node is configured to use pynixd as a cache at all (1 = yes)",
+)
+CACHE_CONFIGURED.set(1 if PYNIXD_ENABLED else 0)
+
+CACHE_COPIES = Counter(
+    "nixkube_cache_copies_total",
+    "Copies of a closure to the cache",
+    ["result"],  # ok, exhausted, timeout
+)
+
+CACHE_COPY_ATTEMPTS = Counter(
+    "nixkube_cache_copy_attempts_total",
+    "Individual `nix copy` attempts, retries included",
+    ["result"],  # ok, error, timeout
+)
+
+CACHE_COPY_DURATION = Histogram(
+    "nixkube_cache_copy_duration_seconds",
+    "Time one copy to the cache took, retries included",
+    buckets=(1, 5, 15, 60, 300, 900, 1800),
+)
+
+# --- Supervision ---
+#
+# A restart count was the diagnosis twice over on the nixlab2 cluster, and
+# both times it came from `kubectl` rather than from a series anybody could
+# alert on.
+
+SERVICE_RESTARTS = Counter(
+    "nixkube_service_restarts_total",
+    "Times a supervised service crashed and was restarted",
+    ["service"],
+)
+
+SERVICE_CRASH_LOOPS = Counter(
+    "nixkube_service_crash_loops_total",
+    "Times a supervised service exceeded its restart threshold and took the process down",
+    ["service"],
+)
+
+# --- The event loop ---
+#
+# nixkube blocks its own loop: linking a closure is synchronous work on the
+# loop that answers the NRI heartbeat, and `nri-wait` gives up after 30 s.
+# A stalled loop looks exactly like a slow build from outside, and this is the
+# series that tells them apart.
+
+EVENT_LOOP_LAG = Gauge(
+    "nixkube_event_loop_lag_seconds",
+    "Seconds the event loop went without running a ready callback, over the last window",
+)
+
+EVENT_LOOP_LAG_MAX = Gauge(
+    "nixkube_event_loop_lag_max_seconds",
+    "Largest event loop stall seen since the process started",
+)
+
+# --- Build info ---
+
+BUILD_INFO = Gauge(
+    "nixkube_build_info",
+    "Always 1. The version rides on the label, which is how a dashboard joins on it",
+    ["version"],
+)
+
+try:
+    BUILD_INFO.labels(version=version("nixkube")).set(1)
+except PackageNotFoundError:
+    # A source tree with no installed distribution. The series goes absent,
+    # which is truthful, and is not a reason to fail an import.
+    logger.debug("build_info_version_unavailable")
+
+
+_NIX_SUBCOMMANDS = frozenset(
+    {
+        "build",
+        "copy",
+        "derivation",
+        "eval",
+        "log",
+        "path-info",
+        "realisation",
+        "store",
+        "why-depends",
+    }
+)
+_NIX_STORE_SUBCOMMANDS = frozenset(
+    {
+        "copy-sigs",
+        "delete",
+        "gc",
+        "info",
+        "optimise",
+        "ping",
+        "repair-path",
+        "sign",
+        "verify",
+    }
+)
+
+
+def command_label(args: tuple[object, ...]) -> str:
+    """A bounded name for a command line.
+
+    **An allow-list, and not "the leading tokens that are not flags".** A
+    caller passes a store path, a flake reference or a temporary file name
+    straight after the subcommand, and any of those as a label gives one
+    series per value. `nix build nixpkgs#hello` is the case that looks safe
+    and is not.
+    """
+    if not args:
+        return "unknown"
+    binary = os.path.basename(str(args[0]))
+    if binary != "nix" or len(args) < 2:
+        return binary
+    sub = str(args[1])
+    if sub not in _NIX_SUBCOMMANDS:
+        return binary
+    if sub == "store" and len(args) >= 3 and str(args[2]) in _NIX_STORE_SUBCOMMANDS:
+        return f"nix store {args[2]}"
+    return f"nix {sub}"
+
+
+class LoopLagMonitor:
+    """Sample how long the loop goes without running a ready callback.
+
+    The measurement is what a `sleep` overshoots by: the loop was asked to
+    wake this task after `interval` and did not, so the difference is time it
+    spent not scheduling. That is what the NRI heartbeat experiences.
+
+    `window_max` decays, because a stall a minute ago says nothing about now.
+    `lifetime_max` does not, because the worst stall a process ever had is
+    what an operator wants after the fact.
+    """
+
+    def __init__(self, interval: float = 0.25, window: float = 30.0) -> None:
+        self._interval = interval
+        self._window = window
+        self._samples: list[tuple[float, float]] = []
+        self.lifetime_max = 0.0
+
+    @property
+    def window_max(self) -> float:
+        cutoff = time.monotonic() - self._window
+        self._samples = [(t, lag) for t, lag in self._samples if t >= cutoff]
+        return max((lag for _, lag in self._samples), default=0.0)
+
+    async def run(self) -> None:
+        """Sample until cancelled. Intended to run as a background task."""
+        while True:
+            t0 = time.monotonic()
+            await asyncio.sleep(self._interval)
+            lag = time.monotonic() - t0 - self._interval
+            if lag < 0:
+                # A sleep that returned early is not a stall, and recording it
+                # would lower the maximum.
+                continue
+            self._samples.append((time.monotonic(), lag))
+            self.lifetime_max = max(self.lifetime_max, lag)
+            EVENT_LOOP_LAG.set(self.window_max)
+            EVENT_LOOP_LAG_MAX.set(self.lifetime_max)
 
 
 class StoreSpaceCollector:

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 import tempfile
+import time
 from pathlib import Path
 
 import structlog
@@ -11,6 +12,7 @@ from ..builders import build_builder_args, get_builder_uris
 from ..cache import check_cache_connectivity, get_substituter_args
 from ..constants import NIX_BUILD_TIMEOUT
 from ..errors import BuildError, CommandTimeoutError, SubprocessError
+from ..metrics import NIX_BUILD_DURATION, NIX_BUILDS
 from ..store import extract_store_name, extract_store_paths
 from ..subprocessing import try_console
 
@@ -55,15 +57,27 @@ async def _run_nix_build(
     timeout: float,
     timeout_msg: str,
     error_msg: str,
+    kind: str,
 ) -> Path:
-    """Run `nix build` with given args and translate errors to BuildError."""
+    """Run `nix build` with given args and translate errors to BuildError.
+
+    `kind` says which volume attribute asked for this build. It is a metric
+    label, so it is one of a fixed few words and never the path itself.
+    """
+    started = time.monotonic()
     try:
         result = await try_console("nix", "build", *args, timeout=timeout)
-        return Path(result.stdout.splitlines()[0])
     except CommandTimeoutError as e:
+        NIX_BUILDS.labels(kind=kind, result="timeout").inc()
         raise BuildError(timeout_msg, logs=e.combined) from e
     except SubprocessError as e:
+        NIX_BUILDS.labels(kind=kind, result="error").inc()
         raise BuildError(error_msg, logs=e.combined) from e
+    else:
+        NIX_BUILDS.labels(kind=kind, result="ok").inc()
+        return Path(result.stdout.splitlines()[0])
+    finally:
+        NIX_BUILD_DURATION.labels(kind=kind).observe(time.monotonic() - started)
 
 
 async def build_store_path(
@@ -79,6 +93,7 @@ async def build_store_path(
         timeout=timeout,
         timeout_msg=f"Build timeout for {store_path} after {timeout}s",
         error_msg=f"Failed to build store path {store_path}",
+        kind="store_path",
     )
 
 
@@ -94,6 +109,7 @@ async def build_flake_ref(
         timeout=timeout,
         timeout_msg=f"Build timeout for flake {flake_ref} after {timeout}s",
         error_msg=f"Failed to build flake {flake_ref}",
+        kind="flake_ref",
     )
 
 
@@ -119,6 +135,7 @@ async def build_nix_expr(
             timeout=timeout,
             timeout_msg=f"Build timeout for Nix expression after {timeout}s",
             error_msg="Failed to build Nix expression",
+            kind="nix_expr",
         )
 
 
@@ -138,9 +155,11 @@ async def fetch_packages(
     args.extend(["--out-link", gc_root / "build"])
     args.extend(package_paths)
 
+    started = time.monotonic()
     try:
         await try_console(*args, timeout=NIX_BUILD_TIMEOUT)
     except SubprocessError as e:
+        NIX_BUILDS.labels(kind="packages", result="error").inc()
         logger.error(
             "fetch_packages_failed",
             returncode=e.returncode,
@@ -149,8 +168,13 @@ async def fetch_packages(
         )
         raise
     except Exception:
+        NIX_BUILDS.labels(kind="packages", result="error").inc()
         logger.exception("fetch_packages_failed")
         raise
+    else:
+        NIX_BUILDS.labels(kind="packages", result="ok").inc()
+    finally:
+        NIX_BUILD_DURATION.labels(kind="packages").observe(time.monotonic() - started)
 
     logger.debug("fetched_packages", count=len(package_paths))
 

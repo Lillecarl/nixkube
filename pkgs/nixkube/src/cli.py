@@ -194,6 +194,9 @@ async def async_main():
     tasks: list[asyncio.Task] = [
         asyncio.create_task(supervise_nix_daemon(), name="nix-daemon"),
         asyncio.create_task(gc_loop(), name="gc"),
+        # Not supervised. It has nothing to crash on, and a restart loop
+        # around a sampler would report on itself.
+        asyncio.create_task(metrics.LoopLagMonitor().run(), name="loop-lag"),
         asyncio.create_task(
             supervised(
                 lambda: csi_serve(

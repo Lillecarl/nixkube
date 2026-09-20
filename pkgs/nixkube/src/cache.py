@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from asyncio import Semaphore, sleep
 from collections import defaultdict
 from pathlib import Path
@@ -12,6 +13,13 @@ from .constants import (
     CACHE_PING_TIMEOUT_SECONDS,
     GC_COPY_TIMEOUT_SECONDS,
     PYNIXD_ENABLED,
+)
+from .errors import CommandTimeoutError
+from .metrics import (
+    CACHE_COPIES,
+    CACHE_COPY_ATTEMPTS,
+    CACHE_COPY_DURATION,
+    CACHE_REACHABLE,
 )
 from .subprocessing import run_captured
 
@@ -45,6 +53,8 @@ async def check_cache_connectivity() -> bool:
     Saying no costs that mount its substituter. It does not cost the mount.
     """
     if not PYNIXD_ENABLED:
+        # Not reported as unreachable: there is nothing to reach. The series
+        # stays at whatever it was, which is 0 from the start.
         return False
 
     logger.debug("cache_connectivity_check")
@@ -68,6 +78,7 @@ async def check_cache_connectivity() -> bool:
         # something outside the node, and there is no failure of it that a
         # mount should be made to care about.
         logger.warning("cache_connectivity_failed", exc_info=True)
+        CACHE_REACHABLE.set(0)
         return False
 
     if result.returncode != 0:
@@ -76,6 +87,7 @@ async def check_cache_connectivity() -> bool:
             returncode=result.returncode,
             stderr=result.stderr,
         )
+        CACHE_REACHABLE.set(0)
         return False
 
     try:
@@ -84,9 +96,11 @@ async def check_cache_connectivity() -> bool:
         # `nix store ping --json` that answers with something else is a nix
         # this code does not understand, not a cache that works.
         logger.warning("cache_connectivity_unparsable", stdout=result.stdout[:200])
+        CACHE_REACHABLE.set(0)
         return False
 
     logger.debug("cache_connectivity_ok", **ping_data)
+    CACHE_REACHABLE.set(1)
     return True
 
 
@@ -127,6 +141,7 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
 
     lock_key = frozenset(package_paths) if package_paths is not None else frozenset()
 
+    copy_started = time.monotonic()
     async with copy_lock[lock_key]:
         if package_paths is None:
             # All-paths mode: sign and copy everything in the local store.
@@ -202,19 +217,31 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
             # no deadline, a copy to an unreachable cache never returned, and
             # `gc_loop` calls this first: one stuck copy stopped collection on
             # that node until the pod restarted. Issue #38.
-            nix_copy = await run_captured(
-                "nix",
-                "copy",
-                "--no-check-sigs",
-                "--to",
-                "ssh-ng://nix@pynixd",
-                *path_args,
-                timeout=GC_COPY_TIMEOUT_SECONDS,
-            )
+            try:
+                nix_copy = await run_captured(
+                    "nix",
+                    "copy",
+                    "--no-check-sigs",
+                    "--to",
+                    "ssh-ng://nix@pynixd",
+                    *path_args,
+                    timeout=GC_COPY_TIMEOUT_SECONDS,
+                )
+            except CommandTimeoutError:
+                # It leaves through here rather than round the loop, so
+                # without this the copy that issue #38 is about moves none of
+                # these three series.
+                CACHE_COPY_ATTEMPTS.labels(result="timeout").inc()
+                CACHE_COPIES.labels(result="timeout").inc()
+                CACHE_COPY_DURATION.observe(time.monotonic() - copy_started)
+                raise
             if nix_copy.returncode == 0:
+                CACHE_COPY_ATTEMPTS.labels(result="ok").inc()
+                CACHE_COPIES.labels(result="ok").inc()
                 log.debug("copy_to_cache_done")
                 break
             else:
+                CACHE_COPY_ATTEMPTS.labels(result="error").inc()
                 log.warning(
                     "copy_attempt_failed",
                     attempt=attempt + 1,
@@ -224,7 +251,10 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
                     stderr=nix_copy.stderr,
                 )
         else:
+            CACHE_COPIES.labels(result="exhausted").inc()
             log.error("copy_to_cache_exhausted")
+
+        CACHE_COPY_DURATION.observe(time.monotonic() - copy_started)
 
 
 def schedule_copy_to_cache(package_paths: set[Path]) -> None:
