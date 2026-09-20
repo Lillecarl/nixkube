@@ -192,7 +192,7 @@ SUBPROCESS_DURATION = Histogram(
 NRI_CONTAINERS_SEEN = Counter(
     "nixkube_nri_containers_total",
     "Containers this plugin has seen create",
-    ["result"],  # injected, no_paths, already_mounted, error
+    ["result"],  # injected, no_paths, already_mounted, excluded, error
 )
 
 NRI_STATE_CHANGES = Counter(

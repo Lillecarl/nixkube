@@ -391,6 +391,20 @@ in
             metadata.labels = pynixdLabels;
             metadata.annotations = {
               "kubectl.kubernetes.io/default-container" = "pynixd";
+              # `appstarter-init` brings its own store and must not be
+              # injected into. It mounts the claim at `/nix-volume` and
+              # realises the closure there as a chroot store, so the `/nix`
+              # check in `CreateContainer` does not cover it, and it cannot
+              # mount `/nix` either -- that would shadow the image's own
+              # store, which is where its fallback copy lives (issue #49).
+              #
+              # Without this, NRI reads `APPSTARTER_WANTED` out of that
+              # container's environment and realises pynixd's closure into
+              # the node's store, whose only substituter is the pynixd this
+              # pod is starting. Measured on nixlab2: the container died with
+              # StartError 128 after nri-wait gave up, and pynixd could not
+              # be rolled forward at all. Issue #55, and issue #27's cycle.
+              "nixkube/appstarter-init-exclude" = "true";
               configHash = lib.hashAttrs (
                 { }
                 // nsRes.ConfigMap.pynixd or { }

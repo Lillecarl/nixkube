@@ -103,6 +103,42 @@ def parse_nix_rw(
     )
 
 
+def parse_nix_exclude(
+    pod_annotations: Annotations, container_name: str, system: str
+) -> bool:
+    """Return True if this container wants no injection at all.
+
+    **For a container that brings its own store.** `CreateContainer` already
+    stands down when `/nix` is mounted, and that check cannot serve a
+    container whose store is somewhere else. `appstarter-init` is the case
+    this exists for: it mounts the claim at `/nix-volume`, realises the
+    closure into it as a chroot store, and must keep the image's own `/nix`
+    visible, because that is where its fallback copy lives (issue #49). So it
+    can neither mount `/nix` nor be injected into.
+
+    Without an opt-out, NRI reads `APPSTARTER_WANTED` out of that container's
+    environment and realises pynixd's closure into the *node's* store, whose
+    only substituter is the pynixd this pod is starting. That is issue #27's
+    cycle, and it wedged a cluster for a day. Issue #55.
+
+    Same shape as `parse_nix_rw`: container-specific wins over pod-wide,
+    including an explicit "false" to opt one container back in.
+
+    Annotations:
+      nixkube/pod-exclude: "true"                  — no container is injected into
+      nixkube/{container-name}-exclude: "true"     — only this one is left alone
+      nixkube/{container-name}-exclude@x86_64-linux: "false" — back in, on x86_64
+    """
+    container_values = list(
+        _iter_annotations(pod_annotations, f"{container_name}-exclude", system)
+    )
+    if container_values:
+        return any(v == "true" for v in container_values)
+    return any(
+        v == "true" for v in _iter_annotations(pod_annotations, "pod-exclude", system)
+    )
+
+
 def parse_store_mounts(
     pod_annotations: Annotations, container_name: str, system: str
 ) -> dict[Path, Path]:

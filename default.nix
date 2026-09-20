@@ -464,6 +464,36 @@ rec {
     assert lib.any (p: p.name == "http") (pynixdContainer on).ports;
     pkgs.runCommand "pynixd-podmonitor-shape" { } "echo ok > $out";
 
+  /*
+    `appstarter-init` is exempt from NRI injection, and the exemption names it.
+
+    The init container mounts the claim at `/nix-volume`, so the `/nix` check
+    in `CreateContainer` does not cover it, and it cannot mount `/nix`
+    instead — that shadows the image's own store, which is where its fallback
+    copy lives (issue #49). Without the annotation NRI reads
+    `APPSTARTER_WANTED` out of its environment and realises pynixd's closure
+    into the *node's* store, whose only substituter is the pynixd this pod is
+    starting. Measured on nixlab2: StartError 128 after nri-wait gave up, and
+    pynixd could not be rolled forward at all. Issue #55, issue #27's cycle.
+
+    The annotation keys on the container's name, so a rename breaks the
+    exemption silently. This asserts the two agree.
+  */
+  pynixdInitIsExemptFromInjection =
+    let
+      cfg = (kubenixInstance { module.nixkube.pynixd.enable = true; }).config;
+      pod = cfg.kubernetes.resources.nixkube.StatefulSet.pynixd.spec.template;
+      initNames = map (c: c.name) pod.spec.initContainers;
+      excluded = name: pod.metadata.annotations."nixkube/${name}-exclude" or null == "true";
+    in
+    assert lib.elem "appstarter-init" initNames;
+    assert excluded "appstarter-init";
+    # The main container is not exempt. It mounts `/nix`, so `CreateContainer`
+    # stands down for its own reason, and an annotation here would hide a
+    # regression in that check.
+    assert !(excluded "pynixd");
+    pkgs.runCommand "pynixd-init-is-exempt-from-injection" { } "echo ok > $out";
+
   assertionsNullShape =
     let
       instance = kubenixInstance {
@@ -1031,6 +1061,7 @@ rec {
       builderSettingsOverride
       metricsPodMonitorShape
       nodeDriverReadiness
+      pynixdInitIsExemptFromInjection
       pynixdPodMonitorShape
       pynixdProbesSurviveAPush
       sourcesAreLocked

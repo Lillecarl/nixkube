@@ -8,6 +8,7 @@ from nri import nri_pb2
 from src.nri.annotations import (
     _parse_store_mounts_for_name,
     extract_container_store_paths,
+    parse_nix_exclude,
     parse_nix_rw,
     parse_store_mounts,
 )
@@ -203,6 +204,54 @@ class TestParseStoreMounts:
         }
         result = parse_store_mounts(annotations, "myapp", "x86_64-linux")
         assert result[Path("/opt/lib")] == Path("/nix/store/lib-myapp-x86")
+
+
+class TestParseNixExclude:
+    """`parse_nix_exclude`, for a container that brings its own store.
+
+    `appstarter-init` is the case. It mounts the claim at `/nix-volume`, so
+    the `/nix` check in `CreateContainer` does not cover it, and it cannot
+    mount `/nix` either — that shadows the image store its fallback lives in.
+    Without an opt-out, NRI reads `APPSTARTER_WANTED` from its environment
+    and realises pynixd's closure into the node's store, whose only
+    substituter is the pynixd this pod is starting. Issue #55.
+    """
+
+    def test_nothing_is_excluded_by_default(self):
+        """The negative control. A default of true would silence NRI
+        everywhere and look like a working cluster with no store mounted."""
+        assert parse_nix_exclude({}, "myapp", "x86_64-linux") is False
+
+    def test_a_named_container_is_excluded(self):
+        annotations = {"nixkube/appstarter-init-exclude": "true"}
+        assert parse_nix_exclude(annotations, "appstarter-init", "x86_64-linux") is True
+
+    def test_a_named_container_does_not_exclude_its_neighbours(self):
+        """The pynixd pod carries this annotation and its main container must
+        still be handled normally."""
+        annotations = {"nixkube/appstarter-init-exclude": "true"}
+        assert parse_nix_exclude(annotations, "pynixd", "x86_64-linux") is False
+
+    def test_pod_wide_exclude_covers_every_container(self):
+        annotations = {"nixkube/pod-exclude": "true"}
+        assert parse_nix_exclude(annotations, "anything", "x86_64-linux") is True
+
+    def test_a_container_can_opt_back_in(self):
+        """Same precedence as `-rw`: container-specific wins, including an
+        explicit false against a pod-wide true."""
+        annotations = {
+            "nixkube/pod-exclude": "true",
+            "nixkube/myapp-exclude": "false",
+        }
+        assert parse_nix_exclude(annotations, "myapp", "x86_64-linux") is False
+
+    def test_the_system_variant_is_honoured(self):
+        annotations = {
+            "nixkube/myapp-exclude@x86_64-linux": "true",
+            "nixkube/myapp-exclude@aarch64-linux": "false",
+        }
+        assert parse_nix_exclude(annotations, "myapp", "x86_64-linux") is True
+        assert parse_nix_exclude(annotations, "myapp", "aarch64-linux") is False
 
 
 class TestParseNixRW:

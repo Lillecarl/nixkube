@@ -32,7 +32,12 @@ from ..metrics import (
 )
 from ..nix import fetch_packages, get_build_args, get_current_system
 from ..volume import prepare_volume
-from .annotations import extract_container_store_paths, parse_nix_rw, parse_store_mounts
+from .annotations import (
+    extract_container_store_paths,
+    parse_nix_exclude,
+    parse_nix_rw,
+    parse_store_mounts,
+)
 from .cleanup import schedule_garbage_collection
 from .mount import kernel_supports_ro, kernel_supports_rw, mount_in_container
 from .zmq import ZeroMQServer
@@ -227,6 +232,16 @@ class NriPlugin(NriPluginBase):
             return
 
         system = get_current_system()
+
+        # Before anything reads the container's environment. A container that
+        # asked to be left alone must not have its store paths extracted, let
+        # alone realised on the node. See `parse_nix_exclude`.
+        if parse_nix_exclude(req.pod.annotations, req.container.name, system):
+            logger.info("injection_excluded")
+            NRI_CONTAINERS_SEEN.labels(result="excluded").inc()
+            resp = nri_pb2.CreateContainerResponse(adjust=nri_pb2.ContainerAdjustment())
+            await stream.send_message(resp)
+            return
 
         store_paths = extract_container_store_paths(req, system)
         if store_paths:
