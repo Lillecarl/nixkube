@@ -8,13 +8,15 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import anyio
+import anyio.abc
 import structlog
-from csi import csi_grpc, csi_pb2
 from grpclib import GRPCError
 from grpclib.const import Status
 from grpclib.server import Server, Stream
 from kr8s import NotFoundError
 from kr8s.asyncio.objects import Pod
+
+from csi import csi_grpc, csi_pb2
 
 from ..cache import schedule_copy_to_cache
 from ..constants import (
@@ -156,9 +158,12 @@ class NodeServicer(csi_grpc.NodeBase):
     # one hangs, and a handler that raises is one kubelet retries.
     volume_locks: ClassVar[defaultdict[str, anyio.Lock]] = defaultdict(anyio.Lock)
 
-    def __init__(self, system: str, plugin_name: str = "nixkube"):
+    def __init__(self, system: str, plugin_name: str, tasks: anyio.abc.TaskGroup):
         self.system = system
         self.plugin_name = plugin_name
+        # Required, and not defaulted to None: a servicer with nowhere to put
+        # a background copy would drop every copy silently.
+        self.tasks = tasks
 
     @csi_error_handler
     async def NodePublishVolume(
@@ -344,7 +349,7 @@ class NodeServicer(csi_grpc.NodeBase):
             await stream.send_message(csi_pb2.NodePublishVolumeResponse())
 
             # Copy all packages to cache in background
-            schedule_copy_to_cache(package_paths)
+            schedule_copy_to_cache(self.tasks, package_paths)
 
     @csi_error_handler
     async def NodeUnpublishVolume(
@@ -476,25 +481,32 @@ async def csi_serve(plugin_name: str | None = None, socket_path: Path | None = N
     socket_path.unlink(missing_ok=True)
 
     identity_servicer = IdentityServicer(plugin_name)
-    # Pod will be fetched and cached on first use via get_nixkube_pod()
-    node_servicer = NodeServicer(get_current_system(), plugin_name)
 
-    server = Server(
-        [
-            identity_servicer,
-            node_servicer,
-        ]
-    )
+    # The group the handlers put their background copies in. Cancelled on the
+    # way out, so a copy dies with the server that started it instead of
+    # outliving a restart.
+    async with anyio.create_task_group() as tasks:
+        # Pod will be fetched and cached on first use via get_nixkube_pod()
+        node_servicer = NodeServicer(get_current_system(), plugin_name, tasks)
 
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.bind(str(socket_path))
-        sock.listen(128)
+        server = Server(
+            [
+                identity_servicer,
+                node_servicer,
+            ]
+        )
 
-        await server.start(sock=sock)
-        logger.info("csi_listening", socket=str(socket_path))
-        await server.wait_closed()
-    except Exception:
-        sock.close()
-        socket_path.unlink(missing_ok=True)
-        raise
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.bind(str(socket_path))
+            sock.listen(128)
+
+            await server.start(sock=sock)
+            logger.info("csi_listening", socket=str(socket_path))
+            await server.wait_closed()
+        except Exception:
+            sock.close()
+            socket_path.unlink(missing_ok=True)
+            raise
+        finally:
+            tasks.cancel_scope.cancel()

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 
-import asyncio
 import json
 import time
 from collections import defaultdict
 from pathlib import Path
 
 import anyio
+import anyio.abc
 import structlog
 
 from .constants import (
@@ -23,6 +23,7 @@ from .metrics import (
     CACHE_REACHABLE,
 )
 from .subprocessing import SubprocessResult, run_captured
+from .supervision import detach
 
 logger = structlog.get_logger("nixkube.cache")
 
@@ -269,15 +270,16 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
         CACHE_COPY_DURATION.observe(time.monotonic() - copy_started)
 
 
-def schedule_copy_to_cache(package_paths: set[Path]) -> None:
-    """Fire-and-forget background task to copy packages to cache."""
+def schedule_copy_to_cache(
+    tasks: anyio.abc.TaskGroup, package_paths: set[Path]
+) -> None:
+    """Copy in the background, so the caller does not wait for the network.
+
+    `tasks` belongs to the server that is handling the request, so the copy
+    dies with that server rather than outliving a restart. A copy that is
+    lost that way is not lost for good: the GC cycle offers the whole store
+    again on its next pass.
+    """
     if not package_paths:
         return
-    task = asyncio.create_task(copy_to_cache(package_paths))
-    task.add_done_callback(
-        lambda t: (
-            logger.error("copy_to_cache_failed", exc_info=t.exception())
-            if t.exception()
-            else None
-        )
-    )
+    detach(tasks, copy_to_cache, package_paths, name="copy_to_cache")

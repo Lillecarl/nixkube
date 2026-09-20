@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: MIT
-import asyncio
 import shutil
 import time
 from functools import wraps
 from pathlib import Path
 from typing import Any
 
+import anyio
+import anyio.abc
 import structlog
 from grpclib_nri import NriPlugin as NriPluginBase
 from grpclib_nri import NriServer
 from kr8s.asyncio.objects import Pod
+
 from nri import nri_pb2
 
 from ..cache import schedule_copy_to_cache
@@ -31,6 +33,7 @@ from ..metrics import (
     NRI_STATE_CHANGES,
 )
 from ..nix import fetch_packages, get_build_args, get_current_system
+from ..supervision import detach
 from ..volume import prepare_volume
 from .annotations import (
     extract_container_store_paths,
@@ -190,12 +193,18 @@ def nri_error_handler(
 class NriPlugin(NriPluginBase):
     """NRI plugin with ZeroMQ build coordination."""
 
-    def __init__(self, zmq_server: ZeroMQServer, cri_socket: Path):
+    def __init__(
+        self,
+        zmq_server: ZeroMQServer,
+        cri_socket: Path,
+        tasks: anyio.abc.TaskGroup,
+    ):
         """Initialize the NRI plugin with ZeroMQ and CRI socket coordination.
 
         Args:
             zmq_server: ZeroMQ server for build task coordination and PID/bundle reporting
             cri_socket: Path to the CRI socket for container introspection
+            tasks: the group the builds and sweeps run in, owned by `nri_serve`
         """
         logger = structlog.get_logger("nixkube.nri.init")
         # Call NirPluginBase init that registers plugin and which events we listen to
@@ -207,6 +216,7 @@ class NriPlugin(NriPluginBase):
         )
         self.zmq_server = zmq_server
         self.cri_socket = cri_socket
+        self.tasks = tasks
         # Find nri-wait binary on PATH (available as nix-csi dependency)
         self.nri_wait_bin = shutil.which("wait")
         logger.debug("nri_wait_resolved", binary=self.nri_wait_bin)
@@ -327,27 +337,17 @@ class NriPlugin(NriPluginBase):
                 if container_id not in self.zmq_server.pending_builds:
                     self.zmq_server.pending_builds.add(container_id)
                     logger.info("build_task_spawning", count=len(store_paths))
-                    # Spawn background task (fire and forget with exception logging)
-                    task = asyncio.create_task(
-                        self._spawn_build_task(
-                            container_id,
-                            req.container.name,
-                            pod,
-                            store_paths,
-                            store_mounts,
-                            nix_rw,
-                        )
+                    detach(
+                        self.tasks,
+                        self._spawn_build_task,
+                        container_id,
+                        req.container.name,
+                        pod,
+                        store_paths,
+                        store_mounts,
+                        nix_rw,
+                        name="nri_build",
                     )
-
-                    def _build_done(t):
-                        if t.cancelled():
-                            logger.warning("build_task_cancelled")
-                        elif t.exception():
-                            logger.error("build_task_failed", exc_info=t.exception())
-                        else:
-                            logger.info("build_task_completed")
-
-                    task.add_done_callback(_build_done)
                 else:
                     logger.warning("build_already_pending")
 
@@ -392,20 +392,21 @@ class NriPlugin(NriPluginBase):
         # Cleanup stale hardlink farm volumes when container is removed
         if event.event == nri_pb2.Event.REMOVE_CONTAINER:
             schedule_garbage_collection(
-                self.cri_socket, removed_id=event.container.id or None
+                self.tasks, self.cri_socket, event.container.id or None
             )
 
         await stream.send_message(nri_pb2.Empty())
 
     async def _pump_build_progress(self, container_id: str) -> None:
-        """Periodically publish build progress heartbeats to reset nri-wait timeout."""
-        logger = structlog.get_logger("nixkube.nri.buildpump")
-        try:
-            while True:
-                await asyncio.sleep(10)
-                await self.zmq_server.publish_build_progress(container_id)
-        except asyncio.CancelledError:
-            logger.debug("progress_pump_cancelled")
+        """Periodically publish build progress heartbeats to reset nri-wait timeout.
+
+        Runs until the group around it is cancelled, which is how the build
+        stops it. The cancellation is not caught: a pump that returned
+        normally would leave that group waiting on nothing.
+        """
+        while True:
+            await anyio.sleep(10)
+            await self.zmq_server.publish_build_progress(container_id)
 
     async def _spawn_build_task(
         self,
@@ -419,12 +420,15 @@ class NriPlugin(NriPluginBase):
         """Realize store paths, link into the volume, then namespace-mount store mounts.
 
         Periodically pumps progress updates to reset nri-wait timeout.
+
+        Reports its own failure and does not re-raise. It runs in the group
+        that holds the NRI server, and one container's build failing is not a
+        reason to take the plugin down.
         """
         log = structlog.get_logger("nixkube.nri.buildtask").bind(
             container_id=container_id
         )
         log.info("build_task_started", count=len(store_paths))
-        pump_task: asyncio.Task | None = None
         started = time.monotonic()
         NRI_BUILDS_IN_FLIGHT.inc()
         try:
@@ -437,48 +441,18 @@ class NriPlugin(NriPluginBase):
                 NRI_BUILDS.labels(result="ok").inc()
                 return
 
-            # Start progress pump to keep nri-wait timeout reset during long builds
-            pump_task = asyncio.create_task(self._pump_build_progress(container_id))
-            log.debug("progress_pump_started")
-
-            # Get extra build args for builders and cache
-            extra_args = await get_build_args()
-
-            # Realize storepaths
-            volume_path = NRI_CONTAINERS / container_id
-            log.debug("fetch_packages_starting", count=len(store_paths))
-            await fetch_packages(store_paths, volume_path, extra_args)
-            log.debug("fetch_packages_done")
-
-            # Hardlink closure into volume (prepare_volume handles closure expansion)
-            await prepare_volume(volume_path, store_paths, None)
-            nix_tree_path = volume_path / "nix"
-
-            # Wait for nri-wait to report PID+bundle (arrives when the createRuntime hook fires).
-            # We need the PID to enter the container's mount namespace and mount /nix + store mounts.
-            log.debug("pid_bundle_waiting")
-            container_info = await self.zmq_server.wait_for_pid(container_id)
-            pid_info = container_info[0] if container_info else None
-            log.debug("pid_bundle_received", pid=pid_info)
-            if container_info is None:
-                raise RuntimeError(
-                    f"No PID/bundle received for container={container_id!r}, cannot mount /nix"
-                )
-            pid, bundle = container_info
-
-            mounts = []
-            if store_mounts:
-                for container_path, store_path in store_mounts.items():
-                    resolved = store_path.resolve()
-                    if not resolved.exists():
-                        raise ValueError(
-                            f"Invalid store path in annotation: {store_path!r} → {container_path!r} "
-                            f"(resolved: {resolved!r} does not exist)"
-                        )
-                    mounts.append((resolved, container_path))
-
-            log.info("namespace_mounting", pid=pid, bundle=bundle, mounts=len(mounts))
-            await mount_in_container(pid, bundle, nix_tree_path, mounts, nix_rw)
+            # The pump keeps nri-wait's timeout reset while the build runs. It
+            # gets a group of its own, cancelled on the way out, so it cannot
+            # outlive the build it reports on however that build ends.
+            async with anyio.create_task_group() as pump:
+                pump.start_soon(self._pump_build_progress, container_id)
+                log.debug("progress_pump_started")
+                try:
+                    await self._build_and_mount(
+                        log, container_id, store_paths, store_mounts, nix_rw
+                    )
+                finally:
+                    pump.cancel_scope.cancel()
 
             log.info("build_task_completed")
             self.zmq_server.build_status[container_id] = {"status": "done"}
@@ -488,7 +462,7 @@ class NriPlugin(NriPluginBase):
             log.info("removed_from_pending")
 
             # Copy all packages to cache in background
-            schedule_copy_to_cache(store_paths)
+            schedule_copy_to_cache(self.tasks, store_paths)
 
             # Report successful build
             await report_event(
@@ -511,17 +485,61 @@ class NriPlugin(NriPluginBase):
                 logs=str(e),
                 event_type="Warning",
             )
-            raise
         finally:
             NRI_BUILDS_IN_FLIGHT.dec()
             NRI_BUILD_DURATION.observe(time.monotonic() - started)
-            # Cancel progress pump if it's still running
-            if pump_task is not None:
-                pump_task.cancel()
-                try:
-                    await pump_task
-                except asyncio.CancelledError:
-                    pass
+
+    async def _build_and_mount(
+        self,
+        log: Any,
+        container_id: str,
+        store_paths: set[Path],
+        store_mounts: dict[Path, Path] | None,
+        nix_rw: bool,
+    ) -> None:
+        """Realize the closure, link it in, then mount it into the namespace.
+
+        Split from `_spawn_build_task` so the progress pump's task group wraps
+        exactly this and nothing else.
+        """
+        # Get extra build args for builders and cache
+        extra_args = await get_build_args()
+
+        # Realize storepaths
+        volume_path = NRI_CONTAINERS / container_id
+        log.debug("fetch_packages_starting", count=len(store_paths))
+        await fetch_packages(store_paths, volume_path, extra_args)
+        log.debug("fetch_packages_done")
+
+        # Hardlink closure into volume (prepare_volume handles closure expansion)
+        await prepare_volume(volume_path, store_paths, None)
+        nix_tree_path = volume_path / "nix"
+
+        # Wait for nri-wait to report PID+bundle (arrives when the createRuntime hook fires).
+        # We need the PID to enter the container's mount namespace and mount /nix + store mounts.
+        log.debug("pid_bundle_waiting")
+        container_info = await self.zmq_server.wait_for_pid(container_id)
+        pid_info = container_info[0] if container_info else None
+        log.debug("pid_bundle_received", pid=pid_info)
+        if container_info is None:
+            raise RuntimeError(
+                f"No PID/bundle received for container={container_id!r}, cannot mount /nix"
+            )
+        pid, bundle = container_info
+
+        mounts = []
+        if store_mounts:
+            for container_path, store_path in store_mounts.items():
+                resolved = store_path.resolve()
+                if not resolved.exists():
+                    raise ValueError(
+                        f"Invalid store path in annotation: {store_path!r} → {container_path!r} "
+                        f"(resolved: {resolved!r} does not exist)"
+                    )
+                mounts.append((resolved, container_path))
+
+        log.info("namespace_mounting", pid=pid, bundle=bundle, mounts=len(mounts))
+        await mount_in_container(pid, bundle, nix_tree_path, mounts, nix_rw)
 
 
 async def nri_serve() -> None:
@@ -563,22 +581,25 @@ async def nri_serve() -> None:
     containers = await list_container_ids(HOST_ROOT / cri_socket.relative_to("/"))
     logger.info("cri_connected", container_count=len(containers))
 
-    # Create plugin instance and NRI server
-    plugin = NriPlugin(zmq_server, cri_socket)
-    server = NriServer(
-        plugin,
-        socket_path=Path(NRI_RUNTIME_SOCKET),
-        plugin_name=NRI_PLUGIN_NAME,
-        plugin_idx=NRI_PLUGIN_IDX,
-    )
+    # One group holds the REP handler and every build and sweep a handler
+    # starts. The `cancel_scope.cancel()` below is what lets it close at all:
+    # the REP handler waits on `recv()` and never returns, so a group that
+    # waited for its children would hang on a clean exit.
+    async with anyio.create_task_group() as tasks:
+        plugin = NriPlugin(zmq_server, cri_socket, tasks)
+        server = NriServer(
+            plugin,
+            socket_path=Path(NRI_RUNTIME_SOCKET),
+            plugin_name=NRI_PLUGIN_NAME,
+            plugin_idx=NRI_PLUGIN_IDX,
+        )
 
-    # Start ZeroMQ handler in background
-    loop = asyncio.get_running_loop()
-    loop.create_task(zmq_server.start_request_handler())
+        tasks.start_soon(zmq_server.start_request_handler, name="zmq-rep")
 
-    try:
-        # Start server (handles reconnection with exponential backoff internally)
-        await server.start()
-    finally:
-        await server.close()
-        zmq_server.shutdown()
+        try:
+            # Start server (handles reconnection with exponential backoff internally)
+            await server.start()
+        finally:
+            await server.close()
+            zmq_server.shutdown()
+            tasks.cancel_scope.cancel()

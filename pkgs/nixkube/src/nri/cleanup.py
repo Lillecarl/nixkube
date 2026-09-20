@@ -1,20 +1,21 @@
 # SPDX-License-Identifier: MIT
 """NRI container cleanup and garbage collection."""
 
-import asyncio
 import shutil
 from pathlib import Path
 
+import anyio.abc
 import structlog
 
 from ..constants import HOST_ROOT, NRI_CONTAINERS
 from ..cri import list_container_ids
+from ..supervision import detach
 
 logger = structlog.get_logger("nixkube.nri.cleanup")
 
 
 def schedule_garbage_collection(
-    cri_socket: Path, removed_id: str | None = None
+    tasks: anyio.abc.TaskGroup, cri_socket: Path, removed_id: str | None = None
 ) -> None:
     """Collect in the background, so the NRI reply does not wait for it.
 
@@ -28,13 +29,12 @@ def schedule_garbage_collection(
     created in that window starts with no /nix, which is the failure this
     plugin exists to prevent.
     """
-    task = asyncio.create_task(garbage_collect_stale_volumes(cri_socket, removed_id))
-    task.add_done_callback(
-        lambda t: (
-            logger.error("gc_task_failed", exc_info=t.exception())
-            if not t.cancelled() and t.exception()
-            else None
-        )
+    detach(
+        tasks,
+        garbage_collect_stale_volumes,
+        cri_socket,
+        removed_id,
+        name="nri_gc",
     )
 
 
