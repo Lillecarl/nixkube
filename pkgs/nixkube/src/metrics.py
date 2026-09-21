@@ -24,6 +24,7 @@ already served. Do not add a gauge for any of them.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from importlib.metadata import PackageNotFoundError, version
@@ -469,6 +470,60 @@ class StoreSpaceCollector:
 
 
 REGISTRY.register(StoreSpaceCollector())
+
+
+# --- appstarter ---
+
+APPSTARTER_STATE = NIX_ROOT / "nix/var/appstarter/state.json"
+"""What `appstarter init` left behind, and the only record of which
+environment this pod actually got. See `AppstarterCollector`."""
+
+
+class AppstarterCollector:
+    """Whether this pod runs what its deployment asks for, or the image's copy.
+
+    `appstarter init` fetches the environment the deployment names, and when
+    that fetch fails it seeds the store from the copy baked into the image
+    instead. That is deliberate -- a node that starts behind beats a node that
+    does not start -- and it is invisible from outside: the pod is Running and
+    every probe passes either way. The two store paths in `state.json` are the
+    only thing that says which happened.
+
+    **Read from the file and on the scrape, not from the environment at
+    import.** `appstarter run` puts both paths in the environment of the
+    container it execs, and only some of these containers are started that way
+    -- the pynixd builder runs its program directly. The store they share
+    answers for all of them.
+
+    **Absent rather than zero when the file cannot be read.** A process that
+    cannot tell must not report "not degraded", which is the one answer that
+    would hide exactly what this exists to show. Alert on `== 1`, and on
+    `absent()` separately if the silence itself matters.
+
+    The paths are deliberately not labels: this module's rule against store
+    paths holds, the bit is what an alert needs, and the paths are in the
+    pod's log and in `APPSTARTER_RUNNING_STORE_PATH`.
+    """
+
+    def collect(self):
+        """Yield the one bit, or nothing when no state was recorded."""
+        try:
+            recorded = json.loads(APPSTARTER_STATE.read_text())
+            wanted, running = recorded["wanted"], recorded["running"]
+        except (OSError, ValueError, KeyError, TypeError):
+            # Deliberately silent. `REGISTRY.register` calls `collect()` once
+            # to check for a duplicate metric name, so anything written here
+            # lands on stdout during import. A scrape every 15 seconds would
+            # then repeat it for ever. The absent series is the signal.
+            return
+        yield GaugeMetricFamily(
+            "nixkube_appstarter_degraded",
+            "1 when this pod runs the environment baked into its image instead of the one the deployment asks for",
+            value=float(wanted != running),
+        )
+
+
+REGISTRY.register(AppstarterCollector())
 
 
 IPV6_ANY = "::"

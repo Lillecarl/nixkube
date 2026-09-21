@@ -295,3 +295,57 @@ class TestServe:
         metrics.serve(port=9099, addr="::")
 
         assert tried == ["::"]
+
+
+class TestAppstarterDegraded:
+    """`AppstarterCollector`, which says whether this pod runs what its
+    deployment asks for.
+
+    The failure it exists for is silent: `appstarter init` seeds the store
+    from the image's own copy when the fetch fails, the pod runs, every probe
+    passes, and the node is behind. Nothing else on the pod says so.
+    """
+
+    def _state(self, tmp_path: Path, wanted: str, running: str) -> None:
+        path = tmp_path / "nix/var/appstarter"
+        path.mkdir(parents=True)
+        (path / "state.json").write_text(
+            f'{{"wanted": "{wanted}", "running": "{running}"}}'
+        )
+
+    def test_the_wanted_environment_reads_zero(self, tmp_path, monkeypatch):
+        self._state(tmp_path, "/nix/store/aaa-node", "/nix/store/aaa-node")
+        monkeypatch.setattr(
+            metrics, "APPSTARTER_STATE", tmp_path / "nix/var/appstarter/state.json"
+        )
+
+        [family] = list(metrics.AppstarterCollector().collect())
+
+        assert family.name == "nixkube_appstarter_degraded"
+        assert family.samples[0].value == 0
+
+    def test_the_image_fallback_reads_one(self, tmp_path, monkeypatch):
+        self._state(tmp_path, "/nix/store/aaa-node", "/nix/store/bbb-older")
+        monkeypatch.setattr(
+            metrics, "APPSTARTER_STATE", tmp_path / "nix/var/appstarter/state.json"
+        )
+
+        [family] = list(metrics.AppstarterCollector().collect())
+
+        assert family.samples[0].value == 1
+
+    def test_no_state_serves_no_series(self, tmp_path, monkeypatch):
+        """Absent, never zero. A process that cannot tell must not answer
+        "not degraded" -- that is the one answer that hides this."""
+        monkeypatch.setattr(metrics, "APPSTARTER_STATE", tmp_path / "absent.json")
+
+        assert list(metrics.AppstarterCollector().collect()) == []
+
+    def test_a_truncated_state_serves_no_series(self, tmp_path, monkeypatch):
+        """`init` writes through a staging file and renames, so this should
+        not happen -- and a crash mid-write must still not read as healthy."""
+        path = tmp_path / "state.json"
+        path.write_text('{"wanted": "/nix/store/aaa-node"')
+        monkeypatch.setattr(metrics, "APPSTARTER_STATE", path)
+
+        assert list(metrics.AppstarterCollector().collect()) == []
