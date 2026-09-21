@@ -500,6 +500,14 @@ class AppstarterCollector:
     would hide exactly what this exists to show. Alert on `== 1`, and on
     `absent()` separately if the silence itself matters.
 
+    **1 is a state, not an event: it cannot clear while the pod lives.**
+    `appstarter init` is an `initContainer`, and a container restart does not
+    re-run one -- a pod killed by its liveness probe comes back onto the same
+    store and reports the same bit. Only a new pod, or a sandbox the kubelet
+    recreates after a node restart, decides it again. So an alert on `== 1`
+    needs no `for:` beyond a scrape or two, will not flap, and stays firing
+    until somebody replaces the pod.
+
     The paths are deliberately not labels: this module's rule against store
     paths holds, the bit is what an alert needs, and the paths are in the
     pod's log and in `APPSTARTER_RUNNING_STORE_PATH`.
