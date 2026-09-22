@@ -18,6 +18,33 @@ _YIELD_EVERY = 256
 """Directory entries between two checkpoints."""
 
 
+def _describe(error: Exception) -> str:
+    """An OSError from `os.link`, with the side that is actually missing named.
+
+    `Path.hardlink_to(target)` calls `os.link(target, self)`, and Python puts
+    the source first in the message whichever side failed. Measured: a link
+    whose *destination directory* is gone reports
+    `'<store path>' -> '<volume path>'`, the same shape as one whose source
+    file is gone. So the message alone cannot tell store corruption from a
+    volume that went away mid-walk, which is the question a reader of this log
+    always has.
+
+    The answer can change between the failure and this call. `exists` is
+    therefore evidence and not proof, which is why both sides are reported
+    rather than one verdict.
+    """
+    if not isinstance(error, OSError) or error.filename is None:
+        return str(error)
+    sides = [f"source {error.filename} exists={os.path.lexists(error.filename)}"]
+    if error.filename2 is not None:
+        parent = os.path.dirname(error.filename2)
+        sides.append(
+            f"target {error.filename2} exists={os.path.lexists(error.filename2)}"
+            f" parent={parent} exists={os.path.lexists(parent)}"
+        )
+    return f"{error}; " + "; ".join(sides)
+
+
 async def _entries(src: Path) -> AsyncIterator[os.DirEntry[str]]:
     """The entries of `src`, giving the event loop a turn as it goes.
 
@@ -92,7 +119,7 @@ async def hardlink_closure(store_paths: set[Path], dst: Path) -> None:
                 HARDLINK_CLOSURES.labels(result="error").inc()
                 raise HardlinkClosureError(
                     f"Failed to hardlink {store_path.name}",
-                    logs=str(e),
+                    logs=_describe(e),
                 ) from e
     except HardlinkClosureError:
         # Re-raise to prevent outer except Exception from double-wrapping
@@ -101,7 +128,7 @@ async def hardlink_closure(store_paths: set[Path], dst: Path) -> None:
         HARDLINK_CLOSURES.labels(result="error").inc()
         raise HardlinkClosureError(
             "Failed to hardlink store paths to volume",
-            logs=str(e),
+            logs=_describe(e),
         ) from e
     else:
         HARDLINK_CLOSURES.labels(result="ok").inc()

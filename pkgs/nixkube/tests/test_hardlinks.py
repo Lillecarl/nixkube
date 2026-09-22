@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -8,7 +9,13 @@ import anyio
 import anyio.lowlevel
 import pytest
 
-from src.hardlinks import _YIELD_EVERY, deref_hardlink_tree, hardlink_tree
+from src.errors import HardlinkClosureError
+from src.hardlinks import (
+    _YIELD_EVERY,
+    deref_hardlink_tree,
+    hardlink_closure,
+    hardlink_tree,
+)
 
 
 class TestHardlinkTree:
@@ -226,3 +233,44 @@ class TestEventLoopStaysAlive:
                 pump.cancel_scope.cancel()
 
         assert ticks > 0, "the walk never gave the loop a turn"
+
+
+class TestWhichSideWasMissing:
+    """A failed link says whether the store path or the volume went away.
+
+    `os.link` names the source first in both directions, so the message on
+    its own reads as store corruption either way. That ambiguity cost two
+    sessions on one incident: a verified closure appeared to lose a file,
+    and the log could not say whether the file or its destination was gone.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_missing_target_does_not_accuse_the_source(self):
+        """The case the incident actually needed telling apart."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src = Path(tmpdir) / "store" / "abc-pkg"
+            src.mkdir(parents=True)
+            (src / "file").write_text("x")
+
+            dst_root = Path(tmpdir) / "vol" / "nix/store"
+
+            real_link = Path.hardlink_to
+
+            def vanishing(self, target):
+                # The volume goes away between the walk and the link, which
+                # is what a teardown racing a CreateContainer handler does.
+                shutil.rmtree(dst_root, ignore_errors=True)
+                return real_link(self, target)
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(Path, "hardlink_to", vanishing)
+                with pytest.raises(HardlinkClosureError) as caught:
+                    await hardlink_closure({src}, dst_root)
+
+        logs = caught.value.logs
+        assert f"source {src / 'file'} exists=True" in logs, (
+            "the store file is still there and the log must say so"
+        )
+        assert "parent" in logs and "exists=False" in logs, (
+            "the missing side is the target's parent directory"
+        )
