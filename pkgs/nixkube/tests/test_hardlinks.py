@@ -245,6 +245,34 @@ class TestWhichSideWasMissing:
     """
 
     @pytest.mark.asyncio
+    async def test_a_store_path_that_is_not_there_fails_the_volume(self):
+        """Not a no-op: silence here gives the container an empty /nix."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gone = Path(tmpdir) / "store" / "abc-gone"
+            dst = Path(tmpdir) / "vol" / "nix/store"
+            with pytest.raises(HardlinkClosureError) as caught:
+                await hardlink_closure({gone}, dst)
+
+        assert f"source {gone} exists=False" in caught.value.logs
+
+    @pytest.mark.asyncio
+    async def test_deref_also_refuses_a_path_that_is_not_there(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gone = Path(tmpdir) / "store" / "abc-gone"
+            with pytest.raises(FileNotFoundError):
+                await deref_hardlink_tree(gone, Path(tmpdir) / "vol")
+
+    @pytest.mark.asyncio
+    async def test_deref_still_copies_a_broken_symlink(self):
+        """The one absent target that is not an error: issue-documented."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src = Path(tmpdir) / "link"
+            src.symlink_to("/nix/store/0000000000000000000000000000000-nope")
+            dst = Path(tmpdir) / "out" / "link"
+            await deref_hardlink_tree(src, dst)
+            assert dst.is_symlink()
+
+    @pytest.mark.asyncio
     async def test_a_missing_target_does_not_accuse_the_source(self):
         """The case the incident actually needed telling apart."""
         with tempfile.TemporaryDirectory() as tmpdir:

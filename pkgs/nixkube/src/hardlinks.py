@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 
+import errno
 import os
 import time
 from collections.abc import AsyncIterator
@@ -93,6 +94,16 @@ async def hardlink_tree(src: Path, dst: Path) -> None:
                 await hardlink_tree(Path(entry.path), dst_path)
             elif entry.is_file(follow_symlinks=False):
                 dst_path.hardlink_to(entry.path)
+    else:
+        # Not a symlink, not a file, not a directory: `src` is not there.
+        #
+        # Falling through silently gave the container an empty /nix and no
+        # error anywhere, so the failure surfaced later as whatever the
+        # application does without its closure. `prepare_volume` passes the
+        # output of `nix path-info --recursive`, so a path that has gone
+        # missing since means the node store lost it under us -- which is
+        # worth failing the container create over, not papering past.
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(src))
 
 
 async def hardlink_closure(store_paths: set[Path], dst: Path) -> None:
@@ -179,3 +190,7 @@ async def deref_hardlink_tree(src: Path, dst: Path) -> None:
         dst.mkdir(parents=True, exist_ok=True)
         async for entry in _entries(src):
             await deref_hardlink_tree(Path(entry.path), dst / entry.name)
+    else:
+        # `src` is not there. A broken symlink is handled above and copied as
+        # it is, so reaching here means the path itself is absent.
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(src))
