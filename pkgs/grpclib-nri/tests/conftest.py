@@ -53,6 +53,11 @@ async def test_server_process(
     """Start the Go NRI test server and yield the process.
 
     Waits for the server to be ready by checking if the socket exists.
+
+    A server that does not come up is a failure, never a skip. The binary is
+    a store path the derivation names, so there is no environment in which it
+    is legitimately absent. `test_nri_server_lifecycle` starts its own copy
+    and already calls `pytest.fail` for the same two cases.
     """
     logger = structlog.get_logger("test.server_process")
     logger.info("starting_test_server", path=str(test_server_bin))
@@ -81,12 +86,15 @@ async def test_server_process(
                 stdout=stdout.decode(),
                 stderr=stderr.decode(),
             )
-            pytest.skip("Test server failed to start")
+            pytest.fail(
+                f"Test server exited prematurely (code {proc.returncode})\n"
+                f"stdout: {stdout.decode()}\nstderr: {stderr.decode()}"
+            )
         await asyncio.sleep(0.1)
     else:
         proc.terminate()
         await proc.wait()
-        pytest.skip("Test server did not create socket in time")
+        pytest.fail(f"Test server did not create {socket_path} within 5s")
 
     yield proc
 
