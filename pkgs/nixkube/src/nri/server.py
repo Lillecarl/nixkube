@@ -489,6 +489,14 @@ class NriPlugin(NriPluginBase):
                 event_type="Warning",
             )
         finally:
+            # Here and not only in the two paths above. `pending_builds` is
+            # what the volume sweep reads to decide a build is still filling
+            # a directory (issue #64), and a cancelled task leaves neither
+            # of those paths: `CancelledError` is a BaseException, so
+            # `except Exception` does not see it. An id left behind would
+            # pin that container's farm against both collection rules for
+            # the life of the process.
+            self.zmq_server.pending_builds.discard(container_id)
             NRI_BUILDS_IN_FLIGHT.dec()
             NRI_BUILD_DURATION.observe(time.monotonic() - started)
 
