@@ -4,7 +4,13 @@
 import logging
 import os
 import subprocess
+import sys
+from collections import deque
 from pathlib import Path
+
+# How much of a failing fetch's stderr `StoreError` carries. The whole of it
+# is already in the log; this is for a caller that only sees the exception.
+_TAIL_LINES = 20
 
 log = logging.getLogger("appstarter.store")
 
@@ -17,6 +23,23 @@ log = logging.getLogger("appstarter.store")
 # path of the node's own store.
 LOCAL_STORE = "local"
 
+# How long a fetch may run before the image's fallback is used instead.
+#
+# **`nix build` does not fail fast when a substituter cannot be reached.** It
+# sits on the connect and retries, and `subprocess.run` with no timeout waits
+# for as long as that takes. Seen on nixlab2, which is IPv6-only: an init
+# container logged `fetching <cacheEnv> (pynixd: disabled)` and printed
+# nothing for the next thirteen minutes, so the Pod stayed in `Init:0/1` and
+# the fallback that exists for exactly this case never ran. `seed.run`
+# catches `StoreError` and seeds from the image; with no bound here there was
+# no `StoreError` to catch.
+#
+# Ten minutes, because a real cold fetch of a cache environment over a slow
+# link is minutes and seeding from the image instead is a downgrade -- that
+# node then runs behind until the next start. Settable, because how long is
+# too long is a property of the link and not of this code.
+BUILD_TIMEOUT = float(os.environ.get("APPSTARTER_BUILD_TIMEOUT", "600"))
+
 
 class StoreError(RuntimeError):
     """A Nix operation failed, or left the store incomplete."""
@@ -26,6 +49,47 @@ def _run(*args: str, timeout: float | None = None) -> subprocess.CompletedProces
     log.debug("running %s", " ".join(args))
     return subprocess.run(
         args, capture_output=True, text=True, check=False, timeout=timeout
+    )
+
+
+def _run_streaming(
+    *args: str, timeout: float | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run *args*, copying its stderr to ours as it arrives, and keeping it.
+
+    **Capturing hides a fetch completely.** Nix writes its progress and its
+    diagnosis to stderr, so capturing means the only thing anyone sees is
+    what this module logs afterwards -- a fetch that takes a long time, or
+    never returns, is one line and then silence. An init container that sat
+    for 22 minutes on nixlab2 printed exactly one line, and the reason it
+    was failing never left the process:
+
+        warning: ignoring substitute for '...-cacheEnv' from
+        'https://nixkube.cachix.org', as it's not signed by any of the keys
+        in 'trusted-public-keys'
+
+    Both, and not one: the log is what someone watching a Pod reads, and the
+    tail is what `StoreError` carries to a caller that never saw the log.
+    `_TAIL_LINES` is a bound, because a failing fetch can write a lot.
+    """
+    log.debug("running %s", " ".join(args))
+    tail: deque[str] = deque(maxlen=_TAIL_LINES)
+    with subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    ) as proc:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            sys.stderr.write(line)
+            tail.append(line)
+        sys.stderr.flush()
+        try:
+            stdout, _ = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise
+    return subprocess.CompletedProcess(
+        args, proc.returncode, stdout or "", "".join(tail)
     )
 
 
@@ -48,7 +112,20 @@ def build(target: str, into: Path, substituters: list[str], out_link: Path) -> N
     replaces a symlink by renaming over it, so a restart part way through this
     reads the previous version rather than half of this one.
     """
-    result = _run(
+    try:
+        result = _build(target, into, substituters, out_link)
+    except subprocess.TimeoutExpired:
+        raise StoreError(
+            f"cannot get {target}: nothing answered within {BUILD_TIMEOUT:.0f}s"
+        ) from None
+    if result.returncode != 0:
+        raise StoreError(f"cannot get {target}: {result.stderr.strip()}")
+
+
+def _build(
+    target: str, into: Path, substituters: list[str], out_link: Path
+) -> subprocess.CompletedProcess[str]:
+    return _run_streaming(
         "nix",
         "build",
         "--extra-substituters",
@@ -70,9 +147,8 @@ def build(target: str, into: Path, substituters: list[str], out_link: Path) -> N
         # does not start.
         "--fallback",
         target,
+        timeout=BUILD_TIMEOUT,
     )
-    if result.returncode != 0:
-        raise StoreError(f"cannot get {target}: {result.stderr.strip()}")
 
 
 def copy(target: str, into: Path, out_link: Path) -> None:

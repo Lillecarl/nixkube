@@ -54,10 +54,34 @@ def test_verify_accepts_a_dangling_symlink(tmp_path, monkeypatch):
 
 
 def test_build_reports_what_nix_said(tmp_path, monkeypatch):
+    """`_run_streaming`, because a fetch shows its stderr as it arrives.
+
+    The message still carries what nix said -- that is what a caller which
+    never saw the log has to go on.
+    """
     monkeypatch.setattr(
-        store, "_run", lambda *a, **k: _completed(1, stderr="no substituter\n")
+        store,
+        "_run_streaming",
+        lambda *a, **k: _completed(1, stderr="no substituter\n"),
     )
     with pytest.raises(store.StoreError, match="no substituter"):
+        store.build("/nix/store/aaa", tmp_path, ["local"], tmp_path / "result")
+
+
+def test_build_falls_back_when_nothing_answers_in_time(tmp_path, monkeypatch):
+    """A fetch that never returns has to become a `StoreError`, not a hang.
+
+    `seed.run` seeds from the image when `build` raises. With no bound on
+    the subprocess there was nothing to raise, so an init container sat in
+    `Init:0/1` for as long as anyone left it -- 22 minutes on nixlab2 --
+    and the fallback that exists for exactly this never ran.
+    """
+
+    def never_returns(*_a, **_k):
+        raise subprocess.TimeoutExpired(cmd="nix", timeout=store.BUILD_TIMEOUT)
+
+    monkeypatch.setattr(store, "_run_streaming", never_returns)
+    with pytest.raises(store.StoreError, match="nothing answered within"):
         store.build("/nix/store/aaa", tmp_path, ["local"], tmp_path / "result")
 
 
