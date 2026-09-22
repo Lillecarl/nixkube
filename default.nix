@@ -957,6 +957,12 @@ rec {
       inherit pkgs lib;
       manifests = kubenixCI2.manifestYAMLFile;
     };
+
+    # Not a cluster, and not in `checks.all`: it boots a VM for one
+    # question, which is whether `nix build` works inside a store made of
+    # bind mounts. Issue #65 rests on the answer, and nothing short of real
+    # root can ask it.
+    bind-farm = import ./tests/nixos/bind-farm.nix { inherit pkgs lib; };
   };
 
   treefmt = (import sources.treefmt-nix).mkWrapper pkgs {
