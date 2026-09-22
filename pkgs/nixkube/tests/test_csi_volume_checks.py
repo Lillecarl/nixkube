@@ -249,7 +249,13 @@ class TestCheckCsiVolumeMounts:
 
     @pytest.mark.asyncio
     async def test_events_are_warnings(self):
-        """All emitted events have event_type='Warning'."""
+        """All emitted events have event_type='Warning'.
+
+        This mount is missing its subPath and is not at /nix, so it is worth
+        two events. Counting them first is the point: a loop over an empty
+        call list asserts nothing, so a check that stopped reporting would
+        pass here.
+        """
         pod = make_pod(
             {
                 "containers": [
@@ -260,5 +266,6 @@ class TestCheckCsiVolumeMounts:
         )
         with patch("src.csi.server.report_event", new_callable=AsyncMock) as mock_event:
             await check_csi_volume_mounts(pod)
+            assert len(mock_event.call_args_list) == 2
             for c in mock_event.call_args_list:
                 assert c.kwargs["event_type"] == "Warning"
