@@ -392,7 +392,10 @@ class NriPlugin(NriPluginBase):
         # Cleanup stale hardlink farm volumes when container is removed
         if event.event == nri_pb2.Event.REMOVE_CONTAINER:
             schedule_garbage_collection(
-                self.tasks, self.cri_socket, event.container.id or None
+                self.tasks,
+                self.cri_socket,
+                event.container.id or None,
+                self.zmq_server.pending_builds,
             )
 
         await stream.send_message(nri_pb2.Empty())

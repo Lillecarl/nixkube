@@ -2,6 +2,7 @@
 """NRI container cleanup and garbage collection."""
 
 import shutil
+from collections.abc import Container
 from pathlib import Path
 
 import anyio.abc
@@ -15,7 +16,10 @@ logger = structlog.get_logger("nixkube.nri.cleanup")
 
 
 def schedule_garbage_collection(
-    tasks: anyio.abc.TaskGroup, cri_socket: Path, removed_id: str | None = None
+    tasks: anyio.abc.TaskGroup,
+    cri_socket: Path,
+    removed_id: str | None = None,
+    building: Container[str] = frozenset(),
 ) -> None:
     """Collect in the background, so the NRI reply does not wait for it.
 
@@ -34,12 +38,15 @@ def schedule_garbage_collection(
         garbage_collect_stale_volumes,
         cri_socket,
         removed_id,
+        building,
         name="nri_gc",
     )
 
 
 async def garbage_collect_stale_volumes(
-    cri_socket: Path, removed_id: str | None = None
+    cri_socket: Path,
+    removed_id: str | None = None,
+    building: Container[str] = frozenset(),
 ) -> None:
     """Remove volumes for containers no longer in CRI.
 
@@ -57,11 +64,27 @@ async def garbage_collect_stale_volumes(
     The CRI comparison stays, as the backstop it always was -- it is what
     collects directories left behind by a crash or an abrupt shutdown,
     where no REMOVE_CONTAINER arrives at all.
+
+    ``building`` holds the containers whose build task is still filling a
+    volume, and neither rule touches one of those. A build walks its closure
+    with a checkpoint every 256 entries, so on a large closure it is minutes
+    long and interleaved with everything else on the loop -- including this
+    sweep. Removing underneath it deleted the destination mid-link, and the
+    resulting `FileNotFoundError` names the *source* store path, so it read
+    as a corrupt store rather than as a race (issue #64). It is read here
+    and not at schedule time because a build may start after the sweep is
+    queued.
+
+    A skipped directory is not leaked for long: the container is gone from
+    the CRI, so the next sweep collects it. On an idle node with nothing
+    else being removed it waits, which is the lesser of the two faults.
     """
     if removed_id:
         volume_dir = NRI_CONTAINERS / removed_id
         try:
-            if volume_dir.is_dir():
+            if removed_id in building:
+                logger.info("gc_skipped_building", volume=removed_id)
+            elif volume_dir.is_dir():
                 shutil.rmtree(volume_dir)
                 logger.debug("gc_removed_volume", volume=removed_id)
         except Exception:
@@ -78,6 +101,8 @@ async def garbage_collect_stale_volumes(
         if NRI_CONTAINERS.exists():
             stale_count = 0
             for volume_dir in NRI_CONTAINERS.iterdir():
+                if volume_dir.name in building:
+                    continue
                 if volume_dir.is_dir() and volume_dir.name not in active_ids:
                     try:
                         shutil.rmtree(volume_dir)
