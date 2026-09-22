@@ -20,7 +20,7 @@ import os
 import subprocess
 import tempfile
 
-from uml_runner import run_test
+from uml_runner import Machine, Machines, run_test
 from uml_runner.cluster import (
     KUBE_DNS,
     KUBE_PROXY,
@@ -37,7 +37,7 @@ from uml_runner.cluster import (
 INSECURE = True
 
 
-async def host_kubeconfig(cp) -> str:
+async def host_kubeconfig(cp: Machine) -> str:
     """The guest's admin kubeconfig, pointed at where the host can reach it.
 
     Rewritten by the guest's own kubectl rather than by parsing YAML here:
@@ -99,7 +99,7 @@ def run(script: str, kubeconfig: str, *args: str) -> None:
         )
 
 
-async def test(vms):
+async def test(vms: Machines) -> None:
     settings = vms.settings
     cp = await bring_up(vms, nix_images=False, addons=(KUBE_PROXY, KUBE_DNS))
 
