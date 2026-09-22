@@ -115,8 +115,3 @@ async def test_server_process(
             logger.warning("server_terminate_timeout")
             proc.kill()
             await proc.wait()
-
-
-@pytest_asyncio.fixture
-async def loop():
-    return asyncio.get_running_loop()
