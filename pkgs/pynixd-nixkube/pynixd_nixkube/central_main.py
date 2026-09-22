@@ -8,7 +8,7 @@ import structlog
 from pynixd.config import LocalSocketStoreSpec, PynixdSettings
 from pynixd.instance import Server
 from pynixd.serde import StoreId
-from pynixd.store import LocalSocketStore, Store
+from pynixd.store import Store
 
 from .builder_manager import BuilderManager
 from .config import NixkubeCentralSettings
@@ -23,14 +23,16 @@ async def _main() -> None:
     log.info("pynixd_nixkube_central_starting")
     install_nss()
 
-    local_store = LocalSocketStore(
-        LocalSocketStoreSpec(
-            store_id=StoreId("local"),
-            store_path=Path("/data"),
-            use_db=False,
-            monitor=False,
-        )
-    )
+    # `spec.to_store`, not `LocalSocketStore(spec)`. That name is a legacy
+    # re-export of `LocalStore`, so naming the class here picks the store
+    # without the SQLite fast paths and makes `use_db` inert -- the argument
+    # was read by nothing. Every pod logged `local_store_db_disabled` and
+    # answered every QueryValidPaths over the daemon socket.
+    local_store = LocalSocketStoreSpec(
+        store_id=StoreId("local"),
+        store_path=Path("/data"),
+        monitor=False,
+    ).to_store(str(StoreId("local")))
 
     pynixd_settings = PynixdSettings()
     settings = NixkubeCentralSettings()

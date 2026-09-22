@@ -7,7 +7,6 @@ import structlog
 from pynixd.config import LocalSocketStoreSpec, PynixdSettings
 from pynixd.instance import Server
 from pynixd.serde import StoreId
-from pynixd.store import LocalSocketStore
 
 from .setup import configure_logging, install_nss
 from .ssh_keys import watch_authorized_keys
@@ -20,14 +19,12 @@ async def _main():
     log.info("pynixd_nixkube_starting")
     install_nss()
 
-    local_store = LocalSocketStore(
-        LocalSocketStoreSpec(
-            store_id=StoreId("local"),
-            store_path=Path("/"),
-            use_db=False,
-            monitor=False,
-        )
-    )
+    # `spec.to_store`, not `LocalSocketStore(spec)`. See central_main.py.
+    local_store = LocalSocketStoreSpec(
+        store_id=StoreId("local"),
+        store_path=Path("/"),
+        monitor=False,
+    ).to_store(str(StoreId("local")))
 
     settings = PynixdSettings()
 
