@@ -14,6 +14,27 @@ from grpclib_nri import NriServer
 
 from .dummy_plugin import DummyPlugin
 
+# How long the RegisterPlugin -> Configure round trip may take, and how often
+# to look. The handshake is two frames over a local Unix socket; the budget is
+# for a loaded runner, not for the protocol.
+HANDSHAKE_TIMEOUT = 10.0
+_POLL = 0.02
+
+
+async def await_configure(plugin: DummyPlugin) -> bool:
+    """Wait until the runtime has called the plugin's Configure handler.
+
+    The runtime calls Configure only after RegisterPlugin succeeds, so this
+    flag is the first observable that says the connection is usable. Waiting
+    for it beats sleeping: a sleep is slow when the handshake is fast, and
+    silent when it never happens.
+    """
+    for _ in range(int(HANDSHAKE_TIMEOUT / _POLL)):
+        if plugin.configure_called:
+            return True
+        await asyncio.sleep(_POLL)
+    return False
+
 
 @pytest.fixture(scope="session")
 def test_server_bin() -> Path:
@@ -134,8 +155,10 @@ async def nri_server(
     # Start server in background task
     server_task = asyncio.create_task(server.start())
 
-    # Give the server time to connect and complete handshake
-    await asyncio.sleep(2.0)
+    if not await await_configure(plugin):
+        await server.close()
+        pytest.fail(f"the runtime never called Configure within {HANDSHAKE_TIMEOUT}s")
+    logger.info("handshake_done")
 
     try:
         yield server
@@ -148,9 +171,3 @@ async def nri_server(
             await asyncio.wait_for(server_task, timeout=2)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             logger.warning("server_task_exit_timeout")
-
-
-@pytest.fixture
-def anyio_backend():
-    """Configure pytest-asyncio to use asyncio backend."""
-    return "asyncio"

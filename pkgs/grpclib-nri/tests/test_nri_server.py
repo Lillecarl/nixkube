@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: MIT
-"""Integration tests for grpclib-nri NRI protocol implementation.
+"""Integration tests for grpclib-nri against the Go test server.
 
-Tests the NriServer against the Go test server to verify:
-- RegisterPlugin handshake
-- Plugin lifecycle (Configure, Synchronize)
-- CreateContainer hook invocation
+What is covered: the RegisterPlugin handshake, through to the runtime
+calling Configure, and a clean start/close of `NriServer`.
+
+What is not: Synchronize, CreateContainer and the rest of the plugin
+lifecycle. `DummyPlugin` implements them, but the Go stub closes the
+connection once Configure answers, so nothing here can reach them.
 """
 
 import asyncio
@@ -13,22 +15,8 @@ import pytest
 import structlog
 from grpclib_nri import NriServer
 
+from .conftest import HANDSHAKE_TIMEOUT, await_configure
 from .dummy_plugin import DummyPlugin
-
-
-@pytest.mark.asyncio
-async def test_nri_handshake(nri_server: NriServer) -> None:
-    """Test that the NRI RegisterPlugin handshake completes successfully."""
-    logger = structlog.get_logger("test.nri_handshake")
-
-    # Server should be running and have completed registration
-    logger.info("checking_nri_server")
-
-    # Give it a moment to complete the registration handshake
-    await asyncio.sleep(1.0)
-
-    assert nri_server is not None
-    logger.info("nri_handshake_ok")
 
 
 @pytest.mark.asyncio
@@ -49,19 +37,6 @@ async def test_plugin_configure_called(nri_server: NriServer) -> None:
 
 
 @pytest.mark.asyncio
-async def test_plugin_survives_registration(nri_server: NriServer) -> None:
-    """Test that plugin survives the full registration handshake without errors."""
-    logger = structlog.get_logger("test.plugin_survives")
-
-    plugin = nri_server.plugin
-    assert isinstance(plugin, DummyPlugin)
-
-    # If we got here, the plugin completed at least Configure without errors
-    logger.info("plugin_survived_registration")
-    assert plugin.configure_called
-
-
-@pytest.mark.asyncio
 async def test_nri_server_lifecycle(
     test_server_bin,
     socket_path,
@@ -69,9 +44,7 @@ async def test_nri_server_lifecycle(
     """Test that NriServer can be started and stopped cleanly."""
     logger = structlog.get_logger("test.nri_lifecycle")
 
-    # Start a fresh test server
-    import asyncio
-
+    # A fresh test server, not the fixture's: this test owns the close.
     proc = await asyncio.create_subprocess_exec(
         str(test_server_bin),
         "-socket",
@@ -111,8 +84,10 @@ async def test_nri_server_lifecycle(
     logger.info("starting_server")
     server_task = asyncio.create_task(server.start())
 
-    # Let it run and complete handshake
-    await asyncio.sleep(2.0)
+    # Close only after the handshake really finished. Closing mid-handshake
+    # tests a different thing, and a sleep decides which one at random.
+    if not await await_configure(plugin):
+        pytest.fail(f"no Configure within {HANDSHAKE_TIMEOUT}s")
 
     # Close it
     logger.info("closing_server")
