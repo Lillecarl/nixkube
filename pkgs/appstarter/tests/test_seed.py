@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 
+import logging
+
 import pytest
 from appstarter import config, seed, store
 
@@ -87,6 +89,44 @@ def test_an_unreachable_pynixd_is_retried(tmp_path, monkeypatch):
 
     seed.run("/nix/store/wanted", "/nix/store/image", tmp_path)
     assert attempts == seed._MAX_ATTEMPTS
+
+
+def _held(caplog) -> list[str]:
+    """Every "store holds" line `seed.run` logged, rendered."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("store holds")
+    ]
+
+
+def test_the_two_store_holds_lines_stay_distinguishable(tmp_path, monkeypatch, caplog):
+    """`nix/uml/test.py` reads these out of the initContainer's log.
+
+    Both outcomes log "store holds", so the successful line is a prefix of
+    the degraded one. `FALLBACK_MARK` there is the only substring that tells
+    them apart, and this repeats it: a reworded message fails here rather
+    than quietly stopping that test from catching a fallback.
+    """
+    fallback_mark = ", and the deployment asks for "
+    monkeypatch.setenv("PYNIXD_ENABLED", "false")
+    monkeypatch.setattr(store, "copy", lambda *_args: None)
+    caplog.set_level(logging.INFO, logger="appstarter.init")
+
+    monkeypatch.setattr(store, "build", lambda *_args: None)
+    seed.run("/nix/store/wanted", "/nix/store/image", tmp_path)
+    assert _held(caplog) == ["store holds /nix/store/wanted"]
+
+    caplog.clear()
+
+    def refuse(*_args):
+        raise store.StoreError("no substituter that can build it")
+
+    monkeypatch.setattr(store, "build", refuse)
+    seed.run("/nix/store/wanted", "/nix/store/image", tmp_path)
+    assert _held(caplog) == [
+        f"store holds /nix/store/image{fallback_mark}/nix/store/wanted"
+    ]
 
 
 def test_a_retry_that_succeeds_stops_retrying(tmp_path, monkeypatch):

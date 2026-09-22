@@ -18,6 +18,11 @@ NAMESPACE = "nixkube"
 DAEMONSET = "nix-node"
 STATEFULSET = "pynixd"
 
+# What `appstarter/seed.py` adds to "store holds X" when the fetch failed and
+# it seeded from the image instead. The successful line is a prefix of the
+# fallback line, so only this substring tells the two apart.
+FALLBACK_MARK = ", and the deployment asks for "
+
 # The jobs ./workloads.nix adds, by name.
 WORKLOADS = ("csi-path", "csi-shared")
 
@@ -167,6 +172,17 @@ async def wait_for_pynixd(cp: Machine) -> None:
     if "store holds" not in logs:
         raise MachineError(
             f"[cp] pynixd started, and appstarter-init never said what it holds:\n{logs}"
+        )
+    # `appstarter/seed.py` writes "store holds X" when the fetch worked and
+    # "store holds X, and the deployment asks for Y" when it fell back to the
+    # image. Both carry "store holds", so the check above passes on the
+    # fallback -- the one outcome this test exists to catch. Measured on
+    # nixlab2 2026-09-22 against an unfetchable path: the pod reached 1/1
+    # Running with exit 0 from the initContainer.
+    if FALLBACK_MARK in logs:
+        raise MachineError(
+            f"[cp] appstarter-init fell back to the image instead of fetching"
+            f" what the deployment asks for:\n{logs}"
         )
 
 
