@@ -3,7 +3,9 @@
 
 import asyncio
 import os
+import shutil
 import sys
+import tempfile
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
@@ -37,21 +39,17 @@ def socket_path() -> Generator[Path, None, None]:
 
     Uses /tmp to avoid "AF_UNIX path too long" error when running in Nix build
     (pytest's tmp_path is too deep in the Nix store, exceeding 108-byte limit).
+
+    A directory per test, because one path per process is not unique: every
+    test bound the same name, so a Go server still exiting from the previous
+    test owned the socket the next one connected to. Same shape as
+    grpclib-nri's fixture.
     """
-    path = Path(f"/tmp/ttrpc_{os.getpid()}.sock")
-    # Clean up any stale socket file from previous runs
+    tmp_dir = Path(tempfile.mkdtemp(prefix="ttrpc", dir="/tmp"))
     try:
-        if path.exists():
-            path.unlink()
-    except OSError:
-        pass
-    yield path
-    # Clean up after the test
-    try:
-        if path.exists():
-            path.unlink()
-    except OSError:
-        pass
+        yield tmp_dir / "s"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @pytest_asyncio.fixture
