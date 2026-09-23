@@ -48,6 +48,30 @@ class TestBudgetArithmetic:
         assert Budget(used=0, limit=0, needed=1).ratio == 1.0
 
 
+class TestAffordable:
+    """Fitting and being affordable are different questions.
+
+    A farm that exactly fills the mount table works, and then nothing else on
+    the node can mount anything. The fallback threshold is what keeps the last
+    tenth for everyone else.
+    """
+
+    def test_plenty_of_room_is_affordable(self):
+        assert Budget(used=10, limit=100, needed=50).affordable
+
+    def test_a_request_that_fits_but_leaves_no_headroom_is_not(self):
+        """The case the whole policy turns on: it fits, and it must not run."""
+        budget = Budget(used=10, limit=100, needed=85)
+        assert budget.fits, "95 of 100 does fit"
+        assert not budget.affordable, "and would leave the node 5 mounts"
+
+    def test_exactly_at_the_threshold_is_not_affordable(self):
+        assert not Budget(used=0, limit=100, needed=90).affordable
+
+    def test_just_under_the_threshold_is(self):
+        assert Budget(used=0, limit=100, needed=89).affordable
+
+
 class TestMeasure:
     """`capture_logs`, not `caplog`: these are structlog's loggers, and
     nothing in this project routes them through the stdlib handler `caplog`
@@ -71,19 +95,23 @@ class TestMeasure:
         assert said, f"stayed quiet about a farm that cannot be built: {logs}"
         assert said[0]["log_level"] == "error"
 
-    def test_approaching_the_limit_is_loud_before_it_fails(self, tmp_path, limit):
-        """The point of the whole module: complain while it still works.
+    def test_a_request_that_fits_but_takes_the_headroom_is_refused_loudly(
+        self, tmp_path, limit
+    ):
+        """The fallback case, which is silent otherwise.
 
-        7500 held plus 2443 wanted is 99% of 10,000 -- it fits, and the next
-        container will not.
+        7500 held plus 2443 wanted is 99% of 10,000. It fits. Taking it leaves
+        the node 57 mounts, and the volume that gets a hardlink tree instead
+        is merely slower -- nothing about it says why.
         """
         limit(10_000)
         with capture_logs() as logs:
             budget = measure(2443, mountinfo=_mountinfo(tmp_path, 7500))
 
-        assert budget.fits, "this request still fits; that is what makes it a warning"
-        said = [entry for entry in logs if entry["event"] == "mount_budget_low"]
-        assert said, f"said nothing while the table filled: {logs}"
+        assert budget.fits, "it fits; that is what makes the refusal a policy"
+        assert not budget.affordable
+        said = [entry for entry in logs if entry["event"] == "mount_budget_exhausted"]
+        assert said, f"fell back to hardlinks without saying so: {logs}"
         assert said[0]["log_level"] == "error"
 
     def test_the_numbers_reach_the_log(self, tmp_path, limit):
@@ -111,3 +139,76 @@ class TestItNeverTakesTheCallerDown:
             mountbudget, "MOUNT_MAX_PATH", Path("/nonexistent/mount-max")
         )
         assert mountbudget.mount_limit() == 100_000
+
+
+class TestTheVolumeFallsBackRatherThanFailing:
+    """A farm the node cannot afford must cost one volume time, not a container.
+
+    Refusing outright was the first shape of this and it was worse: the pod
+    does not start at all, for a reason that is about the node rather than
+    about the pod.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_unaffordable_farm_becomes_a_hardlink_tree(
+        self, tmp_path, monkeypatch
+    ):
+        from src import volume as volume_module
+
+        linked: list[set[Path]] = []
+
+        async def closure(paths):
+            return {Path(f"/nix/store/{n:032d}-p") for n in range(3)}
+
+        async def link(store_paths, dst):
+            linked.append(set(store_paths))
+
+        async def nothing(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(volume_module, "get_closure_paths", closure)
+        monkeypatch.setattr(volume_module, "hardlink_closure", link)
+        monkeypatch.setattr(volume_module, "init_database", nothing)
+        monkeypatch.setattr(volume_module, "install_gcroots", nothing)
+        monkeypatch.setattr(volume_module, "affordable", lambda _needed: False)
+
+        with capture_logs() as logs:
+            prepared = await volume_module.prepare_volume(
+                tmp_path / "vol", {Path("/nix/store/aaa-pkg")}, None, bind_farm=True
+            )
+
+        assert prepared.bind_farm is False, "asked for a farm it could not afford"
+        assert linked, "fell back and then linked nothing"
+        said = [e for e in logs if e["event"] == "farm_fell_back_to_hardlinks"]
+        assert said and said[0]["log_level"] == "error", (
+            f"fell back without saying so: {logs}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_affordable_farm_copies_nothing(self, tmp_path, monkeypatch):
+        from src import volume as volume_module
+
+        linked: list[set[Path]] = []
+
+        async def closure(paths):
+            return {Path("/nix/store/aaa-pkg")}
+
+        async def link(store_paths, dst):
+            linked.append(set(store_paths))
+
+        async def nothing(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(volume_module, "get_closure_paths", closure)
+        monkeypatch.setattr(volume_module, "hardlink_closure", link)
+        monkeypatch.setattr(volume_module, "init_database", nothing)
+        monkeypatch.setattr(volume_module, "install_gcroots", nothing)
+        monkeypatch.setattr(volume_module, "affordable", lambda _needed: True)
+
+        prepared = await volume_module.prepare_volume(
+            tmp_path / "vol", {Path("/nix/store/aaa-pkg")}, None, bind_farm=True
+        )
+
+        assert prepared.bind_farm is True
+        assert not linked, "a farm must not link anything"
+        assert prepared.paths == [Path("/nix/store/aaa-pkg")]

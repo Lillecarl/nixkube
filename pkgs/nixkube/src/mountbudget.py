@@ -7,12 +7,19 @@ spends one per closure path -- 2443 for a measured node closure -- so the
 question "will the next container fit" has a number, and a node that is
 running out should say so long before a mount fails.
 
-The mounts a farm makes live in the worker's own namespace, which starts as a
-copy of the daemon's and dies with the worker. So the daemon's count is what
-the worker inherits, and predicting from here is predicting the right thing.
+**The two injection paths spend this budget differently.** An NRI farm is
+built in the mount worker, whose namespace is a copy of the daemon's and dies
+with it, so nothing accumulates: each container pays for its own closure and
+gives it back. A CSI farm would have to live in the host namespace from
+publish to unpublish, because at `NodePublishVolume` there is no container
+yet to put it in -- so that one accumulates, and it is the one that needs a
+fallback.
 
-A mount that fails for want of budget answers ENOSPC from mount(2), with
-nothing to say which limit it was. That is the error this exists to replace.
+`affordable` is that policy. Past `MOUNT_BUDGET_FALLBACK_RATIO` a volume
+takes a hardlink tree instead, which costs it time and disk rather than
+costing the *next* container its start. A mount that fails for want of budget
+answers ENOSPC from mount(2) with nothing to say which limit it meant,
+partway through a closure -- that is the failure this exists to prevent.
 """
 
 from dataclasses import dataclass
@@ -20,8 +27,8 @@ from pathlib import Path
 
 import structlog
 
-from .constants import MOUNT_BUDGET_WARN_RATIO
-from .metrics import MOUNT_BUDGET_REFUSALS, MOUNT_NAMESPACE_LIMIT, MOUNT_NAMESPACE_USED
+from .constants import MOUNT_BUDGET_FALLBACK_RATIO
+from .metrics import MOUNT_BUDGET_FALLBACKS, MOUNT_NAMESPACE_LIMIT, MOUNT_NAMESPACE_USED
 
 logger = structlog.get_logger("nixkube.mountbudget")
 
@@ -55,6 +62,15 @@ class Budget:
             return 1.0
         return (self.used + self.needed) / self.limit
 
+    @property
+    def affordable(self) -> bool:
+        """Does it fit *and* leave headroom?
+
+        Stricter than `fits` on purpose. A farm that exactly fills the table
+        works, and then nothing else on the node can mount anything.
+        """
+        return self.fits and self.ratio < MOUNT_BUDGET_FALLBACK_RATIO
+
 
 def _read_int(path: Path, fallback: int) -> int:
     try:
@@ -81,31 +97,24 @@ def mounts_used(mountinfo: Path | None = None) -> int:
 def measure(needed: int, mountinfo: Path | None = None) -> Budget:
     """The budget for a request of `needed` mounts. Records it and says so.
 
-    Loud on purpose past `MOUNT_BUDGET_WARN_RATIO`. Nothing outside the node
-    can see a mount table fill up, and the first symptom otherwise is a
-    container that will not start.
+    Loud on purpose when the answer is no. Nothing outside the node can see a
+    mount table fill up, and the fallback it triggers is silent otherwise --
+    a volume that is suddenly slower to prepare, with no reason given.
     """
     budget = Budget(used=mounts_used(mountinfo), limit=mount_limit(), needed=needed)
     MOUNT_NAMESPACE_USED.set(budget.used)
     MOUNT_NAMESPACE_LIMIT.set(budget.limit)
 
-    if not budget.fits:
-        MOUNT_BUDGET_REFUSALS.inc()
+    if not budget.affordable:
+        MOUNT_BUDGET_FALLBACKS.inc()
         logger.error(
             "mount_budget_exhausted",
             used=budget.used,
             limit=budget.limit,
             needed=budget.needed,
             free=budget.free,
-        )
-    elif budget.ratio >= MOUNT_BUDGET_WARN_RATIO:
-        logger.error(
-            "mount_budget_low",
-            used=budget.used,
-            limit=budget.limit,
-            needed=budget.needed,
             would_use=round(budget.ratio, 3),
-            warn_at=MOUNT_BUDGET_WARN_RATIO,
+            fall_back_at=MOUNT_BUDGET_FALLBACK_RATIO,
         )
     else:
         logger.debug(
@@ -116,3 +125,13 @@ def measure(needed: int, mountinfo: Path | None = None) -> Budget:
         )
 
     return budget
+
+
+def affordable(needed: int) -> bool:
+    """Can this namespace spend `needed` mounts and still leave headroom?
+
+    False is not a failure. It is the signal to take a hardlink tree for this
+    volume instead, which costs this one container time and disk rather than
+    costing the next one its start.
+    """
+    return measure(needed).affordable

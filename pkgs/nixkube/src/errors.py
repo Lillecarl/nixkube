@@ -134,17 +134,6 @@ class UnmountError(CSIError):
     reason = "VolumeUnmount"
 
 
-class MountBudgetError(CSIError):
-    """A bind farm the namespace has no room for.
-
-    Refused before the first mount, because mount(2) answers ENOSPC past
-    `fs.mount-max` with nothing to say which limit it meant, and it would do
-    so partway through a closure.
-    """
-
-    reason = "MountBudgetExhausted"
-
-
 class CleanupStaleEntriesError(CSIError):
     """Error cleaning up stale volume entries."""
 

@@ -25,7 +25,6 @@ from ..constants import (
     NRI_RUNTIME_SOCKET,
 )
 from ..cri import get_cri_socket, list_container_ids
-from ..errors import MountBudgetError
 from ..events import report_event
 from ..metrics import (
     NRI_BUILD_DURATION,
@@ -34,7 +33,6 @@ from ..metrics import (
     NRI_CONTAINERS_SEEN,
     NRI_STATE_CHANGES,
 )
-from ..mountbudget import measure
 from ..nix import fetch_packages, get_build_args, get_current_system
 from ..supervision import detach
 from ..volume import prepare_volume
@@ -573,25 +571,12 @@ class NriPlugin(NriPluginBase):
 
         # A farm binds the closure in the mount worker and leaves nothing on
         # disk; the hardlink path fills the volume here instead. Issue #65.
-        closure = await prepare_volume(
+        prepared = await prepare_volume(
             volume_path, store_paths, None, bind_farm=NRI_BIND_FARM
         )
-
-        farm_paths = None
-        if NRI_BIND_FARM:
-            # Asked here rather than in the worker, because the worker's
-            # namespace starts as a copy of this one: what fits here is what
-            # fits there, and a refusal at this point still has somewhere to
-            # report itself.
-            budget = measure(len(closure))
-            if not budget.fits:
-                raise MountBudgetError(
-                    f"{len(closure)} mounts will not fit: this namespace holds "
-                    f"{budget.used} of {budget.limit}. Raise fs.mount-max, or "
-                    f"set NRI_BIND_FARM=false to hardlink this node's stores.",
-                    logs="",
-                )
-            farm_paths = closure
+        # `prepared.bind_farm`, not NRI_BIND_FARM: the volume may have fallen
+        # back to a hardlink tree, and then there is nothing to bind.
+        farm_paths = prepared.paths if prepared.bind_farm else None
 
         nix_tree_path = volume_path / "nix"
 

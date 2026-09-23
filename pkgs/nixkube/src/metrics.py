@@ -144,9 +144,9 @@ MOUNT_NAMESPACE_LIMIT = Gauge(
     "fs.mount-max, the most this namespace may hold",
 )
 
-MOUNT_BUDGET_REFUSALS = Counter(
-    "nixkube_mount_budget_refusals_total",
-    "Farms refused because the closure would not fit in the mount budget",
+MOUNT_BUDGET_FALLBACKS = Counter(
+    "nixkube_mount_budget_fallbacks_total",
+    "Volumes given a hardlink tree because a bind farm would not leave headroom",
 )
 
 # --- Hardlinking ---

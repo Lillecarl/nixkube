@@ -6,6 +6,7 @@ import errno
 import os
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
@@ -22,6 +23,7 @@ from .constants import (
 from .errors import FailedVolumeCleanupError, MountError, UnmountError
 from .hardlinks import deref_hardlink_tree, hardlink_closure
 from .mountattr import MountSetattrUnsupported, set_readonly
+from .mountbudget import affordable
 from .nix import (
     get_closure_paths,
     init_database,
@@ -81,35 +83,44 @@ def _set_readonly_recursive(target_path: Path) -> None:
         )
 
 
+@dataclass(frozen=True)
+class PreparedVolume:
+    """A volume that is ready, and how its store will be presented."""
+
+    paths: list[Path]
+    """The closure, in the order a farm should bind it."""
+
+    bind_farm: bool
+    """True when nothing was copied and the caller must build the farm."""
+
+
 async def prepare_volume(
     volume_root: Path,
     package_paths: set[Path],
     primary_package: Path | None,
     bind_farm: bool = False,
-) -> list[Path]:
-    """Prepare a volume root, and answer the closure it holds.
+) -> PreparedVolume:
+    """Prepare a volume root, and answer the closure and the layout it got.
 
-    Both store layouts come through here, because they differ in one step out
-    of five and a second copy of the other four is a second thing to get
-    wrong. `bind_farm` says which:
+    Both layouts come through here, because they differ in one step out of
+    five and a second copy of the other four is a second thing to get wrong.
 
       hardlinks  every closure path is linked into the volume, here and now.
-      bind farm  nothing is copied. The paths are bound in the mount worker,
-                 which is the only place they can be: `fs.mount-max` is
-                 100,000 per namespace, so 2443 mounts per closure would cap
-                 the daemon's own namespace at about 40 containers. The
-                 caller passes the returned closure on to `mount_in_container`.
+      bind farm  nothing is copied. The caller binds the returned closure.
+
+    `bind_farm` asks for a farm; the answer may still be no. Past
+    `MOUNT_BUDGET_FALLBACK_RATIO` of `fs.mount-max` this takes a hardlink tree
+    instead and says so at error level. That costs this volume time and disk.
+    Spending the last of the namespace's mounts would cost the *next*
+    container its start, with an ENOSPC that names no limit.
+
+    An NRI farm effectively never reaches that point: it is built in the mount
+    worker, whose namespace dies with it, so containers do not accumulate
+    mounts on the node. A CSI farm would, which is what the fallback is for.
     """
     # Capitalized to emphasise they're Nix environment variables
     NIX_STATE_DIR = volume_root / "nix/var/nix"
     NIX_STATE_DIR.mkdir(parents=True, exist_ok=True)
-
-    if not bind_farm:
-        # Pre-create overlayfs upper/work dirs so they're ready if the
-        # container requests a RW /nix mount. A farm needs neither: it is
-        # writable in the gaps between its mounts.
-        (volume_root / "upper").mkdir(parents=True, exist_ok=True)
-        (volume_root / "work").mkdir(parents=True, exist_ok=True)
 
     # Verify all packages and their closures before processing
     if VERIFY_STORE_PATHS:
@@ -117,6 +128,23 @@ async def prepare_volume(
 
     # Get storepaths from all packages
     store_paths = await get_closure_paths(package_paths)
+
+    # Asked before anything is prepared, because the fallback changes what
+    # preparing means.
+    if bind_farm and not affordable(len(store_paths)):
+        logger.error(
+            "farm_fell_back_to_hardlinks",
+            volume_root=str(volume_root),
+            count=len(store_paths),
+        )
+        bind_farm = False
+
+    if not bind_farm:
+        # Pre-create overlayfs upper/work dirs so they're ready if the
+        # container requests a RW /nix mount. A farm needs neither: it is
+        # writable in the gaps between its mounts.
+        (volume_root / "upper").mkdir(parents=True, exist_ok=True)
+        (volume_root / "work").mkdir(parents=True, exist_ok=True)
 
     if not bind_farm:
         # This block is essentially nix copy into a chroot store with
@@ -161,7 +189,7 @@ async def prepare_volume(
                 elapsed=round(time.perf_counter() - deref_start, 3),
             )
 
-    return sorted(store_paths)
+    return PreparedVolume(paths=sorted(store_paths), bind_farm=bind_farm)
 
 
 async def mount_volume(
