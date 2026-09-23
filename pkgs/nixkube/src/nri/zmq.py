@@ -35,6 +35,8 @@ import structlog
 import zmq.asyncio
 from cachetools import TTLCache
 
+from .builds import BuildRegistry
+
 logger = structlog.get_logger("nixkube.nri.zmq")
 
 
@@ -57,7 +59,7 @@ class ZeroMQServer:
         self.rep_socket: zmq.asyncio.Socket | None = None
         self.pub_socket: zmq.asyncio.Socket | None = None
         self.build_status = TTLCache[str, dict[str, str]](maxsize=10000, ttl=3600)
-        self.pending_builds: set[str] = set()
+        self.pending_builds = BuildRegistry()
         # Container metadata from nri-wait, TTL-evicted to avoid unbounded growth
         self._container_info = TTLCache[str, ContainerInfo](maxsize=10000, ttl=3600)
 

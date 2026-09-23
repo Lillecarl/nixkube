@@ -420,6 +420,29 @@ class NriPlugin(NriPluginBase):
         store_mounts: dict[Path, Path] | None = None,
         nix_rw: bool = False,
     ) -> None:
+        """Run the build inside a scope the volume sweep can cancel.
+
+        The scope is attached to the registry rather than created there,
+        because the container id is registered by the NRI handler and this
+        task starts later. A removal that arrives in that window is honoured
+        when the scope arrives (issue #64).
+        """
+        scope = anyio.CancelScope()
+        self.zmq_server.pending_builds.attach(container_id, scope)
+        with scope:
+            await self._run_build_task(
+                container_id, container_name, pod, store_paths, store_mounts, nix_rw
+            )
+
+    async def _run_build_task(
+        self,
+        container_id: str,
+        container_name: str,
+        pod: Pod,
+        store_paths: set[Path],
+        store_mounts: dict[Path, Path] | None = None,
+        nix_rw: bool = False,
+    ) -> None:
         """Realize store paths, link into the volume, then namespace-mount store mounts.
 
         Periodically pumps progress updates to reset nri-wait timeout.

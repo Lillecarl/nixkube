@@ -175,6 +175,14 @@ CACHE_PING_TIMEOUT_SECONDS: float = _parse_float_env("CACHE_PING_TIMEOUT_SECONDS
 # is the kubelet evicting pods for disk.
 GC_STALL_CYCLES: int = _parse_int_env("GC_STALL_CYCLES", "3")
 
+# How long the volume sweep waits for a cancelled build to unwind before it
+# treats the volume as still in use and leaves it to the next sweep.
+#
+# The hardlink walk leaves at its next checkpoint, which is every 256 entries,
+# so it is gone in well under a second. The wait is for the `nix build`
+# subprocess above it, which has to be signalled and reaped.
+NRI_BUILD_CANCEL_TIMEOUT: float = _parse_float_env("NRI_BUILD_CANCEL_TIMEOUT", "30")
+
 # Paths baked in at build time by makeWrapperArgs (empty in dev/test environments)
 SETUP_BINSH = os.environ.get("SETUP_BINSH", "")
 SETUP_CACERTS = os.environ.get("SETUP_CACERTS", "")

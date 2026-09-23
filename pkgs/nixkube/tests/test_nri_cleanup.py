@@ -17,6 +17,15 @@ import pytest
 from src.errors import HardlinkClosureError
 from src.hardlinks import _YIELD_EVERY, hardlink_closure
 from src.nri import cleanup
+from src.nri.builds import BuildRegistry
+
+
+def _building(*container_ids: str) -> BuildRegistry:
+    """A registry holding builds nothing will ever finish."""
+    registry = BuildRegistry()
+    for container_id in container_ids:
+        registry.add(container_id)
+    return registry
 
 
 @pytest.fixture
@@ -60,15 +69,83 @@ class TestRemovedId:
         assert not gone.exists()
 
     @pytest.mark.asyncio
-    async def test_it_leaves_one_whose_build_is_still_running(
+    async def test_it_leaves_one_whose_build_will_not_stop(self, volumes, monkeypatch):
+        """A build that does not unwind inside the timeout keeps its volume.
+
+        The sweep asked it to stop and it did not, so it is still linking
+        into that directory. The next sweep collects it.
+        """
+        stubborn = _volume(volumes, "busy")
+        _cri(monkeypatch, {"busy"})
+        monkeypatch.setattr(cleanup, "NRI_BUILD_CANCEL_TIMEOUT", 0.05)
+
+        await cleanup.garbage_collect_stale_volumes(
+            Path("/cri.sock"), "busy", _building("busy")
+        )
+
+        assert stubborn.exists(), "deleted a volume a build task is writing into"
+
+    @pytest.mark.asyncio
+    async def test_it_cancels_the_build_and_then_collects(self, volumes, monkeypatch):
+        """The other half of #64.
+
+        A container's removal arrives while that container's own build runs.
+        Skipping alone leaves the volume until some *other* container is
+        removed, which on an idle node is never. The sweep cancels the build,
+        waits for it, and then collects.
+        """
+        doomed = _volume(volumes, "doomed")
+        _cri(monkeypatch, {"doomed"})
+
+        builds = BuildRegistry()
+        builds.add("doomed")
+        running = anyio.Event()
+
+        async def build() -> None:
+            scope = anyio.CancelScope()
+            builds.attach("doomed", scope)
+            try:
+                with scope:
+                    running.set()
+                    await anyio.sleep_forever()
+            finally:
+                builds.discard("doomed")
+
+        # `fail_after` and the cancel below are what make a broken sweep fail
+        # instead of hanging here: the build waits forever, so without a
+        # working `stop` nothing ends this group.
+        with anyio.fail_after(5):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(build)
+                await running.wait()
+                await cleanup.garbage_collect_stale_volumes(
+                    Path("/cri.sock"), "doomed", builds
+                )
+                tg.cancel_scope.cancel()
+
+        assert not doomed.exists(), "left a volume whose build the sweep could stop"
+
+    @pytest.mark.asyncio
+    async def test_a_removal_before_the_build_starts_still_stops_it(
         self, volumes, monkeypatch
     ):
-        building = _volume(volumes, "busy")
-        _cri(monkeypatch, {"busy"})
+        """The window between registering an id and the task running.
 
-        await cleanup.garbage_collect_stale_volumes(Path("/cri.sock"), "busy", {"busy"})
+        `CreateContainer` adds the id, then `detach` starts the task later.
+        A removal in between has no scope to cancel, so the registry has to
+        remember and cancel the scope when it arrives.
+        """
+        _volume(volumes, "early")
+        _cri(monkeypatch, set())
+        monkeypatch.setattr(cleanup, "NRI_BUILD_CANCEL_TIMEOUT", 0.05)
 
-        assert building.exists(), "deleted a volume a build task is writing into"
+        builds = BuildRegistry()
+        builds.add("early")
+        await cleanup.garbage_collect_stale_volumes(Path("/cri.sock"), "early", builds)
+
+        scope = anyio.CancelScope()
+        builds.attach("early", scope)
+        assert scope.cancel_called, "the late scope was not told about the removal"
 
 
 class TestItNeverTakesThePluginDown:
@@ -161,7 +238,7 @@ class TestCriBackstop:
         _cri(monkeypatch, {"someone-else"})
 
         await cleanup.garbage_collect_stale_volumes(
-            Path("/cri.sock"), "someone-else", {"creating"}
+            Path("/cri.sock"), "someone-else", _building("creating")
         )
 
         assert fresh.exists(), "another container's removal ate a live volume"
@@ -170,10 +247,10 @@ class TestCriBackstop:
     async def test_a_live_build_is_read_now_and_not_when_it_was_scheduled(
         self, volumes, monkeypatch
     ):
-        """`schedule_garbage_collection` passes the set, not a copy of it."""
+        """`schedule_garbage_collection` passes the registry, not a copy."""
         later = _volume(volumes, "later")
         _cri(monkeypatch, set())
-        pending: set[str] = set()
+        pending = BuildRegistry()
 
         async def listing(_socket):
             # The build starts after the sweep was queued but before it looks.
@@ -211,7 +288,7 @@ class TestTheRaceItself:
         return src
 
     async def _build_against_sweep(
-        self, volumes: Path, src: Path, building: set[str]
+        self, volumes: Path, src: Path, building: BuildRegistry
     ) -> None:
         volume_root = volumes / self.CONTAINER
         async with anyio.create_task_group() as tg:
@@ -229,8 +306,12 @@ class TestTheRaceItself:
     ):
         src = self._closure(tmp_path)
         _cri(monkeypatch, set())
+        # The build has no scope to cancel, so the sweep waits out the
+        # timeout and then leaves the volume alone. Shortened so the test
+        # spends its time on the race and not on the wait.
+        monkeypatch.setattr(cleanup, "NRI_BUILD_CANCEL_TIMEOUT", 0.05)
 
-        await self._build_against_sweep(volumes, src, {self.CONTAINER})
+        await self._build_against_sweep(volumes, src, _building(self.CONTAINER))
 
         linked = volumes / self.CONTAINER / "nix" / "store" / src.name
         assert sorted(p.name for p in linked.iterdir()) == sorted(
@@ -252,7 +333,7 @@ class TestTheRaceItself:
         # A task group reports a child's failure as an ExceptionGroup, so
         # `pytest.raises(HardlinkClosureError)` does not match it.
         with pytest.raises(BaseExceptionGroup) as caught:
-            await self._build_against_sweep(volumes, src, set())
+            await self._build_against_sweep(volumes, src, BuildRegistry())
 
         failures = [
             error

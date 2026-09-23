@@ -2,15 +2,15 @@
 """NRI container cleanup and garbage collection."""
 
 import shutil
-from collections.abc import Container
 from pathlib import Path
 
 import anyio.abc
 import structlog
 
-from ..constants import HOST_ROOT, NRI_CONTAINERS
+from ..constants import HOST_ROOT, NRI_BUILD_CANCEL_TIMEOUT, NRI_CONTAINERS
 from ..cri import list_container_ids
 from ..supervision import detach
+from .builds import BuildRegistry
 
 logger = structlog.get_logger("nixkube.nri.cleanup")
 
@@ -19,7 +19,7 @@ def schedule_garbage_collection(
     tasks: anyio.abc.TaskGroup,
     cri_socket: Path,
     removed_id: str | None = None,
-    building: Container[str] = frozenset(),
+    building: BuildRegistry | None = None,
 ) -> None:
     """Collect in the background, so the NRI reply does not wait for it.
 
@@ -32,6 +32,9 @@ def schedule_garbage_collection(
     dropped the connection, and the plugin re-registered. Every container
     created in that window starts with no /nix, which is the failure this
     plugin exists to prevent.
+
+    The sweep also cancels the removed container's own build and waits for
+    it, which is the other reason it cannot run in the handler.
     """
     detach(
         tasks,
@@ -46,7 +49,7 @@ def schedule_garbage_collection(
 async def garbage_collect_stale_volumes(
     cri_socket: Path,
     removed_id: str | None = None,
-    building: Container[str] = frozenset(),
+    building: BuildRegistry | None = None,
 ) -> None:
     """Remove volumes for containers no longer in CRI.
 
@@ -75,11 +78,24 @@ async def garbage_collect_stale_volumes(
     and not at schedule time because a build may start after the sweep is
     queued.
 
-    A skipped directory is not leaked for long: the container is gone from
-    the CRI, so the next sweep collects it. On an idle node with nothing
-    else being removed it waits, which is the lesser of the two faults.
+    The container being removed is the one case where waiting is not needed.
+    Its build has nothing left to build for, so the sweep cancels it and
+    waits for it to unwind before collecting -- otherwise that volume is
+    skipped and nothing collects it until some *other* container is removed,
+    which on an idle node is never.
+
+    A directory skipped by the sweep is not leaked for long: the container is
+    gone from the CRI, so the next sweep collects it.
     """
+    if building is None:
+        building = BuildRegistry()
+
     if removed_id:
+        # Before the skip below reads it. A build whose container is gone has
+        # nothing to finish, and the volume cannot be collected until it
+        # stops writing into it.
+        await building.stop(removed_id, NRI_BUILD_CANCEL_TIMEOUT)
+
         volume_dir = NRI_CONTAINERS / removed_id
         try:
             if removed_id in building:

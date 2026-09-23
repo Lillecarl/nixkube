@@ -11,12 +11,13 @@ life of the process.
 import anyio
 import pytest
 
+from src.nri.builds import BuildRegistry
 from src.nri.server import NriPlugin
 
 
 class _Zmq:
     def __init__(self) -> None:
-        self.pending_builds: set[str] = set()
+        self.pending_builds = BuildRegistry()
         self.build_status: dict[str, dict[str, str]] = {}
 
     async def publish_build_progress(self, _container_id: str) -> None:
@@ -54,7 +55,7 @@ async def test_a_cancelled_build_does_not_stay_pending():
 
     async def hang(*_args, **_kwargs):
         started.set()
-        await anyio.sleep(3600)
+        await anyio.sleep_forever()
 
     plugin = _plugin(hang)
     plugin.zmq_server.pending_builds.add(CONTAINER)
@@ -65,7 +66,7 @@ async def test_a_cancelled_build_does_not_stay_pending():
             await started.wait()
             tg.cancel_scope.cancel()
 
-    assert plugin.zmq_server.pending_builds == set(), (
+    assert CONTAINER not in plugin.zmq_server.pending_builds, (
         "a cancelled build left its container pinned against the volume sweep"
     )
 
@@ -87,5 +88,5 @@ async def test_a_failed_build_does_not_stay_pending(monkeypatch):
 
     await plugin._spawn_build_task(CONTAINER, "app", None, PATHS)
 
-    assert plugin.zmq_server.pending_builds == set()
+    assert CONTAINER not in plugin.zmq_server.pending_builds
     assert reported == ["BuildFailed"], "a failed build must say so on the pod"
