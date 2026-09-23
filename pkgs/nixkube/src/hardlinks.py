@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import anyio
+import anyio.to_thread
 import structlog
 from anyio.lowlevel import checkpoint
 
@@ -107,11 +108,15 @@ async def hardlink_tree(src: Path, dst: Path) -> None:
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(src))
 
 
-def _discard(path: Path) -> None:
+async def _discard(path: Path) -> None:
     """Remove a staging path, whatever it is, without raising."""
     try:
         if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
+            # In a thread. A staging directory left by a crashed walk holds
+            # most of a store path, and deleting it on this loop is one
+            # synchronous gap in the heartbeat `nri-wait` gives up on after
+            # 30s -- the failure `_entries` checkpoints to avoid (issue #45).
+            await anyio.to_thread.run_sync(shutil.rmtree, path)
         else:
             path.unlink(missing_ok=True)
     except OSError:
@@ -151,12 +156,12 @@ async def hardlink_closure(store_paths: set[Path], dst: Path) -> None:
             # and `CancelledError` is a BaseException, so no `except Exception`
             # runs on the way out.
             staging = dst / f".{store_path.name}.partial"
-            _discard(staging)
+            await _discard(staging)
             try:
                 await hardlink_tree(store_path, staging)
                 os.rename(staging, target)
             except Exception as e:
-                _discard(staging)
+                await _discard(staging)
                 HARDLINK_CLOSURES.labels(result="error").inc()
                 raise HardlinkClosureError(
                     f"Failed to hardlink {store_path.name}",

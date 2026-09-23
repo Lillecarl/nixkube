@@ -337,17 +337,26 @@ class NriPlugin(NriPluginBase):
                 if container_id not in self.zmq_server.pending_builds:
                     self.zmq_server.pending_builds.add(container_id)
                     logger.info("build_task_spawning", count=len(store_paths))
-                    detach(
-                        self.tasks,
-                        self._spawn_build_task,
-                        container_id,
-                        req.container.name,
-                        pod,
-                        store_paths,
-                        store_mounts,
-                        nix_rw,
-                        name="nri_build",
-                    )
+                    try:
+                        detach(
+                            self.tasks,
+                            self._spawn_build_task,
+                            container_id,
+                            req.container.name,
+                            pod,
+                            store_paths,
+                            store_mounts,
+                            nix_rw,
+                            name="nri_build",
+                        )
+                    except Exception:
+                        # `start_soon` refuses once the group is closing, with
+                        # `RuntimeError: This task group is not active`. The id
+                        # would then name a build that never starts: the sweep
+                        # skips that volume, and every later removal pays the
+                        # full cancel timeout waiting for nothing.
+                        self.zmq_server.pending_builds.discard(container_id)
+                        raise
                 else:
                     logger.warning("build_already_pending")
 
