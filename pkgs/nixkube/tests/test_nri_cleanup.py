@@ -143,9 +143,18 @@ class TestRemovedId:
         builds.add("early")
         await cleanup.garbage_collect_stale_volumes(Path("/cri.sock"), "early", builds)
 
-        scope = anyio.CancelScope()
-        builds.attach("early", scope)
-        assert scope.cancel_called, "the late scope was not told about the removal"
+        # The outcome, not the flag. `cancel_called` would be satisfied by a
+        # registry that sets it and does nothing else; what the build needs is
+        # to actually come back out of a wait that never ends.
+        reached_the_end = False
+        with anyio.fail_after(5):
+            scope = anyio.CancelScope()
+            builds.attach("early", scope)
+            with scope:
+                await anyio.sleep_forever()
+            reached_the_end = True
+
+        assert reached_the_end, "the late build was left waiting after its removal"
 
 
 class TestItNeverTakesThePluginDown:

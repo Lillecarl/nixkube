@@ -21,6 +21,13 @@ def is_usable(pod) -> bool:
 
     An empty list is the safe answer: no `--max-jobs 0`, and the node builds
     for itself.
+
+    **Ready only beats Running when the pod has a readiness probe.** With no
+    probe the kubelet marks a container ready as soon as it starts, and this
+    rule collapses back into the old one. This repository ships no builder
+    manifest -- `BUILDERS_ENABLED` is false by default -- so whoever deploys
+    builder pods has to give the container a probe on the SSH port for any of
+    this to mean anything.
     """
     status = pod.raw.get("status") or {}
     if status.get("phase") != "Running":
