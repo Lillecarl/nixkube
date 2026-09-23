@@ -21,6 +21,7 @@ from .constants import (
 )
 from .errors import FailedVolumeCleanupError, MountError, UnmountError
 from .hardlinks import deref_hardlink_tree, hardlink_closure
+from .mountattr import MountSetattrUnsupported, set_readonly
 from .nix import (
     get_closure_paths,
     init_database,
@@ -46,56 +47,23 @@ _libc.mount.restype = ctypes.c_int
 _libc.umount2.argtypes = [ctypes.c_char_p, ctypes.c_int]
 _libc.umount2.restype = ctypes.c_int
 
-# mount_setattr(2) (Linux 5.12, include/uapi/linux/mount.h). Introduced via
-# the common syscall table, so x86_64 and aarch64 share the number.
-_NR_MOUNT_SETATTR = 442
-MOUNT_ATTR_RDONLY = 0x1
-AT_RECURSIVE = 0x8000
-AT_FDCWD = -100
-
-
-class _MountAttr(ctypes.Structure):
-    """struct mount_attr, the argument to mount_setattr(2)."""
-
-    _fields_ = [
-        ("attr_set", ctypes.c_uint64),
-        ("attr_clr", ctypes.c_uint64),
-        ("propagation", ctypes.c_uint64),
-        ("userns_fd", ctypes.c_uint64),
-    ]
-
 
 def _set_readonly_recursive(target_path: Path) -> None:
     """Make `target_path` read-only, and every mount under it too.
 
-    `MS_REMOUNT | MS_RDONLY` changes the top mount only. Measured: a submount
-    under a target remounted that way is still writable, and a write there
-    reaches the host store through the shared inode. mount_setattr with
-    AT_RECURSIVE is the call that covers the subtree.
-
-    A kernel without the syscall answers ENOSYS, and then the remount is
-    correct: such a volume carries no submounts to miss.
+    A kernel without mount_setattr answers ENOSYS, and then the remount below
+    is correct: such a volume carries no submounts to miss.
     """
-    attr = _MountAttr(
-        attr_set=MOUNT_ATTR_RDONLY, attr_clr=0, propagation=0, userns_fd=0
-    )
-    ret = _libc.syscall(
-        ctypes.c_long(_NR_MOUNT_SETATTR),
-        ctypes.c_int(AT_FDCWD),
-        ctypes.c_char_p(os.fsencode(target_path)),
-        ctypes.c_uint(AT_RECURSIVE),
-        ctypes.byref(attr),
-        ctypes.c_size_t(ctypes.sizeof(attr)),
-    )
-    if ret == 0:
+    try:
+        set_readonly(target_path, recursive=True)
         return
-
-    err = ctypes.get_errno()
-    if err != errno.ENOSYS:
+    except MountSetattrUnsupported:
+        pass
+    except OSError as error:
         raise MountError(
-            f"Failed to make bind volume read-only: {os.strerror(err)} (errno {err})",
+            f"Failed to make bind volume read-only: {error}",
             logs="",
-        )
+        ) from error
 
     logger.debug("mount_setattr_unavailable", path=str(target_path))
     ret = _libc.mount(

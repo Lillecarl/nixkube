@@ -967,6 +967,9 @@ rec {
     # Also outside `checks.all`, and for the same reason: a mount flag can
     # only be checked by mounting. Issue #66.
     csi-mount-rec = import ./tests/nixos/csi-mount-rec.nix { inherit pkgs lib; };
+
+    # nixkube's own `build_farm`, as root against a real closure. Issue #65.
+    farm-builder = import ./tests/nixos/farm-builder.nix { inherit pkgs lib; };
   };
 
   treefmt = (import sources.treefmt-nix).mkWrapper pkgs {
