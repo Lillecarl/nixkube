@@ -51,14 +51,33 @@ ModernEvent = new_class(
 MAX_EVENT_NOTE_SIZE = 1000
 
 
+def _clamp(text: str, limit: int) -> str:
+    """The longest prefix of `text` that fits in `limit` bytes.
+
+    `errors="ignore"` drops a multi-byte character the cut fell inside,
+    rather than raising on it.
+    """
+    encoded = text.encode()
+    if len(encoded) <= limit:
+        return text
+    return encoded[:limit].decode(errors="ignore")
+
+
 def _format_event_note(message: str, logs: str | None = None) -> str:
     """Format event note with message and logs, truncated to 1000 bytes.
 
-    Preserves the full message and truncates logs if needed.
+    Preserves the full message where it fits, and truncates logs first.
     Naturally handles UTF-8 multi-byte characters.
 
+    **Nothing here raises.** This runs while reporting some other failure, so
+    anything it throws replaces the failure being reported with one about the
+    reporter. Two assertions used to: one on a message over the limit, and one
+    on the result -- reachable at a message of exactly 1000 bytes, where the
+    space left for logs goes negative and the separator alone put the result
+    at 1001.
+
     Args:
-        message: Human-readable message (must be < 1000 bytes)
+        message: Human-readable message
         logs: Optional build/subprocess logs to append
 
     Returns:
@@ -66,15 +85,14 @@ def _format_event_note(message: str, logs: str | None = None) -> str:
     """
     message_bytes = message.encode()
 
-    # Message must fit within limit (defensive assertion)
-    assert len(message_bytes) <= MAX_EVENT_NOTE_SIZE, (
-        f"Message alone exceeds {MAX_EVENT_NOTE_SIZE} bytes: {len(message_bytes)}"
-    )
+    # No room for a separator, let alone logs.
+    if len(message_bytes) >= MAX_EVENT_NOTE_SIZE:
+        return _clamp(message, MAX_EVENT_NOTE_SIZE)
 
     if not logs:
         return message
 
-    # Calculate space available for logs (reserve space for newline separator)
+    # Space available for logs, with the newline separator reserved.
     available_for_logs = MAX_EVENT_NOTE_SIZE - len(message_bytes) - 1
 
     # Take last 1000 characters of logs (most recent/relevant)
@@ -88,15 +106,7 @@ def _format_event_note(message: str, logs: str | None = None) -> str:
         logs = logs[excess_bytes:]  # Remove first excess_bytes chars
         logs_bytes = logs.encode()
 
-    # Combine and verify final size (defensive assertion)
-    result = f"{message}\n{logs}"
-    result_bytes = result.encode()
-
-    assert len(result_bytes) <= MAX_EVENT_NOTE_SIZE, (
-        f"Failed to truncate event note to {MAX_EVENT_NOTE_SIZE} bytes: {len(result_bytes)}"
-    )
-
-    return result
+    return _clamp(f"{message}\n{logs}", MAX_EVENT_NOTE_SIZE)
 
 
 def _extract_build_logs(exception: Exception) -> str:

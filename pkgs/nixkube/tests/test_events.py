@@ -144,9 +144,25 @@ class TestFormatEventNoteProperties:
         logs=st.one_of(st.none(), st.text()),
     )
     def test_byte_limit_always_holds(self, message, logs):
-        """Output is always at most 1000 bytes for any valid input."""
-        assume(len(message.encode()) <= 1000)
+        """Output is always at most 1000 bytes. For *any* input.
+
+        This carried `assume(len(message.encode()) <= 1000)`, which excluded
+        the one input the function got wrong: an over-long message raised
+        `AssertionError` instead of being cut. The property is only worth
+        anything unconditionally -- this runs while reporting some other
+        failure, and what it raises replaces that failure.
+        """
         result = _format_event_note(message, logs)
+        assert len(result.encode()) <= 1000
+
+    @given(logs=st.one_of(st.none(), st.text()))
+    def test_a_message_at_the_limit_does_not_raise(self, logs):
+        """The boundary the second assertion tripped on.
+
+        At exactly 1000 bytes the space left for logs goes negative, and the
+        newline separator alone took the result to 1001.
+        """
+        result = _format_event_note("a" * 1000, logs)
         assert len(result.encode()) <= 1000
 
     @given(
@@ -154,7 +170,12 @@ class TestFormatEventNoteProperties:
         logs=st.one_of(st.none(), st.text()),
     )
     def test_message_always_preserved(self, message, logs):
-        """Message is always present verbatim in the output."""
+        """Message is always present verbatim in the output.
+
+        This one keeps its `assume`, and means it: a message over the limit
+        is cut, so it cannot also be verbatim. The byte-limit property above
+        is the one that has to hold for every input.
+        """
         assume(len(message.encode()) <= 1000)
         result = _format_event_note(message, logs)
         assert message in result
