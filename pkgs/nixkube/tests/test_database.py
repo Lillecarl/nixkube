@@ -43,6 +43,7 @@ class TestThePipe:
             codes = await pipe_commands(
                 [PY, "-c", "print('hello')"],
                 [PY, "-c", WRITE_STDIN_TO, str(out)],
+                timeout=30,
             )
 
         assert codes == (0, 0)
@@ -59,6 +60,7 @@ class TestThePipe:
             codes = await pipe_commands(
                 [PY, "-c", "print('x' * 300000)"],
                 [PY, "-c", WRITE_STDIN_TO, str(out)],
+                timeout=30,
             )
 
         assert codes == (0, 0)
@@ -81,6 +83,7 @@ class TestThePipe:
                     READ_ENV_TO,
                     str(out),
                 ],
+                timeout=30,
                 consumer_env={"PROBE": "reached"},
             )
 
@@ -98,7 +101,25 @@ class TestThePipe:
             codes = await pipe_commands(
                 [PY, "-c", "raise SystemExit(3)"],
                 [PY, "-c", WRITE_STDIN_TO, str(out)],
+                timeout=30,
             )
 
         assert codes == (3, 0)
         assert out.read_text() == ""
+
+    async def test_a_pipe_that_never_ends_raises_rather_than_hanging(
+        self, tmp_path: Path
+    ) -> None:
+        """The deadline `init_database` needs.
+
+        This runs inside `NodePublishVolume` and nothing above it gives up,
+        so without a bound a stuck `nix-store` leaves the pod waiting for
+        ever and kubelet with nothing to retry.
+        """
+        with anyio.fail_after(30):
+            with pytest.raises(TimeoutError):
+                await pipe_commands(
+                    [PY, "-c", "import time; time.sleep(60)"],
+                    [PY, "-c", "import sys; sys.stdin.read()"],
+                    timeout=0.2,
+                )

@@ -7,6 +7,7 @@ from pathlib import Path
 import anyio
 import structlog
 
+from ..constants import NIX_DATABASE_TIMEOUT
 from ..errors import InitDatabaseError
 
 logger = structlog.get_logger("nixkube.nix")
@@ -16,6 +17,7 @@ async def pipe_commands(
     producer: Sequence[str],
     consumer: Sequence[str],
     *,
+    timeout: float,
     consumer_env: Mapping[str, str] | None = None,
 ) -> tuple[int, int]:
     """Run `producer | consumer`, and answer both return codes.
@@ -27,27 +29,36 @@ async def pipe_commands(
 
     `stderr=None` on both: the messages go where the daemon's own do. A pipe
     nobody drains fills at 64KB and stops the child there instead.
+
+    `timeout` has no default. This runs inside `NodePublishVolume`, and
+    nothing above it gives up; anyio kills and reaps both children on the way
+    out. Issue #38 is the same shape in the GC loop.
     """
     read_fd, write_fd = os.pipe()
     try:
-        async with await anyio.open_process(
-            list(producer), stdout=write_fd, stderr=None
-        ) as upstream:
-            os.close(write_fd)
-            write_fd = -1
+        with anyio.move_on_after(timeout) as scope:
             async with await anyio.open_process(
-                list(consumer),
-                stdin=read_fd,
-                stderr=None,
-                env=None if consumer_env is None else dict(consumer_env),
-            ) as downstream:
-                os.close(read_fd)
-                read_fd = -1
-                return (await upstream.wait(), await downstream.wait())
+                list(producer), stdout=write_fd, stderr=None
+            ) as upstream:
+                os.close(write_fd)
+                write_fd = -1
+                async with await anyio.open_process(
+                    list(consumer),
+                    stdin=read_fd,
+                    stderr=None,
+                    env=None if consumer_env is None else dict(consumer_env),
+                ) as downstream:
+                    os.close(read_fd)
+                    read_fd = -1
+                    return (await upstream.wait(), await downstream.wait())
     finally:
         for descriptor in (read_fd, write_fd):
             if descriptor != -1:
                 os.close(descriptor)
+
+    # Only reachable when the deadline fired: the block above always returns.
+    assert scope.cancelled_caught
+    raise TimeoutError(f"{producer[0]} | {consumer[0]} did not finish in {timeout}s")
 
 
 async def init_database(state_dir: Path, store_paths: set[Path]) -> None:
@@ -67,6 +78,7 @@ async def init_database(state_dir: Path, store_paths: set[Path]) -> None:
                 *[str(path) for path in store_paths],
             ],
             ["nix-store", "--option", "store", "local", "--load-db"],
+            timeout=NIX_DATABASE_TIMEOUT,
             consumer_env={
                 **os.environ,
                 "NIX_STATE_DIR": str(state_dir),

@@ -20,8 +20,21 @@ import pytest
 
 import src.nix
 
-# Everything in `subprocessing` that starts a process and takes `timeout`.
-RUNNERS = {"try_captured", "try_console", "run_captured", "run_console"}
+# Everything here that starts a process on behalf of a caller. The four from
+# `subprocessing`, plus `pipe_commands` (which runs two of its own) and
+# `subprocess.run` (synchronous, so it blocks the whole loop).
+#
+# Not `open_process`: `pipe_commands` calls it twice inside a scope that
+# already carries the deadline its own caller passed, and flagging those two
+# would say the boundary is one level lower than it is.
+RUNNERS = {
+    "try_captured",
+    "try_console",
+    "run_captured",
+    "run_console",
+    "pipe_commands",
+    "run",  # subprocess.run
+}
 
 MODULES = sorted(
     path
