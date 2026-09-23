@@ -23,6 +23,10 @@ dependencies = [
   "protobuf",
   "grpclib-nri",
   "pyzmq",
+  # The GC cycle reduces `nix path-info --all --json` as it reads it. That
+  # answer is one JSON line, 282 MB on a store of 216,455 paths, and parsing
+  # it whole held this event loop for 1.374s. See `gc_task.scan_path_info`.
+  "ijson",
   "cachetools",
   "structlog",
   "rich",

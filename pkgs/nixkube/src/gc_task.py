@@ -12,15 +12,18 @@ one call that never returns ends collection on that node. Issue #38 measured
 that: 33 hours on a four-node cluster, zero completed cycles.
 """
 
-import json
 import random
 import subprocess
 import tempfile
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import BinaryIO
 
 import anyio
+import ijson
 import structlog
+from anyio.lowlevel import checkpoint
 
 from .cache import copy_to_cache
 from .constants import (
@@ -89,16 +92,67 @@ async def gc_loop() -> None:
         await anyio.sleep(sleep_secs)
 
 
-async def _read_path_info(work: Path) -> dict[str, dict]:
-    """Every path in the store, keyed by path, with its registration time.
+_SCAN_YIELD_EVERY = 2000
+"""Store paths between two checkpoints while reading the store's metadata."""
 
-    **To a file, and not to a pipe.** `nix path-info --all --json` writes the
-    whole store as one JSON line, 300,000 characters and more. The kernel
-    gives the process one file descriptor either way, so nothing in between
-    has to hold the line.
+
+@dataclass
+class StoreScan:
+    """What one pass over the store's metadata answers."""
+
+    paths: int = 0
+    nar_bytes: int = 0
+    old_paths: list[str] = field(default_factory=list)
+
+
+def _scan_entry(scan: StoreScan, path: str, facts: object, cutoff: float) -> None:
+    """Fold one path's metadata into the scan.
+
+    `nix path-info --json` answers an object keyed by store path, and the value
+    holds no `path` of its own. Reading it as a list of entries walked the
+    keys, which are strings, so the filter matched nothing and the loop deleted
+    nothing on any node, ever. Issue #38.
+    """
+    scan.paths += 1
+    if not isinstance(facts, dict):
+        return
+    scan.nar_bytes += facts.get("narSize") or 0
+    if facts.get("registrationTime", cutoff + 1) < cutoff:
+        scan.old_paths.append(path)
+
+
+async def scan_path_info(handle: BinaryIO, cutoff: float) -> StoreScan:
+    """Reduce `nix path-info --all --json` without ever holding it.
+
+    **Streamed, not parsed whole.** This loop also serves the CSI server, the
+    NRI plugin and the heartbeat `nri-wait` gives up on. Measured on a store of
+    216,455 paths, whose metadata is 282 MB of JSON on one line:
+
+        json.loads on the loop      worst loop gap 1.374s
+        json.loads in a thread      worst loop gap 0.841s
+        this, checkpointing         worst loop gap 0.057s
+
+    A thread only recovers the read: the C json decoder holds the GIL for the
+    parse. `ijson` hands back one path at a time, so the checkpoint below has
+    somewhere to go -- and neither the 282 MB string nor the dict it parses
+    into is ever held.
 
     `--json-format 2` is not a way out. It is also one line, and it keys on the
     base name instead of the path.
+    """
+    scan = StoreScan()
+    for path, facts in ijson.kvitems(handle, "", use_float=True):
+        _scan_entry(scan, path, facts, cutoff)
+        if scan.paths % _SCAN_YIELD_EVERY == 0:
+            await checkpoint()
+    return scan
+
+
+async def _read_store_scan(work: Path, cutoff: float) -> StoreScan:
+    """Ask nix for the store's metadata, and reduce it as it is read.
+
+    **To a file, and not to a pipe.** The kernel gives the process one file
+    descriptor either way, so nothing in between has to hold the line.
     """
     out = work / "path-info.json"
     with anyio.fail_after(GC_PATH_INFO_TIMEOUT_SECONDS):
@@ -116,10 +170,11 @@ async def _read_path_info(work: Path) -> dict[str, dict]:
                 ],
                 stdout=handle,
             )
-    return json.loads(out.read_text())
+    with out.open("rb") as handle:
+        return await scan_path_info(handle, cutoff)
 
 
-def _record_store_size(path_info: dict[str, dict]) -> None:
+def _record_store_size(scan: StoreScan) -> None:
     """How big this node's store is, from the answer the cycle already has.
 
     There is no way to see a node's store grow from outside it, which is how
@@ -127,36 +182,13 @@ def _record_store_size(path_info: dict[str, dict]) -> None:
     against `/var`, and nothing said which share was the store. Issue #39.
 
     The cost is nothing. `nix path-info --all --json` carries `narSize` beside
-    the `registrationTime` the cycle reads, so this is a sum over a dict that
-    is already in memory, on a cadence that is already slow. A `du`-style walk
-    over a multi-GB store is what this avoids.
+    the `registrationTime` the cycle reads, so the scan sums it on the way
+    past. A `du`-style walk over a multi-GB store is what this avoids.
 
     `narSize` over-counts. See `STORE_NAR_BYTES` for the measurement.
     """
-    STORE_PATHS.set(len(path_info))
-    STORE_NAR_BYTES.set(
-        sum(
-            facts.get("narSize", 0)
-            for facts in path_info.values()
-            if isinstance(facts, dict)
-        )
-    )
-
-
-def _select_old_paths(path_info: dict[str, dict], cutoff: float) -> list[str]:
-    """The paths registered before `cutoff`.
-
-    `nix path-info --json` answers an object keyed by store path, and the value
-    holds no `path` of its own. Reading it as a list of entries walked the
-    keys, which are strings, so the filter matched nothing and the loop deleted
-    nothing on any node, ever. Issue #38.
-    """
-    return [
-        path
-        for path, facts in path_info.items()
-        if isinstance(facts, dict)
-        and facts.get("registrationTime", cutoff + 1) < cutoff
-    ]
+    STORE_PATHS.set(scan.paths)
+    STORE_NAR_BYTES.set(scan.nar_bytes)
 
 
 def _count_deleted(lines: list[str]) -> int:
@@ -220,20 +252,19 @@ async def _run_gc_cycle() -> None:
         work = Path(tmp)
 
         try:
-            path_info = await _read_path_info(work)
-        except json.JSONDecodeError:
+            scan = await _read_store_scan(work, time.time() - GC_KEEP_SECONDS)
+        except ijson.JSONError:
             logger.warning("gc_path_info_parse_error", exc_info=True)
             return
 
-        _record_store_size(path_info)
-        old_paths = _select_old_paths(path_info, time.time() - GC_KEEP_SECONDS)
+        _record_store_size(scan)
 
-        if not old_paths:
-            logger.debug("gc_nothing_to_delete", known=len(path_info))
+        if not scan.old_paths:
+            logger.debug("gc_nothing_to_delete", known=scan.paths)
             return
 
-        logger.info("gc_deleting_paths", count=len(old_paths))
-        deleted = await _delete(work, old_paths)
+        logger.info("gc_deleting_paths", count=len(scan.old_paths))
+        deleted = await _delete(work, scan.old_paths)
 
     GC_PATHS_DELETED.inc(deleted)
-    logger.info("gc_done", offered=len(old_paths), deleted=deleted)
+    logger.info("gc_done", offered=len(scan.old_paths), deleted=deleted)

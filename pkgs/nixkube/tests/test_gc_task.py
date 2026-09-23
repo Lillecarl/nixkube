@@ -12,6 +12,7 @@ invented.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import subprocess
 import sys
@@ -23,7 +24,13 @@ import anyio
 import pytest
 
 from src import gc_task
-from src.gc_task import _count_deleted, _select_old_paths
+from src.gc_task import StoreScan, _count_deleted, scan_path_info
+
+
+async def _scan(info: dict, cutoff: float) -> StoreScan:
+    """Run the real streaming reduction over `info`, as nix would send it."""
+    return await scan_path_info(io.BytesIO(json.dumps(info).encode()), cutoff)
+
 
 # `nix store delete --store <s> --stdin` over one dead path and one live one.
 # Exit code 1.
@@ -47,15 +54,20 @@ class TestSelectOldPaths:
     delete step received an empty list on every cycle on every node.
     """
 
-    def test_a_path_registered_before_the_cutoff_is_selected(self):
+    @pytest.mark.asyncio
+    async def test_a_path_registered_before_the_cutoff_is_selected(self):
         info = {"/nix/store/aaa-old": {"registrationTime": 100, "narSize": 1}}
-        assert _select_old_paths(info, cutoff=200) == ["/nix/store/aaa-old"]
+        scan = await _scan(info, cutoff=200)
+        assert scan.old_paths == ["/nix/store/aaa-old"]
 
-    def test_a_path_registered_after_the_cutoff_is_kept(self):
+    @pytest.mark.asyncio
+    async def test_a_path_registered_after_the_cutoff_is_kept(self):
         info = {"/nix/store/bbb-new": {"registrationTime": 300, "narSize": 1}}
-        assert _select_old_paths(info, cutoff=200) == []
+        scan = await _scan(info, cutoff=200)
+        assert scan.old_paths == []
 
-    def test_the_key_is_the_path_and_the_value_carries_no_path(self):
+    @pytest.mark.asyncio
+    async def test_the_key_is_the_path_and_the_value_carries_no_path(self):
         """The shape that made the old code answer nothing.
 
         A value with no `path` key is what Nix really sends, so a reader that
@@ -63,13 +75,17 @@ class TestSelectOldPaths:
         """
         info = {"/nix/store/ccc-old": {"registrationTime": 1, "narSize": 120}}
         assert "path" not in info["/nix/store/ccc-old"]
-        assert _select_old_paths(info, cutoff=2) == ["/nix/store/ccc-old"]
+        scan = await _scan(info, cutoff=2)
+        assert scan.old_paths == ["/nix/store/ccc-old"]
 
-    def test_a_path_with_no_registration_time_is_kept(self):
+    @pytest.mark.asyncio
+    async def test_a_path_with_no_registration_time_is_kept(self):
         """Absent means "do not touch", not "old"."""
-        assert _select_old_paths({"/nix/store/ddd": {"narSize": 1}}, cutoff=200) == []
+        scan = await _scan({"/nix/store/ddd": {"narSize": 1}}, cutoff=200)
+        assert scan.old_paths == []
 
-    def test_the_real_output_of_nix_path_info_parses(self):
+    @pytest.mark.asyncio
+    async def test_the_real_output_of_nix_path_info_parses(self):
         """One entry, copied from `nix path-info --all --json --json-format 1`."""
         raw = (
             '{"/nix/store/slqhbc4rf1c8j67bjzjdrh32cmwwyrhn-probe-a":'
@@ -78,8 +94,57 @@ class TestSelectOldPaths:
             '"narSize":120,"references":[],"registrationTime":1789602613,'
             '"signatures":[],"ultimate":false}}'
         )
-        selected = _select_old_paths(json.loads(raw), cutoff=1789602614)
-        assert selected == ["/nix/store/slqhbc4rf1c8j67bjzjdrh32cmwwyrhn-probe-a"]
+        scan = await scan_path_info(io.BytesIO(raw.encode()), cutoff=1789602614)
+        assert scan.old_paths == ["/nix/store/slqhbc4rf1c8j67bjzjdrh32cmwwyrhn-probe-a"]
+        assert scan.nar_bytes == 120
+
+    @pytest.mark.asyncio
+    async def test_it_checkpoints_while_it_reads(self):
+        """The reason for the stream: this loop also serves the NRI heartbeat.
+
+        Measured on 216,455 paths / 282 MB of JSON: parsing it whole held the
+        loop for 1.374s, and in a thread for 0.841s, because the C json
+        decoder keeps the GIL. Reduced this way the worst gap was 0.057s.
+        """
+        info = {
+            f"/nix/store/{index:032d}-p": {"registrationTime": 1, "narSize": 1}
+            for index in range(gc_task._SCAN_YIELD_EVERY * 2)
+        }
+        seen = 0
+
+        async def counting_checkpoint() -> None:
+            nonlocal seen
+            seen += 1
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(gc_task, "checkpoint", counting_checkpoint)
+            scan = await _scan(info, cutoff=2)
+
+        assert scan.paths == gc_task._SCAN_YIELD_EVERY * 2
+        assert seen == 2, f"checkpointed {seen} times over {scan.paths} paths"
+
+    def test_the_c_backend_is_the_one_that_ships(self):
+        """A silent fall back to the pure-Python backend costs ~10x.
+
+        `ijson` picks a backend at import. The node is where this runs and
+        where a slow scan matters, so the packaged environment has to carry
+        the compiled one, not just resolve the name.
+        """
+        import ijson
+
+        assert ijson.backend == "yajl2_c", f"ijson fell back to {ijson.backend!r}"
+
+    @pytest.mark.asyncio
+    async def test_a_truncated_answer_ends_the_cycle_quietly(self):
+        """`nix path-info` killed mid-write leaves an incomplete object.
+
+        It must not take the loop down: the cycle logs and returns, and the
+        next one tries again.
+        """
+        import ijson
+
+        with pytest.raises(ijson.JSONError):
+            await scan_path_info(io.BytesIO(b'{"/nix/store/aaa": '), cutoff=0)
 
 
 class TestCountDeleted:
@@ -193,26 +258,34 @@ class TestStoreSize:
     which is how #38 stayed invisible for 33 hours.
     """
 
-    def test_the_sum_and_the_count_come_from_one_answer(self):
+    @pytest.mark.asyncio
+    async def test_the_sum_and_the_count_come_from_one_answer(self):
         gc_task._record_store_size(
-            {
-                "/nix/store/aaa": {"narSize": 100, "registrationTime": 1},
-                "/nix/store/bbb": {"narSize": 250, "registrationTime": 2},
-            }
+            await _scan(
+                {
+                    "/nix/store/aaa": {"narSize": 100, "registrationTime": 1},
+                    "/nix/store/bbb": {"narSize": 250, "registrationTime": 2},
+                },
+                cutoff=0,
+            )
         )
 
         assert gc_task.STORE_PATHS._value.get() == 2
         assert gc_task.STORE_NAR_BYTES._value.get() == 350
 
-    def test_an_empty_store_answers_zero_rather_than_nothing(self):
+    @pytest.mark.asyncio
+    async def test_an_empty_store_answers_zero_rather_than_nothing(self):
         """Absent and zero mean different things on a dashboard."""
-        gc_task._record_store_size({})
+        gc_task._record_store_size(await _scan({}, cutoff=0))
 
         assert gc_task.STORE_PATHS._value.get() == 0
         assert gc_task.STORE_NAR_BYTES._value.get() == 0
 
-    def test_a_path_with_no_nar_size_does_not_break_the_sum(self):
-        gc_task._record_store_size({"/nix/store/aaa": {"registrationTime": 1}})
+    @pytest.mark.asyncio
+    async def test_a_path_with_no_nar_size_does_not_break_the_sum(self):
+        gc_task._record_store_size(
+            await _scan({"/nix/store/aaa": {"registrationTime": 1}}, cutoff=0)
+        )
 
         assert gc_task.STORE_NAR_BYTES._value.get() == 0
 
