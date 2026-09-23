@@ -11,8 +11,10 @@ from pathlib import Path
 import structlog
 
 from .constants import (
+    MNT_DETACH,
     MS_BIND,
     MS_RDONLY,
+    MS_REC,
     MS_REMOUNT,
     NIX_BUILD_TIMEOUT,
     VERIFY_STORE_PATHS,
@@ -43,6 +45,72 @@ _libc.mount.argtypes = [
 _libc.mount.restype = ctypes.c_int
 _libc.umount2.argtypes = [ctypes.c_char_p, ctypes.c_int]
 _libc.umount2.restype = ctypes.c_int
+
+# mount_setattr(2) (Linux 5.12, include/uapi/linux/mount.h). Introduced via
+# the common syscall table, so x86_64 and aarch64 share the number.
+_NR_MOUNT_SETATTR = 442
+MOUNT_ATTR_RDONLY = 0x1
+AT_RECURSIVE = 0x8000
+AT_FDCWD = -100
+
+
+class _MountAttr(ctypes.Structure):
+    """struct mount_attr, the argument to mount_setattr(2)."""
+
+    _fields_ = [
+        ("attr_set", ctypes.c_uint64),
+        ("attr_clr", ctypes.c_uint64),
+        ("propagation", ctypes.c_uint64),
+        ("userns_fd", ctypes.c_uint64),
+    ]
+
+
+def _set_readonly_recursive(target_path: Path) -> None:
+    """Make `target_path` read-only, and every mount under it too.
+
+    `MS_REMOUNT | MS_RDONLY` changes the top mount only. Measured: a submount
+    under a target remounted that way is still writable, and a write there
+    reaches the host store through the shared inode. mount_setattr with
+    AT_RECURSIVE is the call that covers the subtree.
+
+    A kernel without the syscall answers ENOSYS, and then the remount is
+    correct: such a volume carries no submounts to miss.
+    """
+    attr = _MountAttr(
+        attr_set=MOUNT_ATTR_RDONLY, attr_clr=0, propagation=0, userns_fd=0
+    )
+    ret = _libc.syscall(
+        ctypes.c_long(_NR_MOUNT_SETATTR),
+        ctypes.c_int(AT_FDCWD),
+        ctypes.c_char_p(os.fsencode(target_path)),
+        ctypes.c_uint(AT_RECURSIVE),
+        ctypes.byref(attr),
+        ctypes.c_size_t(ctypes.sizeof(attr)),
+    )
+    if ret == 0:
+        return
+
+    err = ctypes.get_errno()
+    if err != errno.ENOSYS:
+        raise MountError(
+            f"Failed to make bind volume read-only: {os.strerror(err)} (errno {err})",
+            logs="",
+        )
+
+    logger.debug("mount_setattr_unavailable", path=str(target_path))
+    ret = _libc.mount(
+        None,
+        ctypes.c_char_p(os.fsencode(target_path)),
+        None,
+        MS_BIND | MS_REMOUNT | MS_RDONLY,
+        None,
+    )
+    if ret != 0:
+        err = ctypes.get_errno()
+        raise MountError(
+            f"Failed to remount bind volume read-only: {os.strerror(err)} (errno {err})",
+            logs="",
+        )
 
 
 async def prepare_volume(
@@ -135,11 +203,16 @@ async def mount_volume(
         logger.debug(
             "mounting_bind_readonly", src=str(volume_root), dst=str(target_path)
         )
+        #
+        # MS_REC because a volume root may hold mounts of its own: a store
+        # presented as one bind mount per path (issue #65). Without it the
+        # pod sees the mountpoints as empty directories -- measured 0 of 3
+        # paths readable. It is a no-op against a volume that holds none.
         ret = _libc.mount(
             ctypes.c_char_p(os.fsencode(volume_root)),
             ctypes.c_char_p(os.fsencode(target_path)),
             None,
-            MS_BIND | MS_RDONLY,
+            MS_BIND | MS_REC | MS_RDONLY,
             None,
         )
         if ret != 0:
@@ -162,23 +235,18 @@ async def mount_volume(
                     f"target_parent_exists={target_path.parent.exists()}",
                     logs="",
                 )
-        # Older kernels silently ignore MS_RDONLY on initial bind mounts, so
-        # remount to guarantee the RO flag is enforced.
-        ret = _libc.mount(
-            None,
-            ctypes.c_char_p(os.fsencode(target_path)),
-            None,
-            MS_BIND | MS_REMOUNT | MS_RDONLY,
-            None,
-        )
-        if ret != 0:
-            err = ctypes.get_errno()
-            # Unmount the writable bind mount so we don't leave it exposed
-            _libc.umount2(ctypes.c_char_p(os.fsencode(target_path)), ctypes.c_int(0))
-            raise MountError(
-                f"Failed to remount bind volume read-only: {os.strerror(err)} (errno {err})",
-                logs="",
+        # The MS_RDONLY above is advisory on older kernels, and it never
+        # covers submounts. Enforce it over the whole subtree.
+        try:
+            _set_readonly_recursive(target_path)
+        except MountError:
+            # Do not leave a writable store exposed. MNT_DETACH because the
+            # bind is recursive: a plain umount2 of a mount that carries
+            # submounts fails with EBUSY.
+            _libc.umount2(
+                ctypes.c_char_p(os.fsencode(target_path)), ctypes.c_int(MNT_DETACH)
             )
+            raise
     else:
         # For readwrite we use an overlayfs mount, the benefit here is that
         # it works as CoW even if the underlying filesystem doesn't support

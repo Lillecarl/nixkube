@@ -963,6 +963,10 @@ rec {
     # bind mounts. Issue #65 rests on the answer, and nothing short of real
     # root can ask it.
     bind-farm = import ./tests/nixos/bind-farm.nix { inherit pkgs lib; };
+
+    # Also outside `checks.all`, and for the same reason: a mount flag can
+    # only be checked by mounting. Issue #66.
+    csi-mount-rec = import ./tests/nixos/csi-mount-rec.nix { inherit pkgs lib; };
   };
 
   treefmt = (import sources.treefmt-nix).mkWrapper pkgs {

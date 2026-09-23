@@ -135,6 +135,11 @@ KUBE_NODE_NAME = os.environ.get("KUBE_NODE_NAME", "unknown")
 MS_RDONLY = 1
 MS_REMOUNT = 32
 MS_BIND = 4096
+MS_REC = 16384
+
+# umount2(2) flag: detach the subtree now and release it when nobody uses it.
+# A plain umount2 of a mount that carries submounts fails with EBUSY.
+MNT_DETACH = 2
 
 # GC loop configuration
 # Set via GC_KEEP_SECONDS / GC_INTERVAL_SECONDS environment variables
