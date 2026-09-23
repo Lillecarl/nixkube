@@ -62,6 +62,7 @@ import ctypes
 import errno
 import multiprocessing
 import os
+import queue
 import traceback
 from functools import cache
 from pathlib import Path
@@ -391,7 +392,16 @@ async def mount_in_container(
     # that dies with the daemon.
     await anyio.to_thread.run_sync(proc.join, abandon_on_cancel=True)
 
-    result = result_queue.get_nowait()
+    try:
+        result = result_queue.get_nowait()
+    except queue.Empty:
+        # The worker died without answering: OOM-killed, or a segfault in
+        # setns. `exitcode` is negative for a signal. Without this the
+        # caller sees a bare `Empty` and nothing about the process.
+        raise RuntimeError(
+            f"mount worker for pid {container_pid} left no result "
+            f"(exit code {proc.exitcode})"
+        ) from None
     if isinstance(result, Exception):
         logger.error("worker_spawn_failed", exc_info=result)
         raise result
