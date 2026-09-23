@@ -20,9 +20,14 @@ async def install_gcroots(
     package_paths: set[Path],
     out_link: Path,
     store: Path | None = None,
-    timeout: float | None = None,
+    timeout: float = NIX_BUILD_TIMEOUT,
 ) -> None:
-    """Install gc roots with single batch build."""
+    """Install gc roots with single batch build.
+
+    The deadline has a default rather than being optional. A caller that
+    forgot one got an unbounded `nix build` on a request path, which is the
+    shape issue #38 measured in the GC loop.
+    """
     if not package_paths:
         return
 
@@ -33,10 +38,7 @@ async def install_gcroots(
         args.extend(["--out-link", out_link])
         args.extend(package_paths)
 
-        if timeout is not None:
-            await try_captured(*args, timeout=timeout)
-        else:
-            await try_captured(*args)
+        await try_captured(*args, timeout=timeout)
     except CommandTimeoutError as e:
         raise InstallGCRootError(
             f"GC root installation timeout after {timeout}s",

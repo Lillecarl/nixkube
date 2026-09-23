@@ -100,6 +100,20 @@ METRICS_ADDR = os.environ.get("METRICS_ADDR", "::")
 # Set via VERIFY_STORE_PATHS environment variable
 VERIFY_STORE_PATHS = os.environ.get("VERIFY_STORE_PATHS", "false") == "true"
 
+# How long `nix store verify --recursive --no-trust` may take.
+#
+# It is the longest nix call on the publish path when it runs at all, and the
+# only one whose cost is bytes rather than work: `--no-trust` re-hashes every
+# path. Measured on nix 2.34.8 over a closure of 2443 paths / 11.8 GiB: 8.19s
+# warm. Cold from disk is bounded by the disk, so this is generous on purpose
+# -- it exists to stop a stuck filesystem blocking NodePublishVolume for ever,
+# not to bound a slow but working node.
+NIX_VERIFY_TIMEOUT: float = _parse_float_env("NIX_VERIFY_TIMEOUT", "900")
+
+# How long `nix path-info --recursive` may take. Metadata only, no bytes: it
+# answers in well under a second for the closures above.
+NIX_PATH_INFO_TIMEOUT: float = _parse_float_env("NIX_PATH_INFO_TIMEOUT", "120")
+
 # CSI socket path for gRPC server
 CSI_SOCKET_PATH = os.environ.get("CSI_SOCKET_PATH", "/csi/csi.sock")
 
