@@ -2,6 +2,7 @@
 
 import errno
 import os
+import shutil
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -106,6 +107,17 @@ async def hardlink_tree(src: Path, dst: Path) -> None:
         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(src))
 
 
+def _discard(path: Path) -> None:
+    """Remove a staging path, whatever it is, without raising."""
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("staging_discard_failed", path=str(path), exc_info=True)
+
+
 async def hardlink_closure(store_paths: set[Path], dst: Path) -> None:
     """
     Hardlink multiple store paths into dst.
@@ -122,11 +134,29 @@ async def hardlink_closure(store_paths: set[Path], dst: Path) -> None:
 
         for store_path in store_paths:
             target = dst / store_path.name
-            if target.exists():
-                continue  # already copied (deduplication across volumes)
+            # `lexists`, because a store path can be a symlink and a broken
+            # one answers False to `exists`. The `os.symlink` below would
+            # then fail with EEXIST on every retry.
+            if os.path.lexists(target):
+                continue  # already linked, and complete: see the rename below
+
+            # Link into a staging name and rename it into place, so a path
+            # that exists is a path that is *finished*. A walk that stops
+            # partway otherwise leaves a half-filled directory that the next
+            # attempt skips as "already copied", and the container gets a
+            # truncated closure with nothing logged anywhere.
+            #
+            # Cancellation is the case that needs the rename rather than the
+            # cleanup below: a removed container cancels its own build now,
+            # and `CancelledError` is a BaseException, so no `except Exception`
+            # runs on the way out.
+            staging = dst / f".{store_path.name}.partial"
+            _discard(staging)
             try:
-                await hardlink_tree(store_path, target)
+                await hardlink_tree(store_path, staging)
+                os.rename(staging, target)
             except Exception as e:
+                _discard(staging)
                 HARDLINK_CLOSURES.labels(result="error").inc()
                 raise HardlinkClosureError(
                     f"Failed to hardlink {store_path.name}",

@@ -302,3 +302,83 @@ class TestWhichSideWasMissing:
         assert "parent" in logs and "exists=False" in logs, (
             "the missing side is the target's parent directory"
         )
+
+
+class TestAnInterruptedWalkIsNotMistakenForAFinishedOne:
+    """A store path that exists must be a store path that is complete.
+
+    The dedup check skips a path whose directory is already there. A walk
+    killed partway -- an OOM kill, a node reboot -- leaves exactly that
+    shape, so without the staging rename the retry hands the container a
+    truncated closure and logs nothing at all.
+    """
+
+    @staticmethod
+    def _store_path(root: Path, count: int = 3) -> Path:
+        src = root / "store" / "abc-pkg"
+        src.mkdir(parents=True)
+        for index in range(count):
+            (src / f"f{index:05d}").write_text("x")
+        return src
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_walk_leaves_no_store_path_behind(self):
+        """Cancellation is the case the staging rename is for.
+
+        `CancelledError` is a BaseException, so the `except Exception` that
+        tidies up after a failure never runs. A removed container now
+        cancels its own build (issue #64), so this is a path the code
+        takes, not a hypothetical one.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            # Enough entries to span checkpoints, so the cancel lands inside
+            # the walk rather than after it.
+            src = self._store_path(root, _YIELD_EVERY * 2)
+            dst = root / "vol" / "nix/store"
+
+            started = anyio.Event()
+            real_link = Path.hardlink_to
+
+            def notice(self, target):
+                result = real_link(self, target)
+                started.set()
+                return result
+
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setattr(Path, "hardlink_to", notice)
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(hardlink_closure, {src}, dst)
+                    await started.wait()
+                    tg.cancel_scope.cancel()
+
+            assert not os.path.lexists(dst / src.name), (
+                "a cancelled walk left a store path the next attempt will skip"
+            )
+
+    @pytest.mark.asyncio
+    async def test_it_leaves_nothing_of_its_own_behind(self):
+        """The staging name must not reach the container's store."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            src = self._store_path(root)
+            dst = root / "vol" / "nix/store"
+
+            await hardlink_closure({src}, dst)
+
+            assert sorted(p.name for p in dst.iterdir()) == [src.name]
+
+    @pytest.mark.asyncio
+    async def test_a_broken_symlink_store_path_survives_a_second_call(self):
+        """`exists` answers False for one, so it used to be relinked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            src = root / "store" / "abc-link"
+            src.parent.mkdir(parents=True)
+            src.symlink_to("/nix/store/0000000000000000000000000000000-nope")
+            dst = root / "vol" / "nix/store"
+
+            await hardlink_closure({src}, dst)
+            await hardlink_closure({src}, dst)
+
+            assert (dst / src.name).is_symlink()
