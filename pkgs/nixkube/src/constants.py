@@ -175,6 +175,15 @@ CACHE_PING_TIMEOUT_SECONDS: float = _parse_float_env("CACHE_PING_TIMEOUT_SECONDS
 # is the kubelet evicting pods for disk.
 GC_STALL_CYCLES: int = _parse_int_env("GC_STALL_CYCLES", "3")
 
+# How long to wait for the CRI to answer ListContainers.
+#
+# The volume sweep awaits this, so a runtime that never answers ends volume
+# collection on that node -- the shape issue #38 measured for the nix calls in
+# the GC loop, on a socket those timeouts do not cover. The plugin also asks
+# once at start-up, where a hang means it never registers and every container
+# created afterwards gets no /nix.
+CRI_LIST_TIMEOUT_SECONDS: float = _parse_float_env("CRI_LIST_TIMEOUT_SECONDS", "30")
+
 # How long the volume sweep waits for a cancelled build to unwind before it
 # treats the volume as still in use and leaves it to the next sweep.
 #

@@ -5,11 +5,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import anyio
 import grpclib.client
 import kr8s
 import structlog
 
 from cri import cri_grpc, cri_pb2
+
+from .constants import CRI_LIST_TIMEOUT_SECONDS
 
 logger = structlog.get_logger("nixkube.cri")
 
@@ -82,15 +85,23 @@ async def list_container_ids(cri_socket: Path) -> set[str]:
         Set of container IDs as strings.
 
     Raises:
-        RuntimeError if unable to connect to CRI or query containers.
+        RuntimeError if unable to connect to CRI, query containers, or if the
+        runtime does not answer inside CRI_LIST_TIMEOUT_SECONDS.
     """
     try:
-        async with cri_channel(cri_socket) as channel:
-            stub = cri_grpc.RuntimeServiceStub(channel)
-            request = cri_pb2.ListContainersRequest()
-            response = await stub.ListContainers(request)
-            return {container.id for container in response.containers}
+        with anyio.move_on_after(CRI_LIST_TIMEOUT_SECONDS):
+            async with cri_channel(cri_socket) as channel:
+                stub = cri_grpc.RuntimeServiceStub(channel)
+                request = cri_pb2.ListContainersRequest()
+                response = await stub.ListContainers(request)
+                return {container.id for container in response.containers}
     except Exception as e:
         raise RuntimeError(
             f"Failed to list containers from CRI socket {cri_socket}: {e}"
         ) from e
+
+    # The only way past that block without returning is the deadline.
+    raise RuntimeError(
+        f"CRI socket {cri_socket} did not answer ListContainers within "
+        f"{CRI_LIST_TIMEOUT_SECONDS}s"
+    )
