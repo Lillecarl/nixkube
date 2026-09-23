@@ -45,6 +45,7 @@ from pathlib import Path
 
 from ..constants import MS_BIND, MS_REC
 from ..mountattr import MountSetattrUnsupported, set_readonly
+from ..mountbudget import measure
 
 _libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
 _libc.mount.argtypes = [
@@ -105,7 +106,20 @@ def build_farm(store_dir: Path, store_paths: Iterable[Path]) -> int:
     A symlink is copied rather than bound: a bind mount needs a directory or
     a regular file to land on, and a store path that is a symlink has nothing
     for either.
+
+    The budget is checked before the first mount. Past `fs.mount-max`,
+    mount(2) answers ENOSPC and says nothing about which limit it meant --
+    partway through a closure, leaving a store that is half there.
     """
+    store_paths = list(store_paths)
+    budget = measure(len(store_paths))
+    if not budget.fits:
+        raise FarmError(
+            errno.ENOSPC,
+            f"{len(store_paths)} mounts will not fit: this namespace holds "
+            f"{budget.used} of {budget.limit}",
+        )
+
     store_dir.mkdir(parents=True, exist_ok=True)
     bound = 0
 

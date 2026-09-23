@@ -25,6 +25,7 @@ from ..constants import (
     NRI_RUNTIME_SOCKET,
 )
 from ..cri import get_cri_socket, list_container_ids
+from ..errors import MountBudgetError
 from ..events import report_event
 from ..metrics import (
     NRI_BUILD_DURATION,
@@ -33,9 +34,10 @@ from ..metrics import (
     NRI_CONTAINERS_SEEN,
     NRI_STATE_CHANGES,
 )
+from ..mountbudget import measure
 from ..nix import fetch_packages, get_build_args, get_current_system
 from ..supervision import detach
-from ..volume import prepare_farm_volume, prepare_volume
+from ..volume import prepare_volume
 from .annotations import (
     extract_container_store_paths,
     parse_nix_exclude,
@@ -110,11 +112,13 @@ from .zmq import ZeroMQServer
 #    - Calls nix build with extra args (builders, cache endpoints)
 #    - Outputs at /nix/var/nixkube/containers/{container_id}/nix
 #
-# 2. Prepare the volume
-#    - Farm: prepare_farm_volume() registers the closure in the chroot store's
-#      database and copies nothing. The paths are bound in the mount worker.
-#    - Hardlinks: prepare_volume() links every closure path into the volume
-#      and creates upper/ and work/ for the RW overlay.
+# 2. Prepare the volume — prepare_volume(bind_farm=NRI_BIND_FARM)
+#    - Farm: registers the closure in the chroot store's database and copies
+#      nothing. The paths are bound in the mount worker. The build task asks
+#      the mount budget here and refuses before the first mount if the
+#      closure will not fit.
+#    - Hardlinks: links every closure path into the volume, and creates
+#      upper/ and work/ for the RW overlay.
 #
 # 3. Wait for PID+bundle
 #    - Blocks on zmq_server.wait_for_pid(container_id, timeout=30)
@@ -569,12 +573,26 @@ class NriPlugin(NriPluginBase):
 
         # A farm binds the closure in the mount worker and leaves nothing on
         # disk; the hardlink path fills the volume here instead. Issue #65.
+        closure = await prepare_volume(
+            volume_path, store_paths, None, bind_farm=NRI_BIND_FARM
+        )
+
+        farm_paths = None
         if NRI_BIND_FARM:
-            farm_paths = await prepare_farm_volume(volume_path, store_paths)
-            log.debug("farm_prepared", count=len(farm_paths))
-        else:
-            farm_paths = None
-            await prepare_volume(volume_path, store_paths, None)
+            # Asked here rather than in the worker, because the worker's
+            # namespace starts as a copy of this one: what fits here is what
+            # fits there, and a refusal at this point still has somewhere to
+            # report itself.
+            budget = measure(len(closure))
+            if not budget.fits:
+                raise MountBudgetError(
+                    f"{len(closure)} mounts will not fit: this namespace holds "
+                    f"{budget.used} of {budget.limit}. Raise fs.mount-max, or "
+                    f"set NRI_BIND_FARM=false to hardlink this node's stores.",
+                    logs="",
+                )
+            farm_paths = closure
+
         nix_tree_path = volume_path / "nix"
 
         # Wait for nri-wait to report PID+bundle (arrives when the createRuntime hook fires).

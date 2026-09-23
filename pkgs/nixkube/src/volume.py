@@ -85,19 +85,31 @@ async def prepare_volume(
     volume_root: Path,
     package_paths: set[Path],
     primary_package: Path | None,
-) -> None:
-    """
-    Prepare a volume root with hardlinked store paths and initialized database.
-    """
+    bind_farm: bool = False,
+) -> list[Path]:
+    """Prepare a volume root, and answer the closure it holds.
 
+    Both store layouts come through here, because they differ in one step out
+    of five and a second copy of the other four is a second thing to get
+    wrong. `bind_farm` says which:
+
+      hardlinks  every closure path is linked into the volume, here and now.
+      bind farm  nothing is copied. The paths are bound in the mount worker,
+                 which is the only place they can be: `fs.mount-max` is
+                 100,000 per namespace, so 2443 mounts per closure would cap
+                 the daemon's own namespace at about 40 containers. The
+                 caller passes the returned closure on to `mount_in_container`.
+    """
     # Capitalized to emphasise they're Nix environment variables
     NIX_STATE_DIR = volume_root / "nix/var/nix"
     NIX_STATE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Pre-create overlayfs upper/work dirs so they're ready if the container
-    # requests a RW /nix mount; harmless when the bind-mount path is used.
-    (volume_root / "upper").mkdir(parents=True, exist_ok=True)
-    (volume_root / "work").mkdir(parents=True, exist_ok=True)
+    if not bind_farm:
+        # Pre-create overlayfs upper/work dirs so they're ready if the
+        # container requests a RW /nix mount. A farm needs neither: it is
+        # writable in the gaps between its mounts.
+        (volume_root / "upper").mkdir(parents=True, exist_ok=True)
+        (volume_root / "work").mkdir(parents=True, exist_ok=True)
 
     # Verify all packages and their closures before processing
     if VERIFY_STORE_PATHS:
@@ -106,73 +118,49 @@ async def prepare_volume(
     # Get storepaths from all packages
     store_paths = await get_closure_paths(package_paths)
 
-    # This block is essentially nix copy into a chroot store with
-    # extra steps. (Hardlinking instead of dumbcopying)
-
-    # Copy closure to substore
-    hardlink_start = time.perf_counter()
-    await hardlink_closure(store_paths, volume_root / "nix/store")
-    logger.debug(
-        "hardlinked_paths",
-        volume_root=volume_root,
-        count=len(store_paths),
-        elapsed=round(time.perf_counter() - hardlink_start, 3),
-    )
+    if not bind_farm:
+        # This block is essentially nix copy into a chroot store with
+        # extra steps. (Hardlinking instead of dumbcopying)
+        hardlink_start = time.perf_counter()
+        await hardlink_closure(store_paths, volume_root / "nix/store")
+        logger.debug(
+            "hardlinked_paths",
+            volume_root=volume_root,
+            count=len(store_paths),
+            elapsed=round(time.perf_counter() - hardlink_start, 3),
+        )
 
     # Create Nix database
     await init_database(NIX_STATE_DIR, store_paths)
 
-    # Install gcroots in container using chroot store. This is
-    # required because the auto roots created for /nix/var/result
-    # will point to Narnia while this one points into store.
-    await install_gcroots(
-        package_paths,
-        NIX_STATE_DIR / "gcroots" / "csi",
-        store=volume_root,
-        timeout=NIX_BUILD_TIMEOUT,
-    )
-
-    # Install /nix/var/result in container using chroot store
-    if primary_package is not None:
-        await install_result_link(volume_root, primary_package)
-        # Create hardlink farm of primary package to volume_root
-        deref_start = time.perf_counter()
-        await deref_hardlink_tree(primary_package, volume_root)
-        logger.debug(
-            "deref_hardlink_tree_done",
-            elapsed=round(time.perf_counter() - deref_start, 3),
+    if not bind_farm:
+        # Install gcroots in container using chroot store. This is
+        # required because the auto roots created for /nix/var/result
+        # will point to Narnia while this one points into store.
+        #
+        # A farm gets none. Its store lives only as long as the container, so
+        # a root inside it protects nothing, and `nix build --store <volume>`
+        # over paths that are not there yet would try to realise them into
+        # it -- copying the closure the farm exists to avoid. The root that
+        # matters is the one `fetch_packages` leaves in the node's store.
+        await install_gcroots(
+            package_paths,
+            NIX_STATE_DIR / "gcroots" / "csi",
+            store=volume_root,
+            timeout=NIX_BUILD_TIMEOUT,
         )
 
+        # Install /nix/var/result in container using chroot store
+        if primary_package is not None:
+            await install_result_link(volume_root, primary_package)
+            # Create hardlink farm of primary package to volume_root
+            deref_start = time.perf_counter()
+            await deref_hardlink_tree(primary_package, volume_root)
+            logger.debug(
+                "deref_hardlink_tree_done",
+                elapsed=round(time.perf_counter() - deref_start, 3),
+            )
 
-async def prepare_farm_volume(
-    volume_root: Path, package_paths: set[Path]
-) -> list[Path]:
-    """Prepare a volume whose store is a bind farm, and answer the closure.
-
-    What it does *not* do is the point: nothing copies or links the closure.
-    The paths are bound in the mount worker, which is the only place they can
-    be -- `fs.mount-max` is 100,000 per namespace, so 2443 mounts per closure
-    would cap the daemon's own namespace at about 40 containers. See
-    `nri/farm.py`.
-
-    It installs no gc root inside the chroot store either. That store lives
-    only as long as the container, so a root in it protects nothing, and
-    `nix build --store <volume>` over a store whose paths are not there yet
-    would try to realise them into it -- copying the closure this exists to
-    avoid. The root that matters is the one `fetch_packages` leaves in the
-    node's store.
-    """
-    NIX_STATE_DIR = volume_root / "nix/var/nix"
-    NIX_STATE_DIR.mkdir(parents=True, exist_ok=True)
-
-    if VERIFY_STORE_PATHS:
-        await verify_store_paths(package_paths)
-
-    store_paths = await get_closure_paths(package_paths)
-    await init_database(NIX_STATE_DIR, store_paths)
-    logger.debug(
-        "farm_volume_prepared", volume_root=str(volume_root), count=len(store_paths)
-    )
     return sorted(store_paths)
 
 
