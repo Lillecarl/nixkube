@@ -126,6 +126,29 @@ VOLUMES_PUBLISHED = Gauge(
     "Volumes this daemon has mounted and not yet unmounted",
 )
 
+# --- Mount budget ---
+#
+# `fs.mount-max` counts per mount namespace, and a bind farm spends one per
+# closure path. Nothing outside a node can see its mount table fill up, and
+# the first symptom otherwise is a container that will not start with an
+# ENOSPC that names no limit. These two are what an alert reads:
+# `used / limit` past about 0.8 means the next large closure may not fit.
+
+MOUNT_NAMESPACE_USED = Gauge(
+    "nixkube_mount_namespace_mounts",
+    "Mounts held by this daemon's mount namespace",
+)
+
+MOUNT_NAMESPACE_LIMIT = Gauge(
+    "nixkube_mount_namespace_limit",
+    "fs.mount-max, the most this namespace may hold",
+)
+
+MOUNT_BUDGET_REFUSALS = Counter(
+    "nixkube_mount_budget_refusals_total",
+    "Farms refused because the closure would not fit in the mount budget",
+)
+
 # --- Hardlinking ---
 #
 # Irreducible work: linking a closure into a container's farm is a metadata

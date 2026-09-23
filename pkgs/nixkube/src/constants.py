@@ -100,6 +100,13 @@ METRICS_ADDR = os.environ.get("METRICS_ADDR", "::")
 # Set via VERIFY_STORE_PATHS environment variable
 VERIFY_STORE_PATHS = os.environ.get("VERIFY_STORE_PATHS", "false") == "true"
 
+# Share of `fs.mount-max` past which the daemon complains at error level.
+#
+# Loud rather than quiet: nothing outside a node can see its mount table fill
+# up, and the failure it leads to is a container that will not start with an
+# ENOSPC naming no limit.
+MOUNT_BUDGET_WARN_RATIO: float = _parse_float_env("MOUNT_BUDGET_WARN_RATIO", "0.8")
+
 # Present a container's store as one read-only bind mount per closure path,
 # instead of a hardlink tree. Issue #65, and `nri/farm.py` for why.
 #
