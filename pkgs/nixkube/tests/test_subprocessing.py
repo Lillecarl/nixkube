@@ -159,3 +159,32 @@ async def test_try_captured_preserves_full_error():
     assert error.returncode == 5
     assert "error" in error.stderr
     assert "error" in error.combined
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_error_from_inside_is_not_reported_as_the_deadline():
+    """The deadline is the cancel scope that caught it, not `TimeoutError`.
+
+    A `TimeoutError` raised *inside* -- a socket, a transport, a nested
+    deadline -- is not this command exceeding its own. Catching the type
+    instead of reading the scope reported it as `CommandTimeoutError(124)`,
+    naming a cause that did not happen and hiding the one that did.
+
+    `open_process` and not `_read_stream`: the stream readers run in a task
+    group, so what leaves them is an `ExceptionGroup` that `except
+    TimeoutError` never matched either. This is the shape that told the two
+    apart.
+    """
+    from src import subprocessing
+
+    async def refuse(*_args, **_kwargs):
+        raise TimeoutError("the transport gave up")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(subprocessing.anyio, "open_process", refuse)
+        with pytest.raises(TimeoutError) as caught:
+            await run_captured("echo", "hello", timeout=30)
+
+    assert not isinstance(caught.value, CommandTimeoutError), (
+        "an inner TimeoutError was rewritten as this command timing out"
+    )

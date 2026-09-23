@@ -114,31 +114,36 @@ async def run_console(
     stderr_data: list[str] = []
     combined_data: list[str] = []
 
-    try:
-        with anyio.fail_after(timeout):
-            async with await anyio.open_process(
-                [str(arg) for arg in args],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            ) as proc:
-                # Both are PIPE above, so neither is None.
-                assert proc.stdout is not None and proc.stderr is not None
-                # Read both while the process runs. A pipe that nobody drains
-                # fills at 64KB and stops the child there, so this is what lets
-                # a chatty command finish at all -- and reading them together is
-                # what makes `combined` interleaved rather than concatenated.
-                async with anyio.create_task_group() as tg:
-                    tg.start_soon(
-                        _read_stream, proc.stdout, stdout_data, combined_data, log_level
-                    )
-                    tg.start_soon(
-                        _read_stream, proc.stderr, stderr_data, combined_data, log_level
-                    )
-                # Not raised on non-zero: try_captured/try_console decide that.
-                returncode = await proc.wait()
-    except TimeoutError:
-        # `anyio.fail_after` raises TimeoutError when the deadline is reached.
-        # Use return code 124 (conventional timeout code).
+    returncode: int | None = None
+    # `move_on_after` and not `fail_after`: the deadline is then identified by
+    # the scope that caught it, not by catching `TimeoutError`. Anything
+    # inside that raises its own `TimeoutError` -- a socket, a nested
+    # deadline -- used to be reported here as this command timing out, with
+    # return code 124 and a story that never happened.
+    with anyio.move_on_after(timeout) as scope:
+        async with await anyio.open_process(
+            [str(arg) for arg in args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ) as proc:
+            # Both are PIPE above, so neither is None.
+            assert proc.stdout is not None and proc.stderr is not None
+            # Read both while the process runs. A pipe that nobody drains
+            # fills at 64KB and stops the child there, so this is what lets
+            # a chatty command finish at all -- and reading them together is
+            # what makes `combined` interleaved rather than concatenated.
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(
+                    _read_stream, proc.stdout, stdout_data, combined_data, log_level
+                )
+                tg.start_soon(
+                    _read_stream, proc.stderr, stderr_data, combined_data, log_level
+                )
+            # Not raised on non-zero: try_captured/try_console decide that.
+            returncode = await proc.wait()
+
+    if scope.cancelled_caught:
+        # Return code 124 is the conventional one for a timeout.
         SUBPROCESS_CALLS.labels(command=label, result="timeout").inc()
         SUBPROCESS_DURATION.labels(command=label).observe(
             time.perf_counter() - start_time
@@ -151,6 +156,7 @@ async def run_console(
             command=list(args),
         )
 
+    assert returncode is not None
     elapsed_time = time.perf_counter() - start_time
     SUBPROCESS_CALLS.labels(
         command=label, result="ok" if returncode == 0 else "error"
