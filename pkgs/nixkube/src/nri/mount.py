@@ -4,18 +4,30 @@
 
 ## Approach
 
-/nix is mounted via one of two paths depending on whether the container
-requested read-write access (nixkube/pod-rw or nixkube/{container}-rw annotation):
+/nix is mounted by one of two mechanisms, chosen by whether this container
+gets a bind farm (`NRI_BIND_FARM`, issue #65) and whether it asked for
+read-write access (nixkube/pod-rw or nixkube/{container}-rw):
 
-  RO (default): open_tree(2) clones the prepared nix tree as a detached fd while
-    still in the daemonset namespace; the fd survives setns(2) so the source
-    path never needs to be visible inside the container. move_mount(2) attaches
-    it at /nix, followed by MS_BIND|MS_REMOUNT|MS_RDONLY.
+  Farm: the worker unshares its own mount namespace and binds one read-only
+    mount per closure path into volume_root/nix/store. `fs.mount-max` is
+    100,000 per namespace, so this cannot happen in the daemon -- 2443 mounts
+    per closure would cap it at about 40 containers. open_tree(2) with
+    AT_RECURSIVE clones the whole tree onto a detached fd, move_mount(2)
+    attaches it at /nix, and the namespace dies with the worker.
 
-  RW: fsopen/fsconfig/fsmount build a detached overlayfs fd before setns.
-    lowerdir=volume_root/nix (the hardlink tree), upperdir=volume_root/upper,
-    workdir=volume_root/work. These directories are pre-created by prepare_volume.
-    move_mount attaches the result at /nix read-write.
+    Read-write is the same farm. Nix never mutates an existing store path, so
+    the writable part is the gaps between the mounts, on the volume's own
+    disk. Read-only adds mount_setattr(MOUNT_ATTR_RDONLY, AT_RECURSIVE) over
+    the tree, because MS_REMOUNT|MS_RDONLY covers the top mount alone.
+
+    Never an overlay lower layer: overlayfs does not follow submounts in one,
+    so a farm used that way presents empty directories.
+
+  Hardlink tree (NRI_BIND_FARM=false): the tree is already filled on disk.
+    RO clones it with open_tree and remounts read-only; RW builds a detached
+    overlayfs fd with fsopen/fsconfig/fsmount over
+    lowerdir=volume_root/nix, upperdir=volume_root/upper,
+    workdir=volume_root/work, pre-created by prepare_volume.
 
 For FHS store mounts we use the traditional mount(2) MS_BIND approach (RW),
 executed inside the container namespace after /nix is attached so that
@@ -46,13 +58,18 @@ via picklable arguments.
 
 ## Worker sequence
 
-  1. /nix mount fd  — while in daemonset namespace:
-       RO: open_tree clone
-       RW: fsopen("overlay") → fsconfig(lowerdir/upper/work) → CMD_CREATE → fsmount
+  0. farm           — unshare(CLONE_NEWNS), make / private, bind the closure
+                      read-only into volume_root/nix/store. Farm only.
+  1. /nix mount fd  — while the source paths are still visible:
+       farm or RO: open_tree clone (AT_RECURSIVE carries the farm)
+       RW hardlink: fsopen("overlay") → fsconfig(lowerdir/upper/work) →
+                    CMD_CREATE → fsmount
   2. rootfs fd      — O_PATH to bundle/rootfs while in daemonset namespace
   3. setns          — enter container mount namespace
   4. fchdir+chroot  — pivot into container rootfs
-  5. move_mount     — attach /nix fd (RO: then remount read-only)
+  5. move_mount     — attach /nix fd. RO then goes read-only:
+                      mount_setattr(AT_RECURSIVE) for a farm, so the bound
+                      paths under it are covered too; MS_REMOUNT otherwise.
   6. MS_BIND        — bind each FHS store path (read-write) inside container;
                       sources resolved after step 5 so /nix/store/... is visible.
                       (Future: open_tree+move_mount before setns removes this dependency)
@@ -70,7 +87,9 @@ from pathlib import Path
 import anyio.to_thread
 import structlog
 
-from ..constants import HOST_PROC_PATH, MS_BIND, MS_RDONLY, MS_REMOUNT
+from ..constants import HOST_PROC_PATH, MNT_DETACH, MS_BIND, MS_RDONLY, MS_REMOUNT
+from ..mountattr import set_readonly
+from .farm import build_farm, detach_namespace
 
 logger = structlog.get_logger("nixkube.nri.mount")
 
@@ -266,6 +285,7 @@ def _mount_worker(
     nix_rw: bool,
     result_queue: "multiprocessing.Queue[Exception | None]",
     host_proc_path: str,
+    farm_paths: list[Path] | None = None,
 ) -> None:
     """Worker that runs in a spawned process to mount /nix and store paths.
 
@@ -276,9 +296,25 @@ def _mount_worker(
         libc = ctypes.CDLL("libc.so.6", use_errno=True)
         libc.syscall.restype = ctypes.c_long
 
+        # Step 0: Build the farm, if this container gets one.
+        #
+        # Here and not in the daemon, because `fs.mount-max` is 100,000 per
+        # mount namespace: at 2443 mounts per closure the daemon's own
+        # namespace would hold about 40 containers. This process unshares
+        # first, so the mounts belong to something that is about to exit.
+        if farm_paths:
+            detach_namespace()
+            build_farm(nix_tree_path / "store", farm_paths)
+
         # Step 1: Build the /nix mount fd while source paths are still visible.
         # Both open_tree and fsmount return fds that survive setns.
-        if nix_rw:
+        #
+        # A farm is never an overlay lower layer: overlayfs does not follow
+        # submounts in one, so the container would see empty directories where
+        # the store paths are. `open_tree(CLONE | AT_RECURSIVE)` carries them,
+        # and the writable side of a read-write farm is the gaps between the
+        # mounts, on the volume's own disk.
+        if nix_rw and not farm_paths:
             nix_fd = _make_overlay_fd(
                 libc,
                 lowerdir=nix_tree_path,
@@ -315,16 +351,29 @@ def _mount_worker(
 
         if not nix_rw:
             # Bind clone is RW by default; flip it to RO.
-            # MS_BIND | MS_REMOUNT | MS_RDONLY is the documented way to change
-            # only the RO flag on an existing bind-like mount.
-            ret = libc.mount(
-                None, b"/nix", None, MS_BIND | MS_REMOUNT | MS_RDONLY, None
-            )
-            if ret != 0:
-                errno = ctypes.get_errno()
-                # Unmount so we don't leave a writable /nix exposed
-                libc.umount2(b"/nix", 0)
-                raise OSError(errno, f"remount /nix RO: {os.strerror(errno)}")
+            #
+            # `mount_setattr(AT_RECURSIVE)` for a farm, because
+            # `MS_BIND | MS_REMOUNT | MS_RDONLY` changes the top mount alone
+            # and every bound store path under it would stay writable --
+            # straight into /nix/store on the node, through the shared inode.
+            # The farm's binds are already read-only one by one; this is what
+            # covers the tree they were cloned into.
+            try:
+                if farm_paths:
+                    set_readonly("/nix", recursive=True)
+                else:
+                    ret = libc.mount(
+                        None, b"/nix", None, MS_BIND | MS_REMOUNT | MS_RDONLY, None
+                    )
+                    if ret != 0:
+                        errno = ctypes.get_errno()
+                        raise OSError(errno, f"remount /nix RO: {os.strerror(errno)}")
+            except OSError:
+                # Do not leave a writable /nix exposed. MNT_DETACH because a
+                # farm carries submounts, and a plain umount2 over those
+                # answers EBUSY.
+                libc.umount2(b"/nix", MNT_DETACH)
+                raise
 
         # Step 6: Bind-mount each FHS store path (read-write) into the container.
         # /nix is mounted now, so /nix/store/... source paths are reachable.
@@ -362,12 +411,16 @@ async def mount_in_container(
     nix_tree_path: Path,
     store_mounts: list[tuple[Path, Path]],
     nix_rw: bool = False,
+    farm_paths: list[Path] | None = None,
 ) -> None:
     """Mount /nix and FHS store paths inside a container's mount namespace.
 
     nix_tree_path: prepared /nix tree (lowerdir for overlayfs or bind source)
     store_mounts:  additional (src, dst) pairs for bind mounts (read-write)
-    nix_rw:        True → RW overlayfs over nix_tree_path; False → RO bind clone
+    nix_rw:        True → writable /nix; False → read-only
+    farm_paths:    the closure to bind into `nix_tree_path/store` inside the
+                   worker's own namespace. Absent means the tree is already
+                   filled -- the hardlink path.
     Raises the worker's original exception (with traceback) on failure.
     """
     ctx = multiprocessing.get_context("spawn")
@@ -383,6 +436,7 @@ async def mount_in_container(
             nix_rw,
             result_queue,
             HOST_PROC_PATH,
+            farm_paths,
         ),
         daemon=True,
     )

@@ -144,6 +144,38 @@ async def prepare_volume(
         )
 
 
+async def prepare_farm_volume(
+    volume_root: Path, package_paths: set[Path]
+) -> list[Path]:
+    """Prepare a volume whose store is a bind farm, and answer the closure.
+
+    What it does *not* do is the point: nothing copies or links the closure.
+    The paths are bound in the mount worker, which is the only place they can
+    be -- `fs.mount-max` is 100,000 per namespace, so 2443 mounts per closure
+    would cap the daemon's own namespace at about 40 containers. See
+    `nri/farm.py`.
+
+    It installs no gc root inside the chroot store either. That store lives
+    only as long as the container, so a root in it protects nothing, and
+    `nix build --store <volume>` over a store whose paths are not there yet
+    would try to realise them into it -- copying the closure this exists to
+    avoid. The root that matters is the one `fetch_packages` leaves in the
+    node's store.
+    """
+    NIX_STATE_DIR = volume_root / "nix/var/nix"
+    NIX_STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    if VERIFY_STORE_PATHS:
+        await verify_store_paths(package_paths)
+
+    store_paths = await get_closure_paths(package_paths)
+    await init_database(NIX_STATE_DIR, store_paths)
+    logger.debug(
+        "farm_volume_prepared", volume_root=str(volume_root), count=len(store_paths)
+    )
+    return sorted(store_paths)
+
+
 async def mount_volume(
     volume_root: Path,
     target_path: Path,

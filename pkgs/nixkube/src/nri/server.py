@@ -18,6 +18,7 @@ from ..cache import schedule_copy_to_cache
 from ..constants import (
     HOST_MOUNT_PATH,
     HOST_ROOT,
+    NRI_BIND_FARM,
     NRI_CONTAINERS,
     NRI_PLUGIN_IDX,
     NRI_PLUGIN_NAME,
@@ -34,7 +35,7 @@ from ..metrics import (
 )
 from ..nix import fetch_packages, get_build_args, get_current_system
 from ..supervision import detach
-from ..volume import prepare_volume
+from ..volume import prepare_farm_volume, prepare_volume
 from .annotations import (
     extract_container_store_paths,
     parse_nix_exclude,
@@ -73,7 +74,10 @@ from .zmq import ZeroMQServer
 # 4. Spawn background build task (starts immediately, runs async)
 #    - Task ID = container_id, added to pending_builds set
 #    - Begins realizing all store paths via nix build immediately
-#    - Will hardlink closure into volume at /nix/var/nixkube/containers/{container_id}/nix
+#    - Registers the closure in a chroot-store database under
+#      /nix/var/nixkube/containers/{container_id}/nix. The closure itself is
+#      bound in the mount worker (bind farm) or hardlinked here
+#      (NRI_BIND_FARM=false).
 #    - This build starts NOW and runs concurrently with OCI hook execution
 #
 #
@@ -106,9 +110,11 @@ from .zmq import ZeroMQServer
 #    - Calls nix build with extra args (builders, cache endpoints)
 #    - Outputs at /nix/var/nixkube/containers/{container_id}/nix
 #
-# 2. Hardslink closure
-#    - Calls prepare_volume() to hardlink all closure paths into the volume
-#    - Creates upper/ and work/ dirs if RW overlayfs requested
+# 2. Prepare the volume
+#    - Farm: prepare_farm_volume() registers the closure in the chroot store's
+#      database and copies nothing. The paths are bound in the mount worker.
+#    - Hardlinks: prepare_volume() links every closure path into the volume
+#      and creates upper/ and work/ for the RW overlay.
 #
 # 3. Wait for PID+bundle
 #    - Blocks on zmq_server.wait_for_pid(container_id, timeout=30)
@@ -124,11 +130,16 @@ from .zmq import ZeroMQServer
 # ───────────────────────────────────────────────────────────
 # The subprocess is spawned with file descriptors for isolated namespace ops:
 #
-# 1. Create detached mount FDs (while in daemonset namespace)
-#    - /nix (RO): open_tree clones the prepared nix tree as detached fd
+# 0. Build the farm (farm only)
+#    - unshare(CLONE_NEWNS) first: fs.mount-max is 100,000 per namespace, so
+#      2443 mounts per closure cannot go in the daemon's. The namespace dies
+#      with the worker, so nothing is left to unmount or collect.
+#
+# 1. Create detached mount FDs (while the sources are still visible)
+#    - open_tree with AT_RECURSIVE clones the tree, farm submounts included
 #      - Survives setns(2) so the source path is never visible inside container
-#      - Later remounted RO with move_mount(2)
-#    - /nix (RW): fsopen/fsconfig build a detached overlayfs fd
+#      - Attached with move_mount(2), then made read-only if RO
+#    - Hardlink tree + RW: fsopen/fsconfig build a detached overlayfs fd
 #      - lowerdir=hardlink tree, upperdir=volume/upper, workdir=volume/work
 #
 # 2. Switch to container namespace
@@ -138,7 +149,9 @@ from .zmq import ZeroMQServer
 #
 # 3. Attach /nix mount
 #    - move_mount(2) attaches the detached /nix fd at /nix
-#    - If RO: followed by MS_REMOUNT|MS_RDONLY
+#    - If RO: mount_setattr(MOUNT_ATTR_RDONLY, AT_RECURSIVE) for a farm, since
+#      MS_REMOUNT|MS_RDONLY covers the top mount alone and would leave every
+#      bound store path writable into /nix/store on the node
 #
 # 4. Attach store mounts
 #    - For each store_mount (container_path → /nix/store/...) requested in annotations:
@@ -554,8 +567,14 @@ class NriPlugin(NriPluginBase):
         await fetch_packages(store_paths, volume_path, extra_args)
         log.debug("fetch_packages_done")
 
-        # Hardlink closure into volume (prepare_volume handles closure expansion)
-        await prepare_volume(volume_path, store_paths, None)
+        # A farm binds the closure in the mount worker and leaves nothing on
+        # disk; the hardlink path fills the volume here instead. Issue #65.
+        if NRI_BIND_FARM:
+            farm_paths = await prepare_farm_volume(volume_path, store_paths)
+            log.debug("farm_prepared", count=len(farm_paths))
+        else:
+            farm_paths = None
+            await prepare_volume(volume_path, store_paths, None)
         nix_tree_path = volume_path / "nix"
 
         # Wait for nri-wait to report PID+bundle (arrives when the createRuntime hook fires).
@@ -581,8 +600,14 @@ class NriPlugin(NriPluginBase):
                     )
                 mounts.append((resolved, container_path))
 
-        log.info("namespace_mounting", pid=pid, bundle=bundle, mounts=len(mounts))
-        await mount_in_container(pid, bundle, nix_tree_path, mounts, nix_rw)
+        log.info(
+            "namespace_mounting",
+            pid=pid,
+            bundle=bundle,
+            mounts=len(mounts),
+            farm=len(farm_paths) if farm_paths else 0,
+        )
+        await mount_in_container(pid, bundle, nix_tree_path, mounts, nix_rw, farm_paths)
 
 
 async def nri_serve() -> None:

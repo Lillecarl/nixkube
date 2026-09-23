@@ -100,6 +100,13 @@ METRICS_ADDR = os.environ.get("METRICS_ADDR", "::")
 # Set via VERIFY_STORE_PATHS environment variable
 VERIFY_STORE_PATHS = os.environ.get("VERIFY_STORE_PATHS", "false") == "true"
 
+# Present a container's store as one read-only bind mount per closure path,
+# instead of a hardlink tree. Issue #65, and `nri/farm.py` for why.
+#
+# The escape hatch is the point of the variable: a node whose kernel or
+# storage disagrees can go back to hardlinks without a new image.
+NRI_BIND_FARM = os.environ.get("NRI_BIND_FARM", "true") == "true"
+
 # How long `nix store verify --recursive --no-trust` may take.
 #
 # It is the longest nix call on the publish path when it runs at all, and the
