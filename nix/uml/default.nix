@@ -11,14 +11,15 @@
 #
 # What makes that possible is that a guest's /nix/store is the *sandbox's*
 # store, over hostfs. So a store path this file names is a path the guest
-# already has, with nothing fetched -- `mkTest` registers everything in
+# already has, with nothing fetched -- `mkSession` registers everything in
 # `settings` so Nix in the guest agrees, and `nixkube-seed-store` below copies
 # it one directory across into the node's own store, where nixkube looks.
 #
-# The same test runs as a virtual machine, which is what CI wants and what
-# makes a run outside the sandbox worth having:
+# The phases are cluster, deploy, workloads, chaos (a pytest phase, one test
+# per scenario) and report. By hand, with the guest held open on a failure:
 #
-#     nix run --file . umlTest.qemu.run
+#     nix run --file . umlTest.run -- --out ./o --break-on-failure
+#     nix run --file . umlTest.run -- --out ./o -- -k containerd
 {
   pkgs,
   lib,
@@ -34,7 +35,7 @@ let
   # `nixkube.discardStringContext = false` (see ./manifest.nix) keeps the
   # string context on the DaemonSet's store paths, so the node environment is
   # in this file's closure. Naming it in `settings` does both jobs: it pulls
-  # the closure into the sandbox, and `mkTest` registers what `settings`
+  # the closure into the sandbox, and `mkSession` registers what `settings`
   # names, which is what makes Nix inside the guest agree the paths are real.
   manifestFile = manifest.manifestYAMLFile;
 
@@ -60,218 +61,273 @@ let
     pkgs.hello
   ];
 
+  # "kubelet restarts,containerd" to `-k "kubelet-restarts or containerd"`,
+  # the ids nix/uml/chaos/ gives the scenarios.
+  scenarioFilter =
+    text:
+    lib.optionals (text != "") [
+      "-k"
+      (lib.concatMapStringsSep " or " (s: lib.replaceStrings [ " " ] [ "-" ] (lib.trim s)) (
+        lib.filter (s: lib.trim s != "") (lib.splitString "," text)
+      ))
+    ];
 in
-uml.mkTest {
-  name = "nixkube";
-  script = ./test.py;
+uml.mkSession (
+  { config, ... }:
+  {
+    name = "nixkube";
 
-  /*
-    QEMU by default, so `nix build --file . umlTest` is the machine CI
-    runs and the one a developer runs.
+    # What every phase and the chaos tests import: waits, probes, checks.
+    # Not `lib/`, which .gitignore takes for a Python build directory.
+    pythonPath = [ ./helpers ];
 
-    A UML guest is one process and one CPU whatever `cpus` says, which is
-    what makes it work inside a build sandbox and what makes it slow here:
-    this test is a control plane, a CSI driver, an NRI plugin and nine
-    chaos scenarios. Measured under QEMU at four processors: 13.4 minutes
-    for all nine, and the guest boots in 8.5s.
+    knobs = {
+      /*
+        Which chaos scenarios to run, by name, comma separated.
 
-    `umlTest.uml` is still the same test on the other machine, and it is
-    the one to reach for when there is no /dev/kvm -- a builder without
-    one refuses to build the QEMU variant rather than failing it.
-  */
-  backend = "qemu";
+        Empty runs all nine, which is what CI wants and what takes most of
+        the run. Iterating on one costs the cluster and that scenario:
 
-  # A function, so the guest can size itself from the backend it got.
-  nodes.cp =
-    { config, ... }:
-    {
-      imports = [ (sources.user-mode-nixos + "/modules/k8s.nix") ];
+            NIXKUBE_UML_SCENARIOS=containerd nix build --file . umlTest
 
-      services.uml-k8s = {
-        enable = true;
-        role = "control-plane";
+        By hand, `-k` does the same without a new evaluation:
 
-        # There is no registry. Every image the DaemonSet names is imported
-        # into containerd before kubelet starts; ./images.nix checks that the
-        # tags match what the manifest asks for.
-        extraImages = umlImages.tarballs;
-
-        /*
-          No CoreDNS. kube-proxy stays.
-
-          Nothing here resolves a name: an in-cluster client reads
-          KUBERNETES_SERVICE_HOST, which is an address. So CoreDNS is two pods
-          on a one-CPU guest doing nothing but timing out against an upstream
-          resolver a build sandbox cannot reach, several lines a second.
-
-          kube-proxy looked equally unnecessary, because the manifest declares
-          no Service. It is not: the *cluster* declares one.
-          `kubernetes.default` is how anything in a pod reaches the API
-          server, and DNAT'ing its ClusterIP is exactly what kube-proxy does.
-          Measured by taking it away -- nixkube's init Job runs
-          `kubectl get secret` and exited non-zero.
-
-          `test.py` waits for `KUBE_PROXY` alone, to match.
-        */
-        skipAddons = [ "coredns" ];
-
-        # nixkube's other mount path. The node DaemonSet asks containerd for
-        # an NRI connection whether or not containerd is listening, and gets
-        # no error when it is not -- so without this the plugin waits, the
-        # pods that need it start without a /nix, and nothing says why.
-        nri = true;
-
-        # One, for pynixd's `nix-store` claim. The StorageClass it creates is
-        # `standard`, annotated as the cluster default, which is what
-        # `nixkube.pynixd.storageClassName = null` asks for. `bring_up`
-        # applies it. Issue #49.
-        persistentVolumes = 1;
+            nix run --file . umlTest.run -- --out ./o -- -k containerd
+      */
+      scenarios = {
+        env = "NIXKUBE_UML_SCENARIOS";
+        default = "";
+        description = "chaos scenarios to run, by name; empty is all";
       };
-
-      boot.uml = {
-        /*
-          A control plane, a CSI driver, an NRI plugin and whatever the test
-          schedules, all in one guest -- so give it what the machine has.
-
-          The two backends get different numbers because they are different
-          machines. A UML guest is one process and one CPU whatever `cpus`
-          says, and it shares the builder with everything else in a `nix
-          build`, so it keeps the 4096M that has always been enough.
-
-          A QEMU guest is sized for the runner it has to pass on: a
-          GitHub-hosted x64 runner is 4 vCPU and 16 GB, and Kubernetes gets
-          14 of those 16.
-
-          Know what that number means before changing it. The guest's RAM
-          is a memfd the host allocates lazily, so a fresh guest costs
-          almost nothing -- measured at 3.5 GB while it was still importing
-          images. But a Linux guest fills the rest with page cache and
-          never gives it back, so over a long run the host pays the whole
-          14 GB. On a 16 GB runner that leaves two for everything else.
-          Lower this first if a run is killed for memory rather than
-          failing.
-
-          The disk stays at 4096. A runner has 14 GB of it for the store,
-          the qcow2 and everything else, and this workload has never needed
-          more.
-
-          No `nixDatabase` here. `mkTest` registers the closure of everything
-          in `settings`, which is every path in `seedRoots`: the manifest,
-          whose own closure carries the node environment because
-          `nixkube.discardStringContext = false` keeps the context on it;
-          both probes; and what a workload asks the driver to mount.
-        */
-        memory = if config.boot.uml.backend == "qemu" then "14336M" else "4096M";
-        cpus = 4;
-        diskSize = 4096;
-        lan = {
-          network = "nixkube";
-          address = "10.103.0.1/24";
-        };
-      };
-
-      # What the sidecar images point into the store, named where Nix can see
-      # it. Their layers are gzipped, so nothing else says these paths are
-      # needed, and a container whose entrypoint is missing fails in runc
-      # rather than anywhere informative. See ./images.nix.
-      system.extraDependencies = umlImages.runtimeInputs;
-
-      # For looking around by hand when something fails. The pods get their own
-      # configuration from the ConfigMap the manifest carries, not from this.
-      nix.settings.experimental-features = [
-        "nix-command"
-        "flakes"
-      ];
-
-      # The chaos scenarios compare what the driver left on the node against
-      # what the node says is still alive, and both answers are JSON.
-      environment.systemPackages = [ pkgs.jq ];
 
       /*
-        Fill the node's store before kubelet can want it.
+        QEMU by default, so `nix build --file . umlTest` is the machine CI
+        runs and the one a developer runs.
 
-        The DaemonSet's init container fills `nixkube.hostMountPath` by
-        substituting into it, and a build sandbox has no binary cache to
-        substitute from. There does not have to be one: this guest's own
-        /nix/store *is* the sandbox's, over hostfs, and holds every path the
-        manifest names. It only has to be copied one directory across.
+        A UML guest is one process and one CPU whatever `cpus` says, which
+        is what makes it work inside a build sandbox and what makes it slow
+        here: this test is a control plane, a CSI driver, an NRI plugin and
+        nine chaos scenarios. Measured under QEMU at four processors: 13.4
+        minutes for all nine, and the guest boots in 8.5s.
 
-        A store-to-store copy on the same disk, so no HTTP, no signatures and
-        no resolver. Serving it over nix-serve was tried first and is what a
-        real node does; here it answered HTTP 500 to every narinfo, and
-        debugging a cache server is not what this test is for.
-
-        The other rejected option was to hand containers the node's whole
-        /nix through containerd's base runtime spec. That works and is
-        wrong: user-mode-nixos already mounts /nix/store into every
-        container, and mounting /nix as well would leave this test unable to
-        tell nixkube's own /nix from the harness's -- it would pass with the
-        driver switched off.
-
-        Before kubelet, so the init container finds the paths already valid
-        and copies nothing. It overlaps `kubeadm init`, which takes longer.
+        `NIXKUBE_UML_BACKEND=uml` is the same test on the other machine, for
+        a host with no /dev/kvm -- a builder without one refuses to build the
+        QEMU variant rather than failing it.
       */
-      systemd.services.nixkube-seed-store = {
-        description = "Copy what nixkube needs into the node's own store";
-        wantedBy = [ "multi-user.target" ];
-        before = [ "kubelet.service" ];
-        # Nothing to order against for the Nix database. It is built with
-        # the guest's root image and mounted with /nix/var, so it is there
-        # before this unit can start.
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-        };
-        script = ''
-          mkdir -p ${hostMountPath}
-          ${lib.getExe' pkgs.nix "nix"} copy \
-            --no-check-sigs --to ${hostMountPath} ${lib.escapeShellArgs seedRoots}
-        '';
+      backend = {
+        env = "NIXKUBE_UML_BACKEND";
+        default = "qemu";
+        description = "qemu, or uml where there is no /dev/kvm";
       };
     };
 
-  settings = {
-    manifest = "${manifestFile}";
-    # One pod using both mount paths, with a generated name, created after
-    # the driver is up and again after each thing that breaks it. See
-    # ./probe.nix.
-    probeRo = "${probes.ro}";
-    probeRw = "${probes.rw}";
-    /*
-      Which chaos scenarios to run, by substring, comma separated.
+    backend = config.resolved.backend.value;
 
-      Empty runs all of them, which is what CI wants and what takes twenty
-      minutes. Iterating on one costs two minutes of cluster and one
-      scenario:
+    phases = {
+      cluster = {
+        script = ./phases/cluster.py;
+        after = [ "boot" ];
+      };
+      deploy = {
+        script = ./phases/deploy.py;
+        after = [ "cluster" ];
+      };
+      workloads = {
+        script = ./phases/workloads.py;
+        after = [ "deploy" ];
+      };
+      chaos = {
+        pytest = {
+          tests = ./chaos;
+          args = scenarioFilter config.resolved.scenarios.value;
+        };
+        after = [ "workloads" ];
+      };
+      report = {
+        script = ./phases/report.py;
+        after = [ "chaos" ];
+        always = true;
+      };
+    };
 
-          NIXKUBE_UML_SCENARIOS=containerd nix build --file . umlTest
+    # A function, so the guest can size itself from the backend it got.
+    nodes.cp =
+      { config, ... }:
+      {
+        imports = [ (sources.user-mode-nixos + "/modules/k8s.nix") ];
 
-      `builtins.getEnv` because this file is not a flake, so the evaluation
-      is impure already, and a knob on the test's own entry point beats a
-      loop somebody builds in a shell.
-    */
-    scenarios = builtins.getEnv "NIXKUBE_UML_SCENARIOS";
+        services.uml-k8s = {
+          enable = true;
+          role = "control-plane";
 
-    # What to run inside the resident pod to ask whether it still has what
-    # it was given. The first only resolves through the CSI volume; the
-    # second prints the mount table the NRI plugin wrote. `/mnt/csi` is the
-    # same literal ./workloads.nix and ./probe.nix use.
-    residentHello = "/mnt/csi${lib.getExe pkgs.hello}";
-    # From the resident's *own* closure, not the node's. The NRI mount is a
-    # narrowed /nix holding what that container needs and nothing else --
-    # which is the point of nixkube -- so a binary from anywhere else is not
-    # in there. Measured: busybox was not, and the exec failed with "no such
-    # file or directory" on a path the node certainly has.
-    residentCat = "${lib.getExe' pkgs.coreutils "cat"}";
+          # There is no registry. Every image the DaemonSet names is imported
+          # into containerd before kubelet starts; ./images.nix checks that the
+          # tags match what the manifest asks for.
+          extraImages = umlImages.tarballs;
 
-    # Where the driver's own state lands on the node -- see CSI_ROOT in
-    # pkgs/nixkube/src/constants.py, which is a path inside the node
-    # container, and this is what its /nix comes from.
-    inherit hostMountPath;
-    kubernetesVersion = pkgs.kubernetes.version;
-    # What a workload will ask the CSI driver to mount. A store path this
-    # file names is a path the sandbox has.
-    workloadStorePath = "${pkgs.hello}";
-    workloadImage = "uml.test/busybox:1";
-  };
-}
+          /*
+            No CoreDNS. kube-proxy stays.
+
+            Nothing here resolves a name: an in-cluster client reads
+            KUBERNETES_SERVICE_HOST, which is an address. So CoreDNS is two pods
+            on a one-CPU guest doing nothing but timing out against an upstream
+            resolver a build sandbox cannot reach, several lines a second.
+
+            kube-proxy looked equally unnecessary, because the manifest declares
+            no Service. It is not: the *cluster* declares one.
+            `kubernetes.default` is how anything in a pod reaches the API
+            server, and DNAT'ing its ClusterIP is exactly what kube-proxy does.
+            Measured by taking it away -- nixkube's init Job runs
+            `kubectl get secret` and exited non-zero.
+
+            `phases/cluster.py` waits for `KUBE_PROXY` alone, to match.
+          */
+          skipAddons = [ "coredns" ];
+
+          # nixkube's other mount path. The node DaemonSet asks containerd for
+          # an NRI connection whether or not containerd is listening, and gets
+          # no error when it is not -- so without this the plugin waits, the
+          # pods that need it start without a /nix, and nothing says why.
+          nri = true;
+
+          # One, for pynixd's `nix-store` claim. The StorageClass it creates is
+          # `standard`, annotated as the cluster default, which is what
+          # `nixkube.pynixd.storageClassName = null` asks for. `bring_up`
+          # applies it. Issue #49.
+          persistentVolumes = 1;
+        };
+
+        boot.uml = {
+          /*
+            A control plane, a CSI driver, an NRI plugin and whatever the test
+            schedules, all in one guest -- so give it what the machine has.
+
+            The two backends get different numbers because they are different
+            machines. A UML guest is one process and one CPU whatever `cpus`
+            says, and it shares the builder with everything else in a `nix
+            build`, so it keeps the 4096M that has always been enough.
+
+            A QEMU guest is sized for the runner it has to pass on: a
+            GitHub-hosted x64 runner is 4 vCPU and 16 GB, and Kubernetes gets
+            14 of those 16.
+
+            Know what that number means before changing it. The guest's RAM
+            is a memfd the host allocates lazily, so a fresh guest costs
+            almost nothing -- measured at 3.5 GB while it was still importing
+            images. But a Linux guest fills the rest with page cache and
+            never gives it back, so over a long run the host pays the whole
+            14 GB. On a 16 GB runner that leaves two for everything else.
+            Lower this first if a run is killed for memory rather than
+            failing.
+
+            The disk stays at 4096. A runner has 14 GB of it for the store,
+            the qcow2 and everything else, and this workload has never needed
+            more.
+
+            No `nixDatabase` here. `mkSession` registers the closure of everything
+            in `settings`, which is every path in `seedRoots`: the manifest,
+            whose own closure carries the node environment because
+            `nixkube.discardStringContext = false` keeps the context on it;
+            both probes; and what a workload asks the driver to mount.
+          */
+          memory = if config.boot.uml.backend == "qemu" then "14336M" else "4096M";
+          cpus = 4;
+          diskSize = 4096;
+          lan = {
+            network = "nixkube";
+            address = "10.103.0.1/24";
+          };
+        };
+
+        # What the sidecar images point into the store, named where Nix can see
+        # it. Their layers are gzipped, so nothing else says these paths are
+        # needed, and a container whose entrypoint is missing fails in runc
+        # rather than anywhere informative. See ./images.nix.
+        system.extraDependencies = umlImages.runtimeInputs;
+
+        # For looking around by hand when something fails. The pods get their own
+        # configuration from the ConfigMap the manifest carries, not from this.
+        nix.settings.experimental-features = [
+          "nix-command"
+          "flakes"
+        ];
+
+        # The chaos scenarios compare what the driver left on the node against
+        # what the node says is still alive, and both answers are JSON.
+        environment.systemPackages = [ pkgs.jq ];
+
+        /*
+          Fill the node's store before kubelet can want it.
+
+          The DaemonSet's init container fills `nixkube.hostMountPath` by
+          substituting into it, and a build sandbox has no binary cache to
+          substitute from. There does not have to be one: this guest's own
+          /nix/store *is* the sandbox's, over hostfs, and holds every path the
+          manifest names. It only has to be copied one directory across.
+
+          A store-to-store copy on the same disk, so no HTTP, no signatures and
+          no resolver. Serving it over nix-serve was tried first and is what a
+          real node does; here it answered HTTP 500 to every narinfo, and
+          debugging a cache server is not what this test is for.
+
+          The other rejected option was to hand containers the node's whole
+          /nix through containerd's base runtime spec. That works and is
+          wrong: user-mode-nixos already mounts /nix/store into every
+          container, and mounting /nix as well would leave this test unable to
+          tell nixkube's own /nix from the harness's -- it would pass with the
+          driver switched off.
+
+          Before kubelet, so the init container finds the paths already valid
+          and copies nothing. It overlaps `kubeadm init`, which takes longer.
+        */
+        systemd.services.nixkube-seed-store = {
+          description = "Copy what nixkube needs into the node's own store";
+          wantedBy = [ "multi-user.target" ];
+          before = [ "kubelet.service" ];
+          # Nothing to order against for the Nix database. It is built with
+          # the guest's root image and mounted with /nix/var, so it is there
+          # before this unit can start.
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            mkdir -p ${hostMountPath}
+            ${lib.getExe' pkgs.nix "nix"} copy \
+              --no-check-sigs --to ${hostMountPath} ${lib.escapeShellArgs seedRoots}
+          '';
+        };
+      };
+
+    settings = {
+      manifest = "${manifestFile}";
+      # One pod using both mount paths, with a generated name, created after
+      # the driver is up and again after each thing that breaks it. See
+      # ./probe.nix.
+      probeRo = "${probes.ro}";
+      probeRw = "${probes.rw}";
+
+      # What to run inside the resident pod to ask whether it still has what
+      # it was given. The first only resolves through the CSI volume; the
+      # second prints the mount table the NRI plugin wrote. `/mnt/csi` is the
+      # same literal ./workloads.nix and ./probe.nix use.
+      residentHello = "/mnt/csi${lib.getExe pkgs.hello}";
+      # From the resident's *own* closure, not the node's. The NRI mount is a
+      # narrowed /nix holding what that container needs and nothing else --
+      # which is the point of nixkube -- so a binary from anywhere else is not
+      # in there. Measured: busybox was not, and the exec failed with "no such
+      # file or directory" on a path the node certainly has.
+      residentCat = "${lib.getExe' pkgs.coreutils "cat"}";
+
+      # Where the driver's own state lands on the node -- see CSI_ROOT in
+      # pkgs/nixkube/src/constants.py, which is a path inside the node
+      # container, and this is what its /nix comes from.
+      inherit hostMountPath;
+      kubernetesVersion = pkgs.kubernetes.version;
+      # What a workload will ask the CSI driver to mount. A store path this
+      # file names is a path the sandbox has.
+      workloadStorePath = "${pkgs.hello}";
+      workloadImage = "uml.test/busybox:1";
+    };
+  }
+)

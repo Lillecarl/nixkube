@@ -1,7 +1,9 @@
-"""nixkube on a real node, in a Nix build sandbox.
+"""What every phase of the node test shares: waits, probes, checks.
 
-The manifest applies, the node DaemonSet reaches Ready, and a workload gets
-the store path it asked for through a CSI ephemeral volume.
+The phases are `nix/uml/phases/*.py` and the chaos scenarios are
+`nix/uml/chaos/`; this module is on their `pythonPath`. The manifest
+applies, the node DaemonSet reaches Ready, and a workload gets the store
+path it asked for through a CSI ephemeral volume.
 
 What is being proved is narrow and load-bearing. The DaemonSet's init
 container fills the node's Nix store by substituting into it, and a build
@@ -11,8 +13,8 @@ the manifest names -- and `boot.uml.nixDatabase` is what makes Nix agree they
 are real rather than go looking for them.
 """
 
-from uml_runner import Machine, MachineError, Machines, run_test
-from uml_runner.cluster import KUBE_PROXY, bring_up, get_json, kubectl, until
+from uml_runner import Machine, MachineError
+from uml_runner.cluster import get_json, kubectl, until
 
 NAMESPACE = "nixkube"
 DAEMONSET = "nix-node"
@@ -508,33 +510,28 @@ async def wait_for_apiserver(cp: Machine) -> None:
     await until("the api server to answer", up, READY_TIMEOUT, cp)
 
 
-async def chaos(cp: Machine, settings: dict) -> None:
-    """Break the driver every way there is, and ask if a pod can still start.
+async def break_and_recover(cp: Machine, settings: dict, name: str) -> None:
+    """Break the driver one way, and ask if a pod can still start.
 
     nixkube is not a component a node can do without: a pod that wants a
     store path does not start until the driver serves it. So the question
     after each of these is never "did it come back" alone -- it is whether a
     *new* pod gets both mounts, and whether the driver left anything behind.
 
-    `NIXKUBE_UML_SCENARIOS` selects a subset by substring, for iterating on
-    one of them without paying for the other eight.
+    One scenario per call: `nix/uml/chaos/` parametrizes over SCENARIOS, so
+    each is a test of its own and `-k` selects one.
     """
-    only = [s for s in settings.get("scenarios", "").split(",") if s.strip()]
-
-    for name, action, resident in SCENARIOS:
-        if only and not any(s.strip() in name for s in only):
-            continue
-        print(f"\n[nixkube] ======== {name} ========", flush=True)
-        await action(cp, settings)
-        await wait_for_apiserver(cp)
-        await wait_for_driver(cp)
-        await probe(cp, settings, name)
-        if resident is REPLACED:
-            # `--wait` by default, so the old pod is gone before
-            # `check_resident` counts pods and finds the new one.
-            await kubectl(cp, f"delete pod --namespace {NAMESPACE} {RESIDENT}")
-        await check_resident(cp, settings, name)
-        await check_reconciled(cp, settings, name)
+    action, resident = next((a, r) for n, a, r in SCENARIOS if n == name)
+    await action(cp, settings)
+    await wait_for_apiserver(cp)
+    await wait_for_driver(cp)
+    await probe(cp, settings, name)
+    if resident is REPLACED:
+        # `--wait` by default, so the old pod is gone before
+        # `check_resident` counts pods and finds the new one.
+        await kubectl(cp, f"delete pod --namespace {NAMESPACE} {RESIDENT}")
+    await check_resident(cp, settings, name)
+    await check_reconciled(cp, settings, name)
 
 
 RESIDENT = "--selector app.kubernetes.io/component=uml-resident"
@@ -702,38 +699,3 @@ async def report(cp: Machine) -> None:
             timeout=120,
         )
         print(f"[nixkube] logs job/{job} (rc={rc}):\n{out}", flush=True)
-
-
-async def test(vms: Machines) -> None:
-    settings = vms.settings
-    print(
-        f"[nixkube] kubernetes {settings['kubernetesVersion']},"
-        " the node's store is the sandbox's",
-        flush=True,
-    )
-
-    # kube-proxy but not CoreDNS, matching `services.uml-k8s.skipAddons`.
-    # Nothing resolves a name here, but everything in a pod reaches the API
-    # server through the `kubernetes.default` ClusterIP, and kube-proxy is
-    # what makes that address go anywhere.
-    cp = await bring_up(vms, addons=(KUBE_PROXY,))
-
-    try:
-        await deploy(cp, settings)
-        await wait_for_driver(cp)
-        await wait_for_pynixd(cp)
-        await check_workloads(cp)
-        await probe(cp, settings, "a clean start")
-        await check_resident(cp, settings, "a clean start")
-        await check_unmount(cp, settings)
-        await chaos(cp, settings)
-    except Exception:
-        # `until` already attaches `diagnose` -- kubelet, containerd, crictl
-        # and the pod logs -- to the message it raises. What it cannot know
-        # about is this namespace, so add that and nothing else.
-        await report(cp)
-        raise
-    await report(cp)
-
-
-run_test(test)

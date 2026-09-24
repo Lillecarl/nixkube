@@ -448,7 +448,10 @@ ghalib.evalWorkflow {
 
       The same test and the same script a developer runs on a laptop:
 
-          nix run --file . umlTest.run
+          nix run --file . umlTest.run -- --out ./uml-out
+
+      `--out` is where the run's evidence goes: junit.xml with one case
+      per chaos scenario, events.jsonl, each guest's console and journal.
 
       There is no Kind cluster and no registry here. The guest's /nix/store
       is the runner's, over virtiofs, so everything the node needs is
@@ -466,7 +469,7 @@ ghalib.evalWorkflow {
       steps = [
         {
           name = "Run the node test as a virtual machine";
-          run = "nix run --file . umlTest.run";
+          run = "nix run --file . umlTest.run -- --out ./uml-out";
         }
       ];
     };

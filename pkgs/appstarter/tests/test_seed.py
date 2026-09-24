@@ -101,7 +101,7 @@ def _held(caplog) -> list[str]:
 
 
 def test_the_two_store_holds_lines_stay_distinguishable(tmp_path, monkeypatch, caplog):
-    """`nix/uml/test.py` reads these out of the initContainer's log.
+    """`nix/uml/helpers/nixkube_uml.py` reads these out of the initContainer's log.
 
     Both outcomes log "store holds", so the successful line is a prefix of
     the degraded one. `FALLBACK_MARK` there is the only substring that tells
