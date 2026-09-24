@@ -635,6 +635,7 @@ rec {
           builder-max = 0;
           builder-startup-timeout = 120;
           builder-backoff-cap = 60;
+          builder-max-age = 0;
         };
       };
       stock = kubenixInstance { };
@@ -670,6 +671,9 @@ rec {
     assert envOf capped "PYNIXD_BUILDER_BACKOFF_CAP" == "60";
     assert envOf stock "PYNIXD_BUILDER_STARTUP_TIMEOUT" == "600";
     assert envOf stock "PYNIXD_BUILDER_BACKOFF_CAP" == "600";
+    # Under the 12 hours at which KubeJobNotCompleted fires.
+    assert envOf capped "PYNIXD_BUILDER_MAX_AGE" == "0";
+    assert envOf stock "PYNIXD_BUILDER_MAX_AGE" == "21600";
     # activeDeadlineSeconds is deliberately absent from the builder Job. It
     # measures a Job's whole life, and a builder Job runs for hours, so any
     # value that bounds a Pod hung before startup kills working builders

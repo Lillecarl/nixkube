@@ -297,6 +297,14 @@ in
         # after another. The delay doubles from 30 seconds up to this, and a
         # builder that reaches Ready clears it.
         builder-backoff-cap = 600;
+        # A builder older than this many seconds takes no new builds once its
+        # replacement is Ready, and its Job is deleted when it has none in
+        # flight. 0 keeps builders for ever.
+        #
+        # 6 hours, well under the 12 hours at which kube-prometheus'
+        # KubeJobNotCompleted fires, so a build that is running at 6 hours
+        # has 6 more to finish.
+        builder-max-age = 21600;
         # Listen on every interface, and carried in config.json rather than in
         # an env var.
         #
@@ -514,6 +522,7 @@ in
                     PYNIXD_IDLE_TIMEOUT.value = toString cfg.pynixd.controller.settings.idle-timeout;
                     PYNIXD_BUILDER_STARTUP_TIMEOUT.value = toString cfg.pynixd.controller.settings.builder-startup-timeout;
                     PYNIXD_BUILDER_BACKOFF_CAP.value = toString cfg.pynixd.controller.settings.builder-backoff-cap;
+                    PYNIXD_BUILDER_MAX_AGE.value = toString cfg.pynixd.controller.settings.builder-max-age;
                     PYNIXD_SCHEDULE_MODE.value = "scheduler";
                     PYNIXD_SYSTEMS.value = lib.concatStringsSep "," (builtins.attrNames enabledSystems);
                     PYNIXD_CONFIG.value = "/etc/pynixd-config/config.json";

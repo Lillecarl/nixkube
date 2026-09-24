@@ -113,6 +113,41 @@ def _job_age_seconds(job_raw: dict, now: datetime) -> float | None:
     return (now - started).total_seconds()
 
 
+@dataclass
+class RecycleView:
+    """What the recycle decision needs to know about one registered builder."""
+
+    store_id: str
+    system: str
+    aged: bool
+    ready: bool
+    draining: bool
+    busy: bool
+
+
+def plan_recycle(
+    builders: list[RecycleView], min_builders: int
+) -> tuple[list[str], list[str]]:
+    """Which aged builders to drain, and which drained ones to retire.
+
+    An aged builder drains only once a fresh builder of its system is Ready,
+    so the system never drops below its minimum while the replacement starts.
+    With a minimum of zero nothing replaces it, so it drains at once and the
+    queue watch starts a builder when a build needs one.
+
+    A draining builder is retired only when it is not busy. Deleting the Job
+    of a busy one makes `remove_store` cancel its builds after 300 seconds.
+    """
+    fresh = {b.system for b in builders if b.ready and not b.aged and not b.draining}
+    drain = [
+        b.store_id
+        for b in builders
+        if b.aged and not b.draining and (min_builders == 0 or b.system in fresh)
+    ]
+    retire = [b.store_id for b in builders if b.draining and not b.busy]
+    return drain, retire
+
+
 def deep_merge(base: dict, overrides: dict) -> dict:
     """Deep-merge overrides into base (Nix lib.recursiveUpdate style).
 
@@ -140,6 +175,7 @@ class BuilderManager:
         cooldown_seconds: float = _COOLDOWN_SECONDS,
         backoff_cap: float = 600.0,
         startup_timeout: float = 600.0,
+        max_age: float = 21600.0,
     ) -> None:
         self.server = server
         self.namespace = namespace
@@ -162,6 +198,9 @@ class BuilderManager:
         self.cooldown_seconds = cooldown_seconds
         self.backoff_cap = backoff_cap
         self.startup_timeout = startup_timeout
+        # Seconds after which a builder is replaced, or 0 for never. A Job that
+        # never completes raises kube-prometheus' KubeJobNotCompleted at 12h.
+        self.max_age = max_age
         self._last_create_time: dict[str, float] = {}
         self._registered: dict[str, str] = {}
         self._idle_since: dict[str, float] = {}
@@ -181,6 +220,10 @@ class BuilderManager:
         # it is empty after a restart -- the Pod phase is the guard that does
         # not forget.
         self._ever_ready: set[str] = set()
+        # Job names past `max_age`, and the system of each registered builder.
+        # Both come from the Job object, so a restart rebuilds them.
+        self._aged: set[str] = set()
+        self._store_systems: dict[str, str] = {}
         # One reconcile at a time.
         #
         # `_reconcile_job` awaits three times, and the periodic tick reconciles
@@ -267,6 +310,7 @@ class BuilderManager:
                 async with self._reconcile_lock:
                     await self._resync_jobs()
                     await self._ensure_min_builders()
+                    await self._recycle_aged()
             except Exception:
                 log.warning("builder_periodic_reconcile_error", exc_info=True)
 
@@ -342,6 +386,7 @@ class BuilderManager:
     def _forget_job(self, job_name: str) -> None:
         self._counted_failures.discard(job_name)
         self._ever_ready.discard(job_name)
+        self._aged.discard(job_name)
 
     # ---- Startup watchdog ----
 
@@ -829,6 +874,7 @@ class BuilderManager:
 
         self._counted_failures &= seen
         self._ever_ready &= seen
+        self._aged &= seen
 
     async def _watch_jobs(self) -> None:
         while True:
@@ -894,6 +940,11 @@ class BuilderManager:
                 await self._unregister_builder(store_id)
             return
 
+        if not is_probe and self._is_aged(job.raw, datetime.now(UTC)):
+            if job_name not in self._aged:
+                log.info("builder_max_age_reached", job=job_name, system=system)
+            self._aged.add(job_name)
+
         pod = await self._get_job_pod_state(job)
 
         if pod.ready:
@@ -908,6 +959,8 @@ class BuilderManager:
                 await self._register_builder(store_id, pod.ip, job_name, probe=is_probe)
         else:
             self._job_names[store_id] = job_name
+        if not is_probe and store_id in self._registered:
+            self._store_systems[store_id] = system
 
     @staticmethod
     def _builder_store_spec(
@@ -965,6 +1018,7 @@ class BuilderManager:
             self._registered.pop(store_id, None)
             self._idle_since.pop(store_id, None)
             self._job_names.pop(store_id, None)
+            self._store_systems.pop(store_id, None)
             log.info("builder_unregistered", store_id=store_id)
         except Exception:
             log.exception("builder_unregister_failed", store_id=store_id)
@@ -1046,26 +1100,46 @@ class BuilderManager:
 
     # ---- Builder min/max lifecycle ----
 
-    async def _ensure_min_builders(self) -> None:
-        try:
-            api = await k8s.api()
-            active_by_system: dict[str, int] = {}
+    def _is_aged(self, job_raw: dict, now: datetime) -> bool:
+        if self.max_age <= 0:
+            return False
+        age = _job_age_seconds(job_raw, now)
+        return age is not None and age > self.max_age
+
+    async def _list_builder_jobs(self) -> list[Any]:
+        api = await k8s.api()
+        return [
+            cast(Any, job)
             async for job in api.get(
                 "jobs",
                 namespace=self.namespace,
                 label_selector={BUILDER_LABEL: BUILDER_LABEL_VALUE},
-            ):
-                job = cast(Any, job)
-                status = job.raw.get("status", {})
-                if not status.get("succeeded") and not status.get("failed"):
-                    labels = getattr(job.metadata, "labels", {}) or {}
-                    if labels.get(PROBE_LABEL) == "true":
-                        continue
-                    sys_label = labels.get(SYSTEM_LABEL, "unknown")
-                    active_by_system[sys_label] = active_by_system.get(sys_label, 0) + 1
+            )
+        ]
+
+    async def _ensure_min_builders(self) -> None:
+        try:
+            jobs = await self._list_builder_jobs()
         except Exception:
             log.exception("builder_job_count_error")
             return
+
+        now = datetime.now(UTC)
+        active_by_system: dict[str, int] = {}
+        for job in jobs:
+            status = job.raw.get("status", {})
+            if status.get("succeeded") or status.get("failed"):
+                continue
+            labels = getattr(job.metadata, "labels", {}) or {}
+            if labels.get(PROBE_LABEL) == "true":
+                continue
+            # An aged builder counts toward neither the minimum nor the
+            # maximum, so its replacement starts while it still serves. At
+            # `max == min` the replacement could not start otherwise.
+            if self._is_aged(job.raw, now):
+                continue
+            sys_label = labels.get(SYSTEM_LABEL, "unknown")
+            active_by_system[sys_label] = active_by_system.get(sys_label, 0) + 1
 
         total_active = sum(active_by_system.values())
 
@@ -1115,22 +1189,22 @@ class BuilderManager:
             return
 
         try:
-            api = await k8s.api()
-            active = 0
-            async for job in api.get(
-                "jobs",
-                namespace=self.namespace,
-                label_selector={BUILDER_LABEL: BUILDER_LABEL_VALUE},
-            ):
-                status = getattr(job, "raw", {}).get("status", {})
-                if not status.get("succeeded") and not status.get("failed"):
-                    labels = getattr(job, "metadata", {}).get("labels", {}) or {}
-                    if labels.get(PROBE_LABEL) == "true":
-                        continue
-                    active += 1
+            jobs = await self._list_builder_jobs()
         except Exception:
             log.exception("builder_job_count_error")
             return
+
+        wall = datetime.now(UTC)
+        active = 0
+        for job in jobs:
+            status = job.raw.get("status", {})
+            if status.get("succeeded") or status.get("failed"):
+                continue
+            labels = getattr(job.metadata, "labels", {}) or {}
+            # Aged builders are leaving; see `_ensure_min_builders`.
+            if labels.get(PROBE_LABEL) == "true" or self._is_aged(job.raw, wall):
+                continue
+            active += 1
 
         if active >= self.max_builders:
             log.debug(
@@ -1147,16 +1221,79 @@ class BuilderManager:
         await self._create_builder_job(system=system)
         self._last_create_time[system] = now
 
+    def _is_aged_store(self, store_id: str) -> bool:
+        return self._job_names.get(store_id) in self._aged
+
+    def _is_busy(self, store: Any) -> bool:
+        """True while the store has work, sent or only assigned.
+
+        `in_flight` counts connections in use. A build the scheduler has
+        assigned but not yet sent does not show there.
+        """
+        if store.in_flight > 0:
+            return True
+        scheduler = self.server.scheduler
+        if scheduler is None:
+            return False
+        return any(
+            build.assigned_store_id == store.store_id and not build.is_done
+            for build in scheduler.queue.queue
+        )
+
+    async def _recycle_aged(self) -> None:
+        """Drain each aged builder once its replacement is Ready, then retire it."""
+        views = []
+        # SSHSubprocessStore, which carries `draining`; the mapping's type is
+        # the Store base class, which does not.
+        stores: dict[str, Any] = {}
+        for store_id, system in self._store_systems.items():
+            store = self.server.stores.get(store_id)  # type: ignore[arg-type]
+            job_name = self._job_names.get(store_id)
+            if store is None or job_name is None:
+                continue
+            stores[store_id] = store
+            views.append(
+                RecycleView(
+                    store_id=store_id,
+                    system=system,
+                    aged=job_name in self._aged,
+                    ready=job_name in self._ever_ready and store.is_healthy,
+                    draining=stores[store_id].draining,
+                    busy=self._is_busy(store),
+                )
+            )
+        drain, retire = plan_recycle(views, self.min_builders)
+
+        for store_id in drain:
+            stores[store_id].draining = True
+            log.info("builder_max_age_draining", store_id=store_id)
+        if drain and self.server.scheduler is not None:
+            self.server.scheduler.trigger()
+
+        for store_id in retire:
+            log.info("builder_max_age_retired", store_id=store_id)
+            await self._delete_builder_job(store_id)
+            await self._unregister_builder(store_id)
+
     async def _reap_idle(self) -> None:
+        """Delete builders idle past `idle_timeout`, down to the minimum.
+
+        Aged builders are left to `_recycle_aged`, and do not count toward the
+        minimum here either: an idle replacement must not be reaped while the
+        builder it replaces drains.
+        """
         while True:
             try:
-                total = len(self._registered)
-                if total <= self.min_builders:
-                    await anyio.sleep(60)
-                    continue
-
+                fresh = [
+                    s
+                    for s in self._store_systems
+                    if s in self._registered and not self._is_aged_store(s)
+                ]
+                remaining = len(fresh)
                 now = time.monotonic()
-                for store_id, pod_ip in list(self._registered.items()):
+                for store_id in fresh:
+                    if remaining <= self.min_builders:
+                        break
                     store = self.server.stores.get(store_id)  # type: ignore[arg-type]
                     if store is None:
                         continue
@@ -1169,16 +1306,15 @@ class BuilderManager:
                     if idle_seconds < self.idle_timeout:
                         continue
 
-                    if len(self._registered) <= self.min_builders:
-                        break
-
                     log.info(
                         "builder_idle_timeout",
                         store_id=store_id,
-                        pod_ip=pod_ip,
+                        pod_ip=self._registered.get(store_id),
                         idle_seconds=idle_seconds,
                     )
                     await self._delete_builder_job(store_id)
+                    # The watch unregisters it later, so count it gone now.
+                    remaining -= 1
             except Exception:
                 log.exception("builder_idle_reap_error")
 
@@ -1276,8 +1412,10 @@ class BuilderManager:
         hangs in Pending from a builder that is serving builds. A builder Job
         is long-lived by design -- one measured at 3h36m, still Running -- so
         any value short enough to bound the hung case would be the usual way a
-        healthy builder dies, mid-build. `_expire_slow_starter` is the bound,
-        because it knows whether the builder has ever been Ready.
+        healthy builder dies, mid-build. `_expire_slow_starter` bounds a
+        builder that never starts, because it knows whether the builder has
+        ever been Ready. `_recycle_aged` bounds a healthy one at `max_age`,
+        because it knows whether the builder is busy.
 
         `backoffLimit: 0` means a failed Job is not retried in place, and
         `ttlSecondsAfterFinished` reaps it. Neither helps a Job that never

@@ -68,6 +68,7 @@ async def _main() -> None:
                     ],
                     startup_timeout=settings.builder_startup_timeout,
                     backoff_cap=settings.builder_backoff_cap,
+                    max_age=settings.builder_max_age,
                 ).running()
             )
 

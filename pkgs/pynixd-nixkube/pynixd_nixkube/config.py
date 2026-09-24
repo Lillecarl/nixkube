@@ -16,3 +16,5 @@ class NixkubeCentralSettings(BaseSettings):
     # Longest delay between retries after builders of one system fail one
     # after another. The delay doubles from 30 seconds up to this.
     builder_backoff_cap: int = 600
+    # Seconds after which a builder is replaced, or 0 for never.
+    builder_max_age: int = 21600
