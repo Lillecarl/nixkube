@@ -9,6 +9,7 @@ import anyio
 import structlog
 
 from . import metrics
+from .cache import cache_probe_loop
 from .constants import (
     BUILDERS_ENABLED,
     ENABLE_COMPAT_DRIVER,
@@ -196,6 +197,7 @@ async def async_main():
     async with anyio.create_task_group() as tg:
         tg.start_soon(supervise_nix_daemon, name="nix-daemon")
         tg.start_soon(gc_loop, name="gc")
+        tg.start_soon(cache_probe_loop, name="cache-probe")
         # Not supervised. It has nothing to crash on, and a restart loop
         # around a sampler would report on itself.
         tg.start_soon(metrics.LoopLagMonitor().run, name="loop-lag")

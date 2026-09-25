@@ -11,6 +11,8 @@ import structlog
 
 from .constants import (
     CACHE_PING_TIMEOUT_SECONDS,
+    CACHE_PROBE_INTERVAL_SECONDS,
+    CACHE_PROBE_RETRY_SECONDS,
     GC_COPY_TIMEOUT_SECONDS,
     PYNIXD_ENABLED,
 )
@@ -116,6 +118,33 @@ async def check_cache_connectivity() -> bool:
     logger.debug("cache_connectivity_ok", **ping_data)
     _record(reachable=True)
     return True
+
+
+def probe_delay(failures: int) -> float:
+    """Seconds until the next ping, after `failures` failed pings in a row."""
+    if failures == 0:
+        return CACHE_PROBE_INTERVAL_SECONDS
+    return min(
+        CACHE_PROBE_RETRY_SECONDS * 2 ** (failures - 1), CACHE_PROBE_INTERVAL_SECONDS
+    )
+
+
+async def cache_probe_loop() -> None:
+    """Keep `CACHE_REACHABLE` current, whether or not the node builds.
+
+    A mount pings once and does not retry, so one ping that fails during a
+    pynixd restart used to hold the gauge at 0 until the node built again.
+    Measured on nixlab2 (#72): the ping failed 11 s before pynixd was Ready,
+    the node built next 10 h later, and the unreachable alert fired for the
+    whole 10 h. This loop pings at startup, retries a failure with backoff,
+    and pings on a schedule after that.
+    """
+    if not PYNIXD_ENABLED:
+        return
+    failures = 0
+    while True:
+        failures = 0 if await check_cache_connectivity() else failures + 1
+        await anyio.sleep(probe_delay(failures))
 
 
 def get_substituter_args() -> list[str]:
@@ -251,6 +280,9 @@ async def copy_to_cache(package_paths: set[Path] | None) -> None:
             if nix_copy.returncode == 0:
                 CACHE_COPY_ATTEMPTS.labels(result="ok").inc()
                 CACHE_COPIES.labels(result="ok").inc()
+                # A copy that pynixd took is an answer from pynixd. A failed
+                # copy says nothing here: it fails for reasons of its own.
+                _record(reachable=True)
                 log.debug("copy_to_cache_done")
                 break
             else:

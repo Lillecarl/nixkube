@@ -252,14 +252,13 @@ CACHE_REACHABLE = Gauge(
     "Whether the last connectivity check reached pynixd (1 = yes)",
 )
 
-# **Read this before alerting on `cache_reachable`.** The check runs before
-# a build and on no other schedule, so a node that has not built since it
-# started has never run one -- and an unset Gauge reads 0, which is the same
-# number a failed check writes. Measured on nixlab2 by solid-kubernetes:
-# all four nodes reported `reachable 0` while `cache_copies_total{ok}` was
-# rising on each of them. After a DaemonSet roll that is every node.
+# **Read this before alerting on `cache_reachable`.** An unset Gauge reads 0,
+# which is the same number a failed check writes. `cache_probe_loop` checks
+# at startup, then every `CACHE_PROBE_INTERVAL_SECONDS`, and sooner after a
+# failure; a mount and a successful copy also write it. So the gap is short,
+# but it exists: between the start of the process and the first answer.
 #
-# So this timestamp is what separates the two. It is written by every
+# This timestamp is what separates the two. It is written by every
 # completed check, whatever the answer, and stays 0 while none has run.
 # A consumer that wants a real failure asks for both.
 CACHE_LAST_CHECK = Gauge(

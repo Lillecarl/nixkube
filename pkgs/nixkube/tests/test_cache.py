@@ -5,9 +5,19 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.cache import check_cache_connectivity
-from src.constants import CACHE_PING_TIMEOUT_SECONDS
+from src.cache import (
+    cache_probe_loop,
+    check_cache_connectivity,
+    copy_to_cache,
+    probe_delay,
+)
+from src.constants import (
+    CACHE_PING_TIMEOUT_SECONDS,
+    CACHE_PROBE_INTERVAL_SECONDS,
+    CACHE_PROBE_RETRY_SECONDS,
+)
 from src.errors import CommandTimeoutError
+from src.metrics import CACHE_REACHABLE
 from src.subprocessing import SubprocessResult
 
 STORE_PATH = Path("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-test-1.0")
@@ -265,6 +275,85 @@ async def test_the_ping_carries_a_short_timeout():
 
     assert seen["timeout"] == CACHE_PING_TIMEOUT_SECONDS
     assert 0 < CACHE_PING_TIMEOUT_SECONDS <= 15
+
+
+def reachable() -> float:
+    return CACHE_REACHABLE._value.get()
+
+
+def test_the_probe_backs_off_to_its_interval():
+    assert probe_delay(0) == CACHE_PROBE_INTERVAL_SECONDS
+    assert probe_delay(1) == CACHE_PROBE_RETRY_SECONDS
+    assert probe_delay(2) == CACHE_PROBE_RETRY_SECONDS * 2
+    assert probe_delay(3) == CACHE_PROBE_RETRY_SECONDS * 4
+    assert probe_delay(50) == CACHE_PROBE_INTERVAL_SECONDS
+
+
+class _Stop(BaseException):
+    pass
+
+
+@pytest.mark.asyncio
+async def test_a_failed_ping_during_a_restart_clears_itself():
+    """#72: a ping failed 11 s before pynixd was Ready, and the gauge stayed
+    0 for 10 h because nothing pinged again until the next build."""
+    CACHE_REACHABLE.set(0)
+    answers = iter([fail(), fail(), ok("{}")])
+    slept: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        if len(slept) == 3:
+            raise _Stop
+
+    with (
+        patch("src.cache.PYNIXD_ENABLED", True),
+        patch("src.cache.run_captured", new=AsyncMock(side_effect=answers)),
+        patch("src.cache.anyio.sleep", side_effect=sleep),
+        pytest.raises(_Stop),
+    ):
+        await cache_probe_loop()
+
+    assert reachable() == 1
+    assert slept == [
+        CACHE_PROBE_RETRY_SECONDS,
+        CACHE_PROBE_RETRY_SECONDS * 2,
+        CACHE_PROBE_INTERVAL_SECONDS,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_no_cache_means_no_probe():
+    with (
+        patch("src.cache.PYNIXD_ENABLED", False),
+        patch("src.cache.run_captured", new_callable=AsyncMock) as mock_run,
+    ):
+        await cache_probe_loop()
+    mock_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_copy_pynixd_took_says_it_is_reachable():
+    CACHE_REACHABLE.set(0)
+    with (
+        patch("src.cache.PYNIXD_ENABLED", True),
+        patch("src.cache.run_captured", side_effect=make_mock_run([ok()])),
+    ):
+        await copy_to_cache(PATHS)
+    assert reachable() == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_copy_leaves_the_gauge_alone():
+    """The negative control: a copy fails for reasons of its own."""
+    CACHE_REACHABLE.set(0)
+    with (
+        patch("src.cache.PYNIXD_ENABLED", True),
+        patch("src.cache.run_captured", side_effect=make_mock_run([fail()] * 6)),
+        patch("src.cache.anyio.sleep", new_callable=AsyncMock),
+    ):
+        await copy_to_cache(PATHS)
+    assert reachable() == 0
 
 
 @pytest.mark.asyncio

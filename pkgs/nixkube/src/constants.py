@@ -214,6 +214,15 @@ GC_DELETE_TIMEOUT_SECONDS: int = _parse_int_env("GC_DELETE_TIMEOUT_SECONDS", "18
 # second when pynixd is there at all.
 CACHE_PING_TIMEOUT_SECONDS: float = _parse_float_env("CACHE_PING_TIMEOUT_SECONDS", "5")
 
+# How often `cache_probe_loop` pings pynixd while it answers. After a failed
+# ping the loop retries sooner, from `CACHE_PROBE_RETRY_SECONDS` doubling up
+# to this. The retry lives in the loop and not in the mount's ping, for the
+# reason above: a mount does not wait on pynixd.
+CACHE_PROBE_INTERVAL_SECONDS: float = _parse_float_env(
+    "CACHE_PROBE_INTERVAL_SECONDS", "300"
+)
+CACHE_PROBE_RETRY_SECONDS: float = _parse_float_env("CACHE_PROBE_RETRY_SECONDS", "5")
+
 # Cycles without one completing before the loop says so at error level. Both
 # failures of #38 were silent, and on a Talos node the first visible symptom
 # is the kubelet evicting pods for disk.
