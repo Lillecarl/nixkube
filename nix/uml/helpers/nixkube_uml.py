@@ -552,11 +552,15 @@ async def kubelet_restarts(cp: Machine, settings: dict) -> None:
     await on_node(cp, "systemctl restart kubelet")
 
 
-async def containerd_restarts(cp: Machine, settings: dict) -> None:
+# containerd or crio: the unit `services.uml-k8s.cri` puts behind this target.
+RUNTIME_UNIT = "$(systemctl show --property Requires --value uml-k8s-cri.target)"
+
+
+async def the_runtime_restarts(cp: Machine, settings: dict) -> None:
     # The big one. Every container on the node dies, including the control
     # plane, and the NRI connection the plugin holds goes with it. A
-    # containerd upgrade does exactly this.
-    await on_node(cp, "systemctl restart containerd")
+    # runtime upgrade does exactly this.
+    await on_node(cp, f"systemctl restart {RUNTIME_UNIT}")
 
 
 async def the_csi_socket_is_deleted(cp: Machine, settings: dict) -> None:
@@ -590,7 +594,7 @@ SCENARIOS = (
     ("crictl removes the sandbox", crictl_removes_the_sandbox, KEEPS),
     ("the process is killed outright", the_process_is_killed, KEEPS),
     ("kubelet restarts", kubelet_restarts, KEEPS),
-    ("containerd restarts", containerd_restarts, KEEPS),
+    ("the container runtime restarts", the_runtime_restarts, KEEPS),
     ("its csi socket is deleted", the_csi_socket_is_deleted, KEEPS),
     ("its state directories are wiped", the_state_is_wiped, REPLACED),
 )
@@ -751,7 +755,7 @@ async def report(cp: Machine) -> None:
     # "[nri-wait] OCI state: id=hello pid=2081 bundle=..." and the verdict
     # was 900 characters further on.
     rc, out = await cp.execute(
-        "journalctl --unit containerd --no-pager --lines 4000"
+        f"journalctl --unit {RUNTIME_UNIT} --no-pager --lines 4000"
         " | grep --text nri-wait | tail -n 20",
         timeout=120,
     )

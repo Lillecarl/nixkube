@@ -19,7 +19,7 @@
 # per scenario), runtimes, host and report. By hand, with the guest held open on a failure:
 #
 #     nix run --file . umlTest.run -- --out ./o --break-on-failure
-#     nix run --file . umlTest.run -- --out ./o -- -k containerd
+#     nix run --file . umlTest.run -- --out ./o -- -k runtime
 {
   pkgs,
   lib,
@@ -102,7 +102,10 @@ let
         # pods that need it start without a /nix, and nothing says why.
         nri = true;
 
-        runtimes = runtimesFor config.boot.uml.backend;
+        runtimes = runtimesFor {
+          inherit (config.boot.uml) backend;
+          inherit (config.services.uml-k8s) cri;
+        };
 
         # One, for pynixd's `nix-store` claim. The StorageClass it creates is
         # `standard`, annotated as the cluster default, which is what
@@ -220,9 +223,10 @@ let
     the booted guest.
   */
   hostNext =
-    backend:
+    { backend, cri }:
     (uml.mkNode {
       imports = [ cpNode ];
+      services.uml-k8s.cri = cri;
       networking.hostName = "cp";
       boot.uml = {
         inherit backend;
@@ -232,11 +236,12 @@ let
       environment.etc."nixkube-host-generation".text = "next\n";
     }).config.system.build.toplevel;
 
-  # The RuntimeClasses besides runc a pod here can ask for. gVisor does not
-  # start under UML; see `services.uml-k8s.runtimes`.
-  runtimesFor = backend: [ "crun" ] ++ lib.optional (backend != "uml") "runsc";
+  # The RuntimeClasses besides runc a pod here can ask for. gVisor runs only
+  # under QEMU and containerd; see `services.uml-k8s.runtimes`.
+  runtimesFor =
+    { backend, cri }: [ "crun" ] ++ lib.optional (backend != "uml" && cri == "containerd") "runsc";
 
-  # "kubelet restarts,containerd" to `-k "kubelet-restarts or containerd"`,
+  # "kubelet restarts,runtime" to `-k "kubelet-restarts or runtime"`,
   # the ids nix/uml/chaos/ gives the scenarios.
   scenarioFilter =
     text:
@@ -263,11 +268,11 @@ uml.mkSession (
         Empty runs all nine, which is what CI wants and what takes most of
         the run. Iterating on one costs the cluster and that scenario:
 
-            NIXKUBE_UML_SCENARIOS=containerd nix build --file . umlTest
+            NIXKUBE_UML_SCENARIOS=runtime nix build --file . umlTest
 
         By hand, `-k` does the same without a new evaluation:
 
-            nix run --file . umlTest.run -- --out ./o -- -k containerd
+            nix run --file . umlTest.run -- --out ./o -- -k runtime
       */
       scenarios = {
         env = "NIXKUBE_UML_SCENARIOS";
@@ -293,6 +298,18 @@ uml.mkSession (
         env = "NIXKUBE_UML_BACKEND";
         default = "qemu";
         description = "qemu, or uml where there is no /dev/kvm";
+      };
+
+      /*
+        The CRI the node runs: containerd, or crio. The same test either
+        way, which is the question issue #74 asks of CRI-O.
+
+            NIXKUBE_UML_CRI=crio nix build --file . umlTest
+      */
+      cri = {
+        env = "NIXKUBE_UML_CRI";
+        default = "containerd";
+        description = "containerd or crio";
       };
     };
 
@@ -335,7 +352,10 @@ uml.mkSession (
       };
     };
 
-    nodes.cp = cpNode;
+    nodes.cp = {
+      imports = [ cpNode ];
+      services.uml-k8s.cri = config.resolved.cri.value;
+    };
 
     settings = {
       manifest = "${manifestFile}";
@@ -366,8 +386,14 @@ uml.mkSession (
       # file names is a path the sandbox has.
       workloadStorePath = "${pkgs.hello}";
       workloadImage = "uml.test/busybox:1";
-      runtimes = runtimesFor config.resolved.backend.value;
-      hostNext = "${hostNext config.resolved.backend.value}";
+      runtimes = runtimesFor {
+        backend = config.resolved.backend.value;
+        cri = config.resolved.cri.value;
+      };
+      hostNext = "${hostNext {
+        backend = config.resolved.backend.value;
+        cri = config.resolved.cri.value;
+      }}";
     };
   }
 )
