@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+import json
 import shutil
 import time
 from functools import wraps
@@ -44,7 +45,7 @@ from .annotations import (
     parse_store_mounts,
 )
 from .cleanup import schedule_garbage_collection
-from .mount import kernel_supports_ro, kernel_supports_rw, mount_in_container
+from .mount import kernel_supports_ro, kernel_supports_rw, mount_in_container, rootfs_of
 from .zmq import ZeroMQServer
 
 # ============================================================================
@@ -124,7 +125,7 @@ from .zmq import ZeroMQServer
 #    - When nri-wait reports, returns (pid, bundle_path)
 #
 # 4. Spawn mount subprocess
-#    - Calls mount_in_container(pid, bundle, nix_tree_path, store_mounts, nix_rw)
+#    - Calls mount_in_container(pid, rootfs, nix_tree_path, store_mounts, nix_rw)
 #    - Uses multiprocessing.spawn to avoid contaminating asyncio event loop with setns(2)
 #    - Passes precomputed mount FDs created in the original namespace
 #
@@ -601,12 +602,8 @@ class NriPlugin(NriPluginBase):
             )
         pid, bundle = container_info
 
-        # What mount.py opens, asked first so the failure can say why. runc
-        # and crun report the container's own pid, whose root is the host's
-        # before pivot_root. gVisor reports its sandbox, whose root is its own
-        # (measured, issue #74); Kata puts the container in a VM.
-        rootfs = anyio.Path(f"{HOST_PROC_PATH}/{pid}/root{bundle}/rootfs")
-        if not await rootfs.is_dir():
+        rootfs = await reachable_rootfs(pid, bundle)
+        if rootfs is None:
             raise RuntimeError(
                 f"the container's rootfs is not reachable through pid {pid}, so"
                 " NRI cannot mount /nix into it. A sandboxed runtime such as"
@@ -632,7 +629,26 @@ class NriPlugin(NriPluginBase):
             mounts=len(mounts),
             farm=len(farm_paths) if farm_paths else 0,
         )
-        await mount_in_container(pid, bundle, nix_tree_path, mounts, nix_rw, farm_paths)
+        await mount_in_container(pid, rootfs, nix_tree_path, mounts, nix_rw, farm_paths)
+
+
+async def reachable_rootfs(pid: int, bundle: str) -> str | None:
+    """The rootfs mount.py will open, or None where it cannot reach one.
+
+    Asked first so a failure can say why. runc and crun report the
+    container's own pid, whose root is the host's before pivot_root. gVisor
+    reports its sandbox, whose root is its own (measured, issue #74); Kata
+    puts the container in a VM.
+    """
+    root = f"{HOST_PROC_PATH}/{pid}/root"
+    try:
+        config = json.loads(await anyio.Path(f"{root}{bundle}/config.json").read_text())
+        rootfs = rootfs_of(bundle, config)
+        if await anyio.Path(f"{root}{rootfs}").is_dir():
+            return rootfs
+    except (OSError, ValueError, KeyError):
+        pass
+    return None
 
 
 def failure_reason(error: BaseException) -> str:

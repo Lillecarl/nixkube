@@ -46,8 +46,10 @@ first so /nix/store/... sources are visible.
 When our createRuntime hook fires the container init process is alive with its
 mount namespace established. pivot_root has NOT happened yet — the container's
 root is still the host root. We use the fchdir+chroot trick to enter the
-container's rootfs: open an O_PATH fd to the bundle rootfs before setns (while
-the host path is accessible), then fchdir+chroot after setns.
+container's rootfs: open an O_PATH fd to the rootfs before setns (while the
+host path is accessible), then fchdir+chroot after setns. The rootfs is the
+bundle's `config.json` `root.path`, not `{bundle}/rootfs`: containerd puts it
+there, CRI-O keeps it in containers-storage. See `rootfs_of`.
 
 ## Why multiprocessing.spawn
 
@@ -64,7 +66,7 @@ via picklable arguments.
        farm or RO: open_tree clone (AT_RECURSIVE carries the farm)
        RW hardlink: fsopen("overlay") → fsconfig(lowerdir/upper/work) →
                     CMD_CREATE → fsmount
-  2. rootfs fd      — O_PATH to bundle/rootfs while in daemonset namespace
+  2. rootfs fd      — O_PATH to the rootfs while in daemonset namespace
   3. setns          — enter container mount namespace
   4. fchdir+chroot  — pivot into container rootfs
   5. move_mount     — attach /nix fd. RO then goes read-only:
@@ -277,9 +279,20 @@ def _make_overlay_fd(
         os.close(ctx_fd)
 
 
+def rootfs_of(bundle: str, config: dict) -> str:
+    """The container's rootfs, from its bundle's OCI `config.json`.
+
+    The spec lets `root.path` be absolute or relative to the bundle.
+    containerd writes "rootfs"; CRI-O writes an absolute path into
+    containers-storage, and its bundle has no rootfs directory at all.
+    """
+    path = config["root"]["path"]
+    return path if path.startswith("/") else f"{bundle}/{path}"
+
+
 def _mount_worker(
     container_pid: int,
-    bundle: str,
+    rootfs: str,
     nix_tree_path: Path,
     store_mounts: list[tuple[Path, Path]],
     nix_rw: bool,
@@ -326,8 +339,8 @@ def _mount_worker(
 
         # Step 2: Open the container rootfs while still in the daemonset namespace.
         # /host/proc/{pid}/root reaches the container init's root; pre-pivot_root
-        # that equals the host root, so appending {bundle}/rootfs gives the OCI rootfs.
-        rootfs_path = f"{host_proc_path}/{container_pid}/root{bundle}/rootfs"
+        # that equals the host root, so appending the rootfs gives the OCI rootfs.
+        rootfs_path = f"{host_proc_path}/{container_pid}/root{rootfs}"
         rootfs_fd = os.open(rootfs_path, os.O_PATH | os.O_DIRECTORY)
 
         # Step 3: Enter the container's mount namespace.
@@ -407,7 +420,7 @@ def _mount_worker(
 
 async def mount_in_container(
     container_pid: int,
-    bundle: str,
+    rootfs: str,
     nix_tree_path: Path,
     store_mounts: list[tuple[Path, Path]],
     nix_rw: bool = False,
@@ -430,7 +443,7 @@ async def mount_in_container(
         target=_mount_worker,
         args=(
             container_pid,
-            bundle,
+            rootfs,
             nix_tree_path,
             store_mounts,
             nix_rw,
