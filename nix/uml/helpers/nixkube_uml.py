@@ -247,7 +247,11 @@ async def check_workloads(cp: Machine) -> None:
 
 
 async def probe(
-    cp: Machine, settings: dict, why: str, runtime_class: str | None = None
+    cp: Machine,
+    settings: dict,
+    why: str,
+    runtime_class: str | None = None,
+    wants: tuple[str, ...] = ("ro", "rw"),
 ) -> None:
     """Create one pod that wants both mount paths, and see that it gets them.
 
@@ -266,9 +270,11 @@ async def probe(
     the guest's own /nix is an overlay too, so the type says nothing.
 
     *runtime_class* runs the pod under that RuntimeClass instead of the
-    default runc. Issue #74.
+    default runc. Issue #74. *wants* limits it to some of `PROBES`.
     """
     for want, key in PROBES:
+        if want not in wants:
+            continue
         # jq, then kubectl reading stdin: the agent's shell is /bin/sh.
         runtime_filter = (
             "cat"
@@ -429,6 +435,38 @@ async def check_sandboxed(cp: Machine, settings: dict, runtime_class: str) -> No
             f" ({UNREACHABLE!r}); its containers said:\n{messages}"
         )
     print(f"[nixkube] NRI refuses {runtime_class} and says why", flush=True)
+
+
+# What `nri/vm.py` says when a VM pod asks for a writable /nix.
+VM_RW_REFUSED = "a writable /nix is not offered under a VM runtime"
+
+
+async def check_vm(cp: Machine, settings: dict, runtime_class: str) -> None:
+    """Under a VM runtime: a read-only /nix through virtio-fs, and no rw.
+
+    The ro probe asks what it asks under runc: both mounts, and a mount at
+    exactly /nix. The rw probe must fail in its nri container with the
+    reason, which the waiter prints before it exits.
+    """
+    await probe(
+        cp, settings, "a clean start", runtime_class=runtime_class, wants=("ro",)
+    )
+    rw = (
+        f'.spec.template.spec.runtimeClassName = "{runtime_class}"'
+        f' | .metadata.generateName = "rw-{runtime_class}-"'
+    )
+    _, logs = await run_job(
+        cp, settings["probeRw"], rw, f"an rw probe under {runtime_class}"
+    )
+    if VM_RW_REFUSED not in logs:
+        raise MachineError(
+            f"[cp] an rw probe under {runtime_class} was not refused with the"
+            f" reason ({VM_RW_REFUSED!r}); its containers said:\n{logs}"
+        )
+    print(
+        f"[nixkube] NRI refuses a writable /nix under {runtime_class} and says why",
+        flush=True,
+    )
 
 
 def state_dirs(settings: dict) -> dict[str, str]:
