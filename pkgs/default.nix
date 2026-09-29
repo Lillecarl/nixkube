@@ -48,6 +48,8 @@ self: pkgs: {
       SETUP_BINSH = pkgs.dockerTools.binSh;
       SETUP_CACERTS = pkgs.dockerTools.caCertificates;
       SETUP_USRBINENV = pkgs.dockerTools.usrBinEnv;
+      # Copied into a VM container's /nix; see src/nri/vm.py.
+      NRI_VM_BUSYBOX = "${pkgs.pkgsStatic.busybox}/bin/busybox";
     };
   };
 

@@ -121,6 +121,17 @@ MOUNT_BUDGET_FALLBACK_RATIO: float = _parse_float_env(
 # storage disagrees can go back to hardlinks without a new image.
 NRI_BIND_FARM = os.environ.get("NRI_BIND_FARM", "true") == "true"
 
+# RuntimeClass handlers that run each pod in a VM, such as Kata. The pod's
+# /nix reaches the VM as a bind mount the runtime shares over virtio-fs, and
+# not as a mount into the container's namespace. See `nri/vm.py`.
+NRI_VM_RUNTIME_HANDLERS = frozenset(
+    h for h in os.environ.get("NRI_VM_RUNTIME_HANDLERS", "kata").split(",") if h
+)
+
+# A static busybox, which a VM runs from the container's /nix to wait for
+# the build. Empty where the node does not set it; a VM pod is then refused.
+NRI_VM_BUSYBOX = os.environ.get("NRI_VM_BUSYBOX", "")
+
 # How long `nix store verify --recursive --no-trust` may take.
 #
 # It is the longest nix call on the publish path when it runs at all, and the

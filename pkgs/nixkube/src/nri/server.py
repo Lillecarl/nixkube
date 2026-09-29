@@ -25,6 +25,8 @@ from ..constants import (
     NRI_PLUGIN_IDX,
     NRI_PLUGIN_NAME,
     NRI_RUNTIME_SOCKET,
+    NRI_VM_BUSYBOX,
+    NRI_VM_RUNTIME_HANDLERS,
 )
 from ..cri import get_cri_socket, list_container_ids
 from ..events import report_event
@@ -46,6 +48,17 @@ from .annotations import (
 )
 from .cleanup import schedule_garbage_collection
 from .mount import kernel_supports_ro, kernel_supports_rw, mount_in_container, rootfs_of
+from .vm import (
+    ALIVE,
+    FAILED,
+    READY,
+    host_source,
+    is_vm_runtime,
+    mark,
+    prepare_waiter,
+    refusal,
+    waiter_args,
+)
 from .zmq import ZeroMQServer
 
 # ============================================================================
@@ -180,6 +193,14 @@ from .zmq import ZeroMQServer
 #      containerd deadlines every NRI request, and a sweep is slower than an
 #      acknowledgement may be.
 #
+# VM RUNTIMES (NRI_VM_RUNTIME_HANDLERS, e.g. Kata)
+# ─────────────────────────────────────────────────
+# No hook and no namespace mount: the hook's pid is the hypervisor. Phase 1
+# instead binds the container's tree at /nix, which the runtime shares into
+# the VM over virtio-fs, and puts a static busybox waiter in front of the
+# container's args. Phase 3 fills the tree with hardlinks and writes a ready
+# or failed marker. Read-only only. See `vm.py`.
+#
 # ============================================================================
 
 
@@ -248,7 +269,7 @@ class NriPlugin(NriPluginBase):
             pod={"namespace": req.pod.namespace, "name": req.pod.name},
             container={"name": req.container.name, "id": req.container.id},
         )
-        logger.debug("create_container")
+        logger.debug("create_container", runtime_handler=req.pod.runtime_handler)
 
         # Check if /nix is already mounted (e.g., by nix-csi) to avoid collision
         if any(m.destination == "/nix" for m in req.container.mounts):
@@ -321,34 +342,60 @@ class NriPlugin(NriPluginBase):
                     namespace=req.pod.namespace,
                 )
 
-                # Inject OCI hook to wait for build completion and report PID+bundle
-                assert self.nri_wait_bin is not None, (
-                    "nri-wait binary not found on PATH, wait hook won't be able to execute"
-                )
-                coreutils_container = shutil.which("coreutils")
-                assert coreutils_container is not None, "coreutils not found on PATH"
-                coreutils_host = HOST_MOUNT_PATH / Path(
-                    coreutils_container
-                ).relative_to("/")
-                hook = nri_pb2.Hook(
-                    path=str(coreutils_host),
-                    args=[
-                        "chroot",  # somehow this works in OCI hooks but not --coreutils-prog=chroot....
-                        str(HOST_MOUNT_PATH),
-                        self.nri_wait_bin,
-                    ],
-                    env=[
-                        "NRI_QUERY_SOCKET=/nix/var/nixkube/wait-req.sock",
-                        "NRI_PUB_SOCKET=/nix/var/nixkube/wait-pub.sock",
-                        "NRI_TIMEOUT=30",
-                    ],
-                )
-                adjust.hooks.create_runtime.append(hook)
-                logger.info(
-                    "hook_injected",
-                    nri_wait_bin=self.nri_wait_bin,
-                    coreutils_host=coreutils_host,
-                )
+                vm = is_vm_runtime(req.pod.runtime_handler, NRI_VM_RUNTIME_HANDLERS)
+                if vm:
+                    if not NRI_VM_BUSYBOX:
+                        raise RuntimeError(
+                            "NRI_VM_BUSYBOX is not set, so a VM container cannot wait for its /nix"
+                        )
+                    tree = NRI_CONTAINERS / container_id / "nix"
+                    await prepare_waiter(tree, NRI_VM_BUSYBOX)
+                    source = host_source(tree, HOST_MOUNT_PATH)
+                    adjust.mounts.append(
+                        nri_pb2.Mount(
+                            destination="/nix",
+                            type="bind",
+                            source=str(source),
+                            options=["rbind", "ro"],
+                        )
+                    )
+                    adjust.args.extend(waiter_args(list(req.container.args)))
+                    logger.info(
+                        "vm_waiter_injected",
+                        runtime_handler=req.pod.runtime_handler,
+                        source=str(source),
+                    )
+                else:
+                    # Inject OCI hook to wait for build completion and report PID+bundle
+                    assert self.nri_wait_bin is not None, (
+                        "nri-wait binary not found on PATH, wait hook won't be able to execute"
+                    )
+                    coreutils_container = shutil.which("coreutils")
+                    assert coreutils_container is not None, (
+                        "coreutils not found on PATH"
+                    )
+                    coreutils_host = HOST_MOUNT_PATH / Path(
+                        coreutils_container
+                    ).relative_to("/")
+                    hook = nri_pb2.Hook(
+                        path=str(coreutils_host),
+                        args=[
+                            "chroot",  # somehow this works in OCI hooks but not --coreutils-prog=chroot....
+                            str(HOST_MOUNT_PATH),
+                            self.nri_wait_bin,
+                        ],
+                        env=[
+                            "NRI_QUERY_SOCKET=/nix/var/nixkube/wait-req.sock",
+                            "NRI_PUB_SOCKET=/nix/var/nixkube/wait-pub.sock",
+                            "NRI_TIMEOUT=30",
+                        ],
+                    )
+                    adjust.hooks.create_runtime.append(hook)
+                    logger.info(
+                        "hook_injected",
+                        nri_wait_bin=self.nri_wait_bin,
+                        coreutils_host=coreutils_host,
+                    )
 
                 # Spawn build task to build store paths and namespace-mount them into the container
                 if container_id not in self.zmq_server.pending_builds:
@@ -364,6 +411,7 @@ class NriPlugin(NriPluginBase):
                             store_paths,
                             store_mounts,
                             nix_rw,
+                            vm,
                             name="nri_build",
                         )
                     except Exception:
@@ -426,7 +474,7 @@ class NriPlugin(NriPluginBase):
 
         await stream.send_message(nri_pb2.Empty())
 
-    async def _pump_build_progress(self, container_id: str) -> None:
+    async def _pump_build_progress(self, container_id: str, vm: bool) -> None:
         """Periodically publish build progress heartbeats to reset nri-wait timeout.
 
         Runs until the group around it is cancelled, which is how the build
@@ -436,6 +484,8 @@ class NriPlugin(NriPluginBase):
         while True:
             await anyio.sleep(10)
             await self.zmq_server.publish_build_progress(container_id)
+            if vm:
+                await mark(NRI_CONTAINERS / container_id / "nix", ALIVE)
 
     async def _spawn_build_task(
         self,
@@ -445,6 +495,7 @@ class NriPlugin(NriPluginBase):
         store_paths: set[Path],
         store_mounts: dict[Path, Path] | None = None,
         nix_rw: bool = False,
+        vm: bool = False,
     ) -> None:
         """Run the build inside a scope the volume sweep can cancel.
 
@@ -457,7 +508,7 @@ class NriPlugin(NriPluginBase):
         self.zmq_server.pending_builds.attach(container_id, scope)
         with scope:
             await self._run_build_task(
-                container_id, container_name, pod, store_paths, store_mounts, nix_rw
+                container_id, container_name, pod, store_paths, store_mounts, nix_rw, vm
             )
 
     async def _run_build_task(
@@ -468,6 +519,7 @@ class NriPlugin(NriPluginBase):
         store_paths: set[Path],
         store_mounts: dict[Path, Path] | None = None,
         nix_rw: bool = False,
+        vm: bool = False,
     ) -> None:
         """Realize store paths, link into the volume, then namespace-mount store mounts.
 
@@ -480,7 +532,8 @@ class NriPlugin(NriPluginBase):
         log = structlog.get_logger("nixkube.nri.buildtask").bind(
             container_id=container_id
         )
-        log.info("build_task_started", count=len(store_paths))
+        log.info("build_task_started", count=len(store_paths), vm=vm)
+        tree = NRI_CONTAINERS / container_id / "nix"
         started = time.monotonic()
         NRI_BUILDS_IN_FLIGHT.inc()
         try:
@@ -497,15 +550,22 @@ class NriPlugin(NriPluginBase):
             # gets a group of its own, cancelled on the way out, so it cannot
             # outlive the build it reports on however that build ends.
             async with anyio.create_task_group() as pump:
-                pump.start_soon(self._pump_build_progress, container_id)
+                pump.start_soon(self._pump_build_progress, container_id, vm)
                 log.debug("progress_pump_started")
                 try:
-                    await self._build_and_mount(
-                        log, container_id, store_paths, store_mounts, nix_rw
-                    )
+                    if vm:
+                        await self._build_for_vm(
+                            log, container_id, store_paths, store_mounts, nix_rw
+                        )
+                    else:
+                        await self._build_and_mount(
+                            log, container_id, store_paths, store_mounts, nix_rw
+                        )
                 finally:
                     pump.cancel_scope.cancel()
 
+            if vm:
+                await mark(tree, READY)
             log.info("build_task_completed")
             self.zmq_server.build_status[container_id] = {"status": "done"}
             log.debug("build_status_updated")
@@ -536,6 +596,8 @@ class NriPlugin(NriPluginBase):
                 "reason": reason,
             }
             await self.zmq_server.publish_build_failed(container_id, reason)
+            if vm:
+                await mark(tree, FAILED, f"nixkube: {reason}\n")
 
             # Report failed build
             await report_event(
@@ -630,6 +692,29 @@ class NriPlugin(NriPluginBase):
             farm=len(farm_paths) if farm_paths else 0,
         )
         await mount_in_container(pid, rootfs, nix_tree_path, mounts, nix_rw, farm_paths)
+
+    async def _build_for_vm(
+        self,
+        log: Any,
+        container_id: str,
+        store_paths: set[Path],
+        store_mounts: dict[Path, Path] | None,
+        nix_rw: bool,
+    ) -> None:
+        """Fill the tree a VM already shares at /nix. See `vm.py`.
+
+        A hardlink tree and never a farm: the VM sees the tree through
+        virtio-fs, which serves files and would have to serve each farm bind
+        as a submount of its own.
+        """
+        reason = refusal(nix_rw, store_mounts)
+        if reason:
+            raise RuntimeError(reason)
+        extra_args = await get_build_args()
+        volume_path = NRI_CONTAINERS / container_id
+        await fetch_packages(store_paths, volume_path, extra_args)
+        await prepare_volume(volume_path, store_paths, None, bind_farm=False)
+        log.info("vm_tree_filled")
 
 
 async def reachable_rootfs(pid: int, bundle: str) -> str | None:

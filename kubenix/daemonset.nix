@@ -286,6 +286,7 @@ in
                         PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
                         ENABLE_COMPAT_DRIVER.value = lib.boolToString cfg.node.compat;
                         NRI_ENABLED.value = "true";
+                        NRI_VM_RUNTIME_HANDLERS.value = lib.concatStringsSep "," cfg.nri.vmRuntimeHandlers;
                         HOME.value = "/nix/var/nix-csi/root";
                         HOST_MOUNT_PATH.value = cfg.hostMountPath;
                         KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";

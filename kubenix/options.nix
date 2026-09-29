@@ -121,6 +121,19 @@ in
       default = false;
     };
 
+    nri.vmRuntimeHandlers = lib.mkOption {
+      description = ''
+        RuntimeClass handlers that run each pod in a virtual machine, such as
+        Kata Containers. For these, the NRI plugin shares the container's
+        /nix as a bind mount, which the runtime passes into the VM over
+        virtio-fs, and the container waits for it before its own command.
+
+        Read-only only. A writable /nix and store path mounts are refused.
+      '';
+      type = lib.types.listOf lib.types.str;
+      default = [ "kata" ];
+    };
+
     verifyStorePaths = lib.mkOption {
       description = "Verify Nix store paths after building or fetching, before mounting into pods.";
       type = lib.types.bool;

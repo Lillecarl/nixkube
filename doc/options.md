@@ -974,6 +974,37 @@ positive integer, meaning >0
 
 
 
+## nixkube\.nri\.vmRuntimeHandlers
+
+
+
+RuntimeClass handlers that run each pod in a virtual machine, such as
+Kata Containers\. For these, the NRI plugin shares the container’s
+/nix as a bind mount, which the runtime passes into the VM over
+virtio-fs, and the container waits for it before its own command\.
+
+Read-only only\. A writable /nix and store path mounts are refused\.
+
+
+
+*Type:*
+list of string
+
+
+
+*Default:*
+
+```nix
+[
+  "kata"
+]
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
 ## nixkube\.pynixd\.enable
 
 

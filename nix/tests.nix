@@ -82,6 +82,8 @@ in
     projectRoot = ../pkgs/nixkube;
     spec.nixkube = [ "test" ];
     importPackages = [ "src" ];
+    # The waiter in tests/test_vm.py runs under it, as it does in a VM.
+    env.NRI_VM_BUSYBOX = "${pkgs.pkgsStatic.busybox}/bin/busybox";
   };
 
   pynixd-nixkube-tests = mkSuite {
