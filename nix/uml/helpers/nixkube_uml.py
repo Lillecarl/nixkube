@@ -246,7 +246,9 @@ async def check_workloads(cp: Machine) -> None:
     print(f"[nixkube] {', '.join(WORKLOADS)} ran out of the volume", flush=True)
 
 
-async def probe(cp: Machine, settings: dict, why: str) -> None:
+async def probe(
+    cp: Machine, settings: dict, why: str, runtime_class: str | None = None
+) -> None:
     """Create one pod that wants both mount paths, and see that it gets them.
 
     This is the question every chaos scenario asks: after that, can a pod
@@ -262,11 +264,20 @@ async def probe(cp: Machine, settings: dict, why: str) -> None:
     Read-only and read-write are told apart by the mount options, not the
     filesystem type: the plugin builds the writable one as an overlay, and
     the guest's own /nix is an overlay too, so the type says nothing.
+
+    *runtime_class* runs the pod under that RuntimeClass instead of the
+    default runc. Issue #74.
     """
     for want, key in PROBES:
-        created = await kubectl(
-            cp,
-            f"create --namespace {NAMESPACE} --filename {settings[key]} --output name",
+        # jq, then kubectl reading stdin: the agent's shell is /bin/sh.
+        runtime_filter = (
+            "cat"
+            if runtime_class is None
+            else f"jq '.spec.template.spec.runtimeClassName = \"{runtime_class}\"'"
+        )
+        created = await cp.succeed(
+            f"{runtime_filter} {settings[key]}"
+            f" | kubectl create --namespace {NAMESPACE} --filename - --output name",
             timeout=APPLY_TIMEOUT,
         )
         name = created.strip().splitlines()[-1].split("/")[-1]
@@ -323,7 +334,96 @@ async def probe(cp: Machine, settings: dict, why: str) -> None:
             f"delete job {name} --namespace {NAMESPACE} --wait=true",
             timeout=APPLY_TIMEOUT,
         )
-        print(f"[nixkube] a {want} probe got both mounts after {why}", flush=True)
+        under = "" if runtime_class is None else f" under {runtime_class}"
+        print(
+            f"[nixkube] a {want} probe got both mounts{under} after {why}", flush=True
+        )
+
+
+# What `nri/server.py` says when a runtime keeps the container out of reach.
+UNREACHABLE = "rootfs is not reachable through pid"
+
+
+async def run_job(
+    cp: Machine, source: str, jq_filter: str, what: str
+) -> tuple[dict, str]:
+    """Create a Job from *source* through *jq_filter*; wait until it ends.
+
+    Returns its pod as JSON and its logs. The pod ends either way here, so
+    nothing is raised on failure: the caller says which outcome it wanted.
+    """
+    created = await cp.succeed(
+        f"jq '{jq_filter}' {source}"
+        f" | kubectl create --namespace {NAMESPACE} --filename - --output name",
+        timeout=APPLY_TIMEOUT,
+    )
+    name = created.strip().splitlines()[-1].split("/")[-1]
+    selector = f"--namespace {NAMESPACE} --selector job-name={name}"
+
+    async def ended() -> tuple[bool, str]:
+        pods = (await get_json(cp, f"get pods {selector}")).get("items", [])
+        statuses = [
+            s for p in pods for s in p.get("status", {}).get("containerStatuses", [])
+        ]
+        done = bool(statuses) and all(
+            "terminated" in s.get("state", {})
+            or s.get("state", {}).get("waiting", {}).get("reason")
+            in ("StartError", "RunContainerError", "CrashLoopBackOff")
+            or "terminated" in s.get("lastState", {})
+            for s in statuses
+        )
+        return done, pod_summary(await kubectl(cp, f"get pods {selector} --no-headers"))
+
+    await until(what, ended, READY_TIMEOUT, cp)
+    pod = (await get_json(cp, f"get pods {selector}"))["items"][0]
+    _, logs = await cp.execute(f"kubectl logs {selector} --all-containers")
+    await kubectl(cp, f"delete job {name} --namespace {NAMESPACE} --wait=true")
+    return pod, logs
+
+
+async def check_sandboxed(cp: Machine, settings: dict, runtime_class: str) -> None:
+    """Under a sandboxed runtime: CSI works, and NRI refuses by name.
+
+    Measured under gVisor (issue #74): a CSI volume reaches the sandbox
+    through its gofer, and NRI cannot, because the pid the hook reports is
+    the sandbox's and its root is not the host's.
+    """
+    csi = (
+        f'.spec.template.spec.runtimeClassName = "{runtime_class}"'
+        ' | .spec.template.metadata.annotations = {"nixkube/pod-exclude": "true"}'
+        ' | .spec.template.spec.containers |= map(select(.name == "csi")'
+        f' | .command = ["{settings["workloadStorePath"]}/bin/hello"]'
+        ' | .volumeMounts = [{"name": "store", "mountPath": "/nix", "subPath": "nix"}])'
+        f' | .metadata.generateName = "csi-{runtime_class}-"'
+    )
+    _, logs = await run_job(
+        cp, settings["probeRo"], csi, f"a CSI pod under {runtime_class}"
+    )
+    if "Hello, world!" not in logs:
+        raise MachineError(
+            f"[cp] a CSI volume at /nix did not run hello under {runtime_class}:\n{logs}"
+        )
+    print(f"[nixkube] a CSI volume works under {runtime_class}", flush=True)
+
+    nri = (
+        f'.spec.template.spec.runtimeClassName = "{runtime_class}"'
+        f' | .metadata.generateName = "nri-{runtime_class}-"'
+    )
+    pod, _ = await run_job(
+        cp, settings["probeRo"], nri, f"an NRI pod under {runtime_class}"
+    )
+    messages = " ".join(
+        s.get("state", {}).get("waiting", {}).get("message", "")
+        + s.get("state", {}).get("terminated", {}).get("message", "")
+        + s.get("lastState", {}).get("terminated", {}).get("message", "")
+        for s in pod["status"].get("containerStatuses", [])
+    )
+    if UNREACHABLE not in messages:
+        raise MachineError(
+            f"[cp] an NRI pod under {runtime_class} did not fail with the reason"
+            f" ({UNREACHABLE!r}); its containers said:\n{messages}"
+        )
+    print(f"[nixkube] NRI refuses {runtime_class} and says why", flush=True)
 
 
 def state_dirs(settings: dict) -> dict[str, str]:

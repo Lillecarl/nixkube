@@ -16,7 +16,7 @@
 # it one directory across into the node's own store, where nixkube looks.
 #
 # The phases are cluster, deploy, workloads, chaos (a pytest phase, one test
-# per scenario) and report. By hand, with the guest held open on a failure:
+# per scenario), runtimes and report. By hand, with the guest held open on a failure:
 #
 #     nix run --file . umlTest.run -- --out ./o --break-on-failure
 #     nix run --file . umlTest.run -- --out ./o -- -k containerd
@@ -60,6 +60,10 @@ let
     probes.rw
     pkgs.hello
   ];
+
+  # The RuntimeClasses besides runc a pod here can ask for. gVisor does not
+  # start under UML; see `services.uml-k8s.runtimes`.
+  runtimesFor = backend: [ "crun" ] ++ lib.optional (backend != "uml") "runsc";
 
   # "kubelet restarts,containerd" to `-k "kubelet-restarts or containerd"`,
   # the ids nix/uml/chaos/ gives the scenarios.
@@ -143,9 +147,15 @@ uml.mkSession (
         };
         after = [ "workloads" ];
       };
+      # After chaos, so a scheduler that picks chaos first cannot leave
+      # this waiting behind a breakpoint on it.
+      runtimes = {
+        script = ./phases/runtimes.py;
+        after = [ "chaos" ];
+      };
       report = {
         script = ./phases/report.py;
-        after = [ "chaos" ];
+        after = [ "runtimes" ];
         always = true;
       };
     };
@@ -189,6 +199,8 @@ uml.mkSession (
           # no error when it is not -- so without this the plugin waits, the
           # pods that need it start without a /nix, and nothing says why.
           nri = true;
+
+          runtimes = runtimesFor config.boot.uml.backend;
 
           # One, for pynixd's `nix-store` claim. The StorageClass it creates is
           # `standard`, annotated as the cluster default, which is what
@@ -328,6 +340,7 @@ uml.mkSession (
       # file names is a path the sandbox has.
       workloadStorePath = "${pkgs.hello}";
       workloadImage = "uml.test/busybox:1";
+      runtimes = runtimesFor config.resolved.backend.value;
     };
   }
 )
