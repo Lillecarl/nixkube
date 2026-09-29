@@ -109,6 +109,18 @@ in
       default = "/var/lib/nix-csi";
     };
 
+    nixosHost.enable = lib.mkOption {
+      description = ''
+        Let each node switch its NixOS host to the system its Node object
+        names in the `nixkube/toplevel` annotation. Issue #24.
+
+        Whoever can annotate a Node can then choose what that machine runs,
+        as root. A node that is not NixOS logs so and does nothing.
+      '';
+      type = lib.types.bool;
+      default = false;
+    };
+
     verifyStorePaths = lib.mkOption {
       description = "Verify Nix store paths after building or fetching, before mounting into pods.";
       type = lib.types.bool;

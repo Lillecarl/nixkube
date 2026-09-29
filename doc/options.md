@@ -733,6 +733,34 @@ open submodule of attribute set of (Nix config atom (null, bool, int, float, str
 
 
 
+## nixkube\.nixosHost\.enable
+
+
+
+Let each node switch its NixOS host to the system its Node object
+names in the ` nixkube/toplevel ` annotation\. Issue \#24\.
+
+Whoever can annotate a Node can then choose what that machine runs,
+as root\. A node that is not NixOS logs so and does nothing\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+false
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
 ## nixkube\.node\.enable
 
 

@@ -70,6 +70,9 @@ in
     */
     pynixd.enable = true;
 
+    # The host phase switches the guest's own system. Issue #24.
+    nixosHost.enable = true;
+
     # The guest's whole disk is 4 GiB (`boot.uml.diskSize`), and the node's
     # own store is already on it. `cacheEnv` is about 512 MiB, so this is what
     # pynixd actually writes here plus room to see it grow. The 10Gi default
