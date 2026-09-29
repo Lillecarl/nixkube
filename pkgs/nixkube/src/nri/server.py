@@ -526,13 +526,21 @@ class NriPlugin(NriPluginBase):
             NRI_BUILDS.labels(result="error").inc()
             log.exception("build_task_failed")
             self.zmq_server.pending_builds.discard(container_id)
+            reason = failure_reason(e)
+            # So the hook fails now, with the reason, instead of after its
+            # timeout with none.
+            self.zmq_server.build_status[container_id] = {
+                "status": "failed",
+                "reason": reason,
+            }
+            await self.zmq_server.publish_build_failed(container_id, reason)
 
             # Report failed build
             await report_event(
                 pod,
                 reason="BuildFailed",
                 note=f"Failed to build store paths for container {container_name}",
-                logs=str(e),
+                logs=reason,
                 event_type="Warning",
             )
         finally:
@@ -611,6 +619,17 @@ class NriPlugin(NriPluginBase):
             farm=len(farm_paths) if farm_paths else 0,
         )
         await mount_in_container(pid, bundle, nix_tree_path, mounts, nix_rw, farm_paths)
+
+
+def failure_reason(error: BaseException) -> str:
+    """The messages of the errors a group wraps, not the group's own.
+
+    The build runs inside the progress pump's task group, so its failure
+    arrives as "unhandled errors in a TaskGroup (1 sub-exception)".
+    """
+    if isinstance(error, BaseExceptionGroup):
+        return "; ".join(failure_reason(inner) for inner in error.exceptions)
+    return str(error)
 
 
 async def nri_serve() -> None:

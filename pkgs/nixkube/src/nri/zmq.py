@@ -157,6 +157,21 @@ class ZeroMQServer:
         except Exception:
             log.exception("zmq_publish_done_failed")
 
+    async def publish_build_failed(self, container_id: str, reason: str) -> None:
+        """Publish a build failure and its reason on the PUB socket."""
+        if self.pub_socket is None:
+            logger.warning("zmq_pub_not_initialized")
+            return
+        log = logger.bind(container_id=container_id)
+        try:
+            msg = json.dumps(
+                {"container_id": container_id, "status": "failed", "reason": reason}
+            )
+            await self.pub_socket.send(msg.encode())
+            log.info("zmq_published_failed")
+        except Exception:
+            log.exception("zmq_publish_failed_failed")
+
     async def start_request_handler(self) -> None:
         """Handle build status queries on REP socket (blocks until cancelled)."""
         if self.rep_socket is None:

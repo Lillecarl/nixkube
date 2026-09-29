@@ -19,12 +19,16 @@ class _Zmq:
     def __init__(self) -> None:
         self.pending_builds = BuildRegistry()
         self.build_status: dict[str, dict[str, str]] = {}
+        self.failed: list[tuple[str, str]] = []
 
     async def publish_build_progress(self, _container_id: str) -> None:
         pass
 
     async def publish_build_complete(self, _container_id: str) -> None:
         pass
+
+    async def publish_build_failed(self, container_id: str, reason: str) -> None:
+        self.failed.append((container_id, reason))
 
 
 def _plugin(build_and_mount) -> NriPlugin:
@@ -90,3 +94,10 @@ async def test_a_failed_build_does_not_stay_pending(monkeypatch):
 
     assert CONTAINER not in plugin.zmq_server.pending_builds
     assert reported == ["BuildFailed"], "a failed build must say so on the pod"
+    # And to the hook, which otherwise waits out its timeout and says nothing.
+    reason = "no substituter that can build it"
+    assert plugin.zmq_server.build_status[CONTAINER] == {
+        "status": "failed",
+        "reason": reason,
+    }
+    assert plugin.zmq_server.failed == [(CONTAINER, reason)]

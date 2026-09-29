@@ -180,6 +180,41 @@ class TestHeartbeat:
         assert exit_info.value.code == 1
 
 
+class TestFailure:
+    """The daemon says the build failed. The hook stops at once, with the reason."""
+
+    def test_failure_ends_the_wait_with_its_reason(self, pub, capsys):
+        """Sent repeatedly, for the same reason as the heartbeat test: a
+        message sent before the subscription arrives reaches nobody."""
+        socket, path = pub
+        stop = threading.Event()
+        reason = "the container's rootfs is not reachable through pid 7237"
+
+        def daemon():
+            payload = {"container_id": CONTAINER, "status": "failed", "reason": reason}
+            while not stop.is_set():
+                socket.send(json.dumps(payload).encode())
+                time.sleep(TIMEOUT / 10)
+
+        thread = threading.Thread(target=daemon)
+        thread.start()
+        started = time.time()
+        try:
+            with (
+                subscriber(path) as sub,
+                pytest.raises(SystemExit) as exit_info,
+            ):
+                wait_for_completion(sub, CONTAINER, 10 * TIMEOUT, never)
+        finally:
+            waited = time.time() - started
+            stop.set()
+            thread.join()
+
+        assert exit_info.value.code == 1
+        assert waited < TIMEOUT, "the hook waited out its timeout instead"
+        assert reason in capsys.readouterr().err
+
+
 class TestSilence:
     """The daemon says nothing. That is the only failure."""
 
