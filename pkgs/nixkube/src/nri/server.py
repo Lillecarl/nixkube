@@ -17,6 +17,7 @@ from nri import nri_pb2
 from ..cache import schedule_copy_to_cache
 from ..constants import (
     HOST_MOUNT_PATH,
+    HOST_PROC_PATH,
     HOST_ROOT,
     NRI_BIND_FARM,
     NRI_CONTAINERS,
@@ -599,6 +600,19 @@ class NriPlugin(NriPluginBase):
                 f"No PID/bundle received for container={container_id!r}, cannot mount /nix"
             )
         pid, bundle = container_info
+
+        # What mount.py opens, asked first so the failure can say why. runc
+        # and crun report the container's own pid, whose root is the host's
+        # before pivot_root. gVisor reports its sandbox, whose root is its own
+        # (measured, issue #74); Kata puts the container in a VM.
+        rootfs = anyio.Path(f"{HOST_PROC_PATH}/{pid}/root{bundle}/rootfs")
+        if not await rootfs.is_dir():
+            raise RuntimeError(
+                f"the container's rootfs is not reachable through pid {pid}, so"
+                " NRI cannot mount /nix into it. A sandboxed runtime such as"
+                " gVisor or Kata keeps it out of the host's reach; mount the"
+                " store with a CSI volume instead."
+            )
 
         mounts = []
         if store_mounts:
