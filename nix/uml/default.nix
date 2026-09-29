@@ -102,11 +102,6 @@ let
         # pods that need it start without a /nix, and nothing says why.
         nri = true;
 
-        runtimes = runtimesFor {
-          inherit (config.boot.uml) backend;
-          inherit (config.services.uml-k8s) cri;
-        };
-
         # One, for pynixd's `nix-store` claim. The StorageClass it creates is
         # `standard`, annotated as the cluster default, which is what
         # `nixkube.pynixd.storageClassName = null` asks for. `bring_up`
@@ -223,10 +218,13 @@ let
     the booted guest.
   */
   hostNext =
-    { backend, cri }:
+    {
+      backend,
+      cri,
+      kata,
+    }:
     (uml.mkNode {
-      imports = [ cpNode ];
-      services.uml-k8s.cri = cri;
+      imports = [ (cpFor { inherit cri kata; }) ];
       networking.hostName = "cp";
       boot.uml = {
         inherit backend;
@@ -239,7 +237,29 @@ let
   # The RuntimeClasses besides runc a pod here can ask for. gVisor runs only
   # under QEMU and containerd; see `services.uml-k8s.runtimes`.
   runtimesFor =
-    { backend, cri }: [ "crun" ] ++ lib.optional (backend != "uml" && cri == "containerd") "runsc";
+    {
+      backend,
+      cri,
+      kata,
+    }:
+    [ "crun" ]
+    ++ lib.optional (backend != "uml" && cri == "containerd") "runsc"
+    ++ lib.optional kata "kata";
+
+  cpFor =
+    { cri, kata }:
+    { config, ... }:
+    {
+      imports = [ cpNode ];
+      services.uml-k8s = {
+        inherit cri;
+        runtimes = runtimesFor {
+          inherit (config.boot.uml) backend;
+          inherit cri kata;
+        };
+      };
+      boot.uml.nestedVirtualization = kata;
+    };
 
   # "kubelet restarts,runtime" to `-k "kubelet-restarts or runtime"`,
   # the ids nix/uml/chaos/ gives the scenarios.
@@ -254,6 +274,11 @@ let
 in
 uml.mkSession (
   { config, ... }:
+  let
+    backend = config.resolved.backend.value;
+    cri = config.resolved.cri.value;
+    kata = config.resolved.kata.value == "1";
+  in
   {
     name = "nixkube";
 
@@ -311,9 +336,22 @@ uml.mkSession (
         default = "containerd";
         description = "containerd or crio";
       };
+
+      /*
+        Kata Containers as a further RuntimeClass, on either CRI. It starts
+        a VM per pod, so the host needs nested virtualization, and a GitHub
+        runner has none: by hand only.
+
+            NIXKUBE_UML_KATA=1 NIXKUBE_UML_CRI=crio nix build --file . umlTest
+      */
+      kata = {
+        env = "NIXKUBE_UML_KATA";
+        default = "";
+        description = "1 to offer Kata Containers";
+      };
     };
 
-    backend = config.resolved.backend.value;
+    inherit backend;
 
     phases = {
       cluster = {
@@ -352,10 +390,7 @@ uml.mkSession (
       };
     };
 
-    nodes.cp = {
-      imports = [ cpNode ];
-      services.uml-k8s.cri = config.resolved.cri.value;
-    };
+    nodes.cp = cpFor { inherit cri kata; };
 
     settings = {
       manifest = "${manifestFile}";
@@ -386,14 +421,8 @@ uml.mkSession (
       # file names is a path the sandbox has.
       workloadStorePath = "${pkgs.hello}";
       workloadImage = "uml.test/busybox:1";
-      runtimes = runtimesFor {
-        backend = config.resolved.backend.value;
-        cri = config.resolved.cri.value;
-      };
-      hostNext = "${hostNext {
-        backend = config.resolved.backend.value;
-        cri = config.resolved.cri.value;
-      }}";
+      runtimes = runtimesFor { inherit backend cri kata; };
+      hostNext = "${hostNext { inherit backend cri kata; }}";
     };
   }
 )

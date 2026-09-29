@@ -9,7 +9,7 @@ from uml_runner import Machines
 
 # The pid a sandboxed runtime reports is not the container's, so NRI cannot
 # reach it. Measured for gVisor; see `check_sandboxed`.
-SANDBOXED = {"runsc"}
+SANDBOXED = {"runsc", "kata"}
 
 
 async def test(vms: Machines) -> None:
