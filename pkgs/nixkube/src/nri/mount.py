@@ -89,7 +89,14 @@ from pathlib import Path
 import anyio.to_thread
 import structlog
 
-from ..constants import HOST_PROC_PATH, MNT_DETACH, MS_BIND, MS_RDONLY, MS_REMOUNT
+from ..constants import (
+    CSI_ROOT,
+    HOST_PROC_PATH,
+    MNT_DETACH,
+    MS_BIND,
+    MS_RDONLY,
+    MS_REMOUNT,
+)
 from ..mountattr import set_readonly
 from .farm import build_farm, detach_namespace
 
@@ -148,12 +155,22 @@ def kernel_supports_ro() -> bool:
 
 @cache
 def kernel_supports_rw() -> bool:
-    """Test if kernel supports new mount API for overlayfs (fsopen/fsconfig/fsmount). Result is cached."""
+    """Test if kernel supports new mount API for overlayfs (fsopen/fsconfig/fsmount). Result is cached.
+
+    Probed on the filesystem of the real upper directories, not in /tmp,
+    and not in NRI_CONTAINERS, whose sweep would take the probe for a
+    stale volume. The container's
+    /tmp is on its own rootfs, an overlay, and the kernel refuses an
+    overlay upper on one: under CRI-O this said "unsupported" with
+    fsconfig('upperdir') EINVAL, on a kernel whose volumes mount read-write
+    fine. Measured on 2026-09-29.
+    """
     import tempfile
 
     libc = ctypes.CDLL(None, use_errno=True)
     try:
-        with tempfile.TemporaryDirectory() as tmpdir:
+        CSI_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=CSI_ROOT) as tmpdir:
             tmppath = Path(tmpdir)
             lowerdir = tmppath / "lower"
             upperdir = tmppath / "upper"
