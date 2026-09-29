@@ -368,7 +368,12 @@ async def run_job(
         done = bool(statuses) and all(
             "terminated" in s.get("state", {})
             or s.get("state", {}).get("waiting", {}).get("reason")
-            in ("StartError", "RunContainerError", "CrashLoopBackOff")
+            in (
+                "StartError",
+                "RunContainerError",
+                "CreateContainerError",
+                "CrashLoopBackOff",
+            )
             or "terminated" in s.get("lastState", {})
             for s in statuses
         )
