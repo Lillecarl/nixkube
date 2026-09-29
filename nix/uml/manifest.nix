@@ -124,7 +124,9 @@ in
     hostMountPath = "/nixkube";
 
     /*
-      No substituters at all.
+      No substituters at all, for every role. Each role's list has its own
+      default of cache.nixos.org and a list concatenates, so the top-level
+      `nixkube.nixConfig` cannot empty it; only `mkForce` on the role does.
 
       Nothing needs one: `nixkube-seed-store` in ./default.nix copies
       everything this node will be asked for into its store before kubelet
@@ -138,7 +140,13 @@ in
 
           error: path '...-nodeEnv' is required, but there is no
           substituter that can build it
+
+      The node alone was not enough. pynixd's appstarter-init reads the
+      controller's nix.conf, and each unreachable cache there cost five
+      retries and a DNS failure: measured, pynixd-0 spent 90s in Init.
     */
     node.nixConfig.settings.substituters = lib.mkForce [ ];
+    pynixd.controller.nixConfig.settings.substituters = lib.mkForce [ ];
+    pynixd.builder.nixConfig.settings.substituters = lib.mkForce [ ];
   };
 }
