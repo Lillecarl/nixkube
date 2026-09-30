@@ -114,8 +114,8 @@ writable /nix.
 
 | | runc | crun | gVisor (runsc) | Kata Containers |
 |---|---|---|---|---|
-| **containerd** | CSI, NRI ro/rw | CSI, NRI ro/rw | CSI; NRI refused¹ | CSI, NRI ro²; see ³ |
-| **CRI-O** | CSI, NRI ro/rw | CSI, NRI ro/rw | no container runs⁴ | CSI, NRI ro²; see ³ |
+| **containerd** | CSI, NRI ro/rw | CSI, NRI ro/rw | CSI; NRI refused¹ | CSI, NRI ro², ³ |
+| **CRI-O** | CSI, NRI ro/rw | CSI, NRI ro/rw | no container runs⁴ | CSI, NRI ro², ³ |
 
 1. gVisor keeps the container's rootfs out of the node's reach. The
    container fails with a message that says so and names CSI instead.
@@ -123,9 +123,10 @@ writable /nix.
    the build is done. A writable /nix and `nixkube/pod-path` mounts are
    refused with the reason: the tree is hardlinks into the node's store.
    Set `nixkube.nri.vmRuntimeHandlers` if your Kata handler is not `kata`.
-3. Kata's guest kernel 6.18.35 crashed in its virtio-fs code in our test
-   (`input` from `fuse_release_end`), and the pod's containers then exit with
-   255. It happens with plain shares too, without nixkube.
+3. Needs Kata 4.0.0 or later. Earlier guest kernels have a use-after-free
+   in virtio-fs when a container exits (kata-containers#12589): the VM's
+   agent dies and every container in the pod exits with 255. This happens
+   without nixkube too.
 4. Measured with CRI-O 1.36.5 and runsc 20260406, on a plain busybox pod
    without nixkube.
 
@@ -135,7 +136,7 @@ when an NRI plugin returns an error, without the plugin's changes.
 
 Tested by `nix/uml` (`NIXKUBE_UML_CRI`, `NIXKUBE_UML_KATA`) on Kubernetes
 1.37, containerd 2.3.4, CRI-O 1.36.5, runc 1.4.3, crun 1.29.1, gVisor
-20260406 and Kata 3.32.0 on nested QEMU. Not tested: youki, and pods with
+20260406 and Kata 4.2.0 on nested QEMU. Not tested: youki, and pods with
 `hostUsers: false`.
 
 Examples:
