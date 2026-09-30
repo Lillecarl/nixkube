@@ -122,6 +122,10 @@ let
         but MemFree fell to 64 MiB against kubelet's 50Mi eviction line.
         So this is the lowest that passed, plus a few percent.
 
+        The Kata cells pass at 2200M too (2026-10-01): the working set
+        peaks at 1.46 GiB with CRI-O and 1.53 GiB with containerd, in
+        `runtimes`, and MemFree bottoms at 64 MiB, as without Kata.
+
         The same for both backends. vivarium issue #19 is swap, which
         would let this sit nearer the working set.
 
