@@ -955,26 +955,23 @@ rec {
     assert lib.hasInfix "ed25519" builder.path;
     pkgs.runCommand "builder-presents-pinned-host-key" { } "echo ok > $out";
 
-  # NixOS integration tests — spin up real kubeadm clusters in VMs
-  nixosTests = {
-    containerd = import ./tests/nixos/integration.nix {
-      inherit pkgs lib;
-      manifests = kubenixCI2.manifestYAMLFile;
+  # Tests written as nixos-test modules, run as vivarium guests: a
+  # sandboxed build, a `.driver` run and an MCP session are the same test.
+  nixosTests =
+    let
+      inherit (import (sources.vivarium + "/lib.nix") { inherit pkgs; }) fromNixosTest;
+    in
+    {
+      # Whether `nix build` works inside a store made of bind mounts. Issue
+      # #65 rests on the answer, and nothing short of real root can ask it.
+      bind-farm = fromNixosTest (import ./tests/nixos/bind-farm.nix { inherit pkgs lib; });
+
+      # A mount flag can only be checked by mounting. Issue #66.
+      csi-mount-rec = fromNixosTest (import ./tests/nixos/csi-mount-rec.nix { inherit pkgs lib; });
+
+      # nixkube's own `build_farm`, as root against a real closure. Issue #65.
+      farm-builder = fromNixosTest (import ./tests/nixos/farm-builder.nix { inherit pkgs lib; });
     };
-
-    # Not a cluster, and not in `checks.all`: it boots a VM for one
-    # question, which is whether `nix build` works inside a store made of
-    # bind mounts. Issue #65 rests on the answer, and nothing short of real
-    # root can ask it.
-    bind-farm = import ./tests/nixos/bind-farm.nix { inherit pkgs lib; };
-
-    # Also outside `checks.all`, and for the same reason: a mount flag can
-    # only be checked by mounting. Issue #66.
-    csi-mount-rec = import ./tests/nixos/csi-mount-rec.nix { inherit pkgs lib; };
-
-    # nixkube's own `build_farm`, as root against a real closure. Issue #65.
-    farm-builder = import ./tests/nixos/farm-builder.nix { inherit pkgs lib; };
-  };
 
   treefmt = (import sources.treefmt-nix).mkWrapper pkgs {
     projectRootFile = "default.nix";

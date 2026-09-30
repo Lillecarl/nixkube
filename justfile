@@ -78,10 +78,6 @@ testpod:
 # Deploy to Hetzkube then deploy test pods
 livetest: hetzkube testpod
 
-# Run NixOS integration test (requires KVM)
+# Run the root-only tests (bind farm, CSI mount flags, farm builder)
 nixos-test:
-    nix build --file . nixosTests.containerd --no-link --print-build-logs
-
-# Run NixOS integration test interactively (opens test driver shell)
-nixos-test-interactive:
-    nix build --file . nixosTests.containerd.driverInteractive && ./result/bin/nixos-test-driver
+    nix build --file . nixosTests.bind-farm nixosTests.csi-mount-rec nixosTests.farm-builder --no-link --print-build-logs

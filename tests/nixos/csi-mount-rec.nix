@@ -30,7 +30,7 @@ let
     anyio.run(mount_volume, Path(sys.argv[1]), Path(sys.argv[2]), True)
   '';
 in
-pkgs.testers.runNixOSTest {
+{
   name = "nixkube-csi-mount-rec";
 
   nodes.machine = {

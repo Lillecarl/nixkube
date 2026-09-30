@@ -83,7 +83,7 @@ let
     print("PROBE " + json.dumps(checks))
   '';
 in
-pkgs.testers.runNixOSTest {
+{
   name = "nixkube-farm-builder";
 
   nodes.machine = {

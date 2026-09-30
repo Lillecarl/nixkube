@@ -21,7 +21,7 @@
 let
   seed = pkgs.bash;
 in
-pkgs.testers.runNixOSTest {
+{
   name = "nixkube-bind-farm";
 
   nodes.machine = {
