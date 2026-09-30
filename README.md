@@ -123,16 +123,24 @@ writable /nix.
    the build is done. A writable /nix and `nixkube/pod-path` mounts are
    refused with the reason: the tree is hardlinks into the node's store.
    Set `nixkube.nri.vmRuntimeHandlers` if your Kata handler is not `kata`.
+   The wait is a static busybox that NRI puts in front of the container's
+   args, because Kata checks the command exists before any OCI hook runs;
+   `crictl inspect` shows the changed args. A container that also mounts
+   something under /nix fails with EROFS, because its mount point would be
+   inside the read-only share.
 3. Needs Kata 4.0.0 or later. Earlier guest kernels have a use-after-free
    in virtio-fs when a container exits (kata-containers#12589): the VM's
    agent dies and every container in the pod exits with 255. This happens
-   without nixkube too.
+   without nixkube too. nixpkgs still packages 3.32.0; user-mode-nixos
+   carries 4.2.0 until nixpkgs moves.
 4. Measured with CRI-O 1.36.5 and runsc 20260406, on a plain busybox pod
    without nixkube.
 
 CRI-O with Kata needs `skip_mount_home = "true"` in containers-storage's
-overlay options, or the VM gets an empty rootfs. CRI-O creates a container
-when an NRI plugin returns an error, without the plugin's changes.
+overlay options, or the VM gets an empty rootfs. CRI-O refuses a Kata pod on
+the host network ("Host networking requested, not supported by runtime");
+containerd accepts one. CRI-O creates a container when an NRI plugin returns
+an error, without the plugin's changes.
 
 Tested by `nix/uml` (`NIXKUBE_UML_CRI`, `NIXKUBE_UML_KATA`) on Kubernetes
 1.37, containerd 2.3.4, CRI-O 1.36.5, runc 1.4.3, crun 1.29.1, gVisor
