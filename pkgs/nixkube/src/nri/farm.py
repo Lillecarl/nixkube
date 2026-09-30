@@ -97,15 +97,72 @@ def detach_namespace() -> None:
         raise FarmError(err, f"make / private: {os.strerror(err)}")
 
 
+def place(store_dir: Path, store_paths: Iterable[Path]) -> None:
+    """Make, on disk, what each store path binds onto.
+
+    A directory or an empty file per path, and a copy of the link for a
+    symlink: a bind needs a directory or a regular file to land on, and a
+    store path that is a symlink is complete as a copy. An entry already
+    there is left alone.
+
+    Separate from `bind` because a CSI volume is published read-only before
+    its farm is bound, and nothing can be created through a read-only mount.
+    """
+    store_dir.mkdir(parents=True, exist_ok=True)
+    for source in store_paths:
+        target = store_dir / source.name
+        if os.path.lexists(target):
+            continue
+        if source.is_symlink():
+            os.symlink(os.readlink(source), target)
+        elif source.is_dir():
+            target.mkdir()
+        elif source.is_file():
+            target.touch()
+        else:
+            # Not a symlink, not a directory, not a file: it is not there.
+            # Going on would give the container an empty store path and no
+            # error anywhere, which is the failure `hardlink_tree` learned.
+            raise FarmError(errno.ENOENT, f"store path is not there: {source}")
+
+
+def mount_points(mountinfo: Path = Path("/proc/self/mountinfo")) -> set[str]:
+    """Every mount point in this namespace."""
+    return {line.split()[4] for line in mountinfo.read_text().splitlines()}
+
+
+def bind(store_dir: Path, store_paths: Iterable[Path]) -> int:
+    """Bind each store path read-only onto its place in `store_dir`.
+
+    Answers how many it bound. A symlink has no bind, and a path already
+    mounted is left alone, so this is safe to run twice. `place` first: a
+    path with nothing to land on fails here.
+    """
+    mounted = mount_points()
+    bound = 0
+    for source in store_paths:
+        target = store_dir / source.name
+        if source.is_symlink() or str(target) in mounted:
+            continue
+        _bind(source, target)
+        try:
+            set_readonly(target, recursive=False)
+        except MountSetattrUnsupported as error:
+            # No fallback. `MS_REMOUNT | MS_RDONLY` would report success and
+            # leave the bind writable into the node's store, which is worse
+            # than refusing to mount at all.
+            raise FarmError(
+                error.errno or 0,
+                f"kernel cannot make {target} read-only (needs Linux 5.12)",
+            ) from error
+        bound += 1
+    return bound
+
+
 def build_farm(store_dir: Path, store_paths: Iterable[Path]) -> int:
-    """Bind every path in `store_paths` read-only into `store_dir`.
+    """`place` and `bind` every path in `store_paths` into `store_dir`.
 
-    Answers how many it bound. A path already present is left alone, so this
-    is safe to run twice over the same directory.
-
-    A symlink is copied rather than bound: a bind mount needs a directory or
-    a regular file to land on, and a store path that is a symlink has nothing
-    for either.
+    Answers how many it bound. Safe to run twice over the same directory.
 
     The budget is checked before the first mount. Past `fs.mount-max`,
     mount(2) answers ENOSPC and says nothing about which limit it meant --
@@ -119,40 +176,5 @@ def build_farm(store_dir: Path, store_paths: Iterable[Path]) -> int:
             f"{len(store_paths)} mounts will not fit: this namespace holds "
             f"{budget.used} of {budget.limit}",
         )
-
-    store_dir.mkdir(parents=True, exist_ok=True)
-    bound = 0
-
-    for source in store_paths:
-        target = store_dir / source.name
-        if os.path.lexists(target):
-            continue
-
-        if source.is_symlink():
-            os.symlink(os.readlink(source), target)
-            continue
-
-        if source.is_dir():
-            target.mkdir()
-        elif source.is_file():
-            target.touch()
-        else:
-            # Not a symlink, not a directory, not a file: it is not there.
-            # Falling through would give the container an empty store path and
-            # no error anywhere, which is the failure `hardlink_tree` learned.
-            raise FarmError(errno.ENOENT, f"store path is not there: {source}")
-
-        _bind(source, target)
-        try:
-            set_readonly(target, recursive=False)
-        except MountSetattrUnsupported as error:
-            # No fallback. `MS_REMOUNT | MS_RDONLY` would report success and
-            # leave the bind writable into the node's store, which is worse
-            # than refusing to mount at all.
-            raise FarmError(
-                error.errno or 0,
-                f"kernel cannot make {target} read-only (needs Linux 5.12)",
-            ) from error
-        bound += 1
-
-    return bound
+    place(store_dir, store_paths)
+    return bind(store_dir, store_paths)
