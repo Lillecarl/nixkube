@@ -1,7 +1,7 @@
 """On a clean start: the workloads get their store paths, and unmount is clean."""
 
 from nixkube_uml import check_resident, check_unmount, check_workloads, probe
-from uml_runner import Machines
+from vivarium_runner import Machines
 
 
 async def test(vms: Machines) -> None:

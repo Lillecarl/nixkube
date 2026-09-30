@@ -3,8 +3,8 @@
 # Every image the node DaemonSet names, as a docker-archive tarball.
 #
 # There is no registry inside a Nix build sandbox, so a node gets an image one
-# way: user-mode-nixos imports it into containerd before kubelet starts, from
-# `services.uml-k8s.extraImages`. What matters is the *tag* inside each
+# way: vivarium imports it into containerd before kubelet starts, from
+# `services.vivarium-k8s.extraImages`. What matters is the *tag* inside each
 # tarball -- containerd matches on it, and a pod whose image nobody imported
 # under that exact name sits in `ErrImagePull` until the test times out.
 #
@@ -101,14 +101,14 @@ rec {
 
     A tarball carries none. `dockerTools.buildImage` gzips its layers, so
     the reference scanner sees compressed bytes and records nothing -- and
-    then user-mode-nixos bind-mounts the guest's /nix/store over each
+    then vivarium bind-mounts the guest's /nix/store over each
     container's, hiding the copy the image brought with it. The entrypoint
     is a store path that is not in the sandbox, and runc says so:
 
         exec: ".../bin/livenessprobe": no such file or directory
 
     So the packages have to be named where Nix will see them.
-    `services.uml-k8s.extraImages` says this in its description, and
+    `services.vivarium-k8s.extraImages` says this in its description, and
     modules/k8s.nix does the same thing for kubeadm's own images through
     `system.extraDependencies`. ./default.nix passes these to it.
 
@@ -126,7 +126,7 @@ rec {
     Do the tarballs carry the tags the manifest names?
 
     Cheap, and the alternative is finding out from an ErrImagePull twenty
-    minutes into a cluster test -- the same reason user-mode-nixos keeps
+    minutes into a cluster test -- the same reason vivarium keeps
     `check-k8s-images` over kubeadm's own list.
 
     The manifest is the authority: this reads the image strings straight out

@@ -6,8 +6,8 @@ and back, and refuses a value that is not a store path.
 """
 
 from nixkube_uml import READY_TIMEOUT
-from uml_runner import Machine, MachineError, Machines
-from uml_runner.cluster import get_json, kubectl, until
+from vivarium_runner import Machine, MachineError, Machines
+from vivarium_runner.cluster import get_json, kubectl, until
 
 TOPLEVEL = "nixkube/toplevel"
 CURRENT = "nixkube/current-system"

@@ -52,7 +52,7 @@ let
 
   # The same two deployments as the kind jobs, on a guest that boots on the
   # runner.  The test itself is nix/uml/ci.py, so a developer runs exactly
-  # what CI runs: `nix run --file . ciTest.run`.
+  # what CI runs: `nix run --file . ciTest.driver -- --out ./out`.
   testQemu =
     { attr, what }:
     {
@@ -63,7 +63,7 @@ let
       steps = [
         {
           name = "Deploy and test ${what}, on a guest";
-          run = "nix run --file . ${attr}.run";
+          run = "nix run --file . ${attr}.driver -- --out ./out";
         }
       ];
     };
@@ -448,13 +448,13 @@ ghalib.evalWorkflow {
 
       The same test and the same script a developer runs on a laptop:
 
-          nix run --file . umlTest.run -- --out ./uml-out
+          nix run --file . umlTest.driver -- --out ./uml-out
 
       `--out` is where the run's evidence goes: junit.xml with one case
       per chaos scenario, events.jsonl, each guest's console and journal.
 
-      There is no Kind cluster and no registry here. The guest's /nix/store
-      is the runner's, over virtiofs, so everything the node needs is
+      There is no Kind cluster and no registry here. The guest's store view
+      comes from the runner's /nix/store, so everything the node needs is
       already on the machine that built it -- which is what lets this job
       run with no `needs` and no published image.
 
@@ -469,7 +469,7 @@ ghalib.evalWorkflow {
       steps = [
         {
           name = "Run the node test as a virtual machine";
-          run = "nix run --file . umlTest.run -- --out ./uml-out";
+          run = "nix run --file . umlTest.driver -- --out ./uml-out";
         }
       ];
     };

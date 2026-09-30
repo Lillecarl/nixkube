@@ -11,15 +11,15 @@
 #
 # What makes that possible is that a guest's /nix/store is the *sandbox's*
 # store, over hostfs. So a store path this file names is a path the guest
-# already has, with nothing fetched -- `mkSession` registers everything in
+# already has, with nothing fetched -- `mkTest` registers everything in
 # `settings` so Nix in the guest agrees, and `nixkube-seed-store` below copies
 # it one directory across into the node's own store, where nixkube looks.
 #
 # The phases are cluster, deploy, workloads, chaos (a pytest phase, one test
 # per scenario), runtimes, host and report. By hand, with the guest held open on a failure:
 #
-#     nix run --file . umlTest.run -- --out ./o --break-on-failure
-#     nix run --file . umlTest.run -- --out ./o -- -k runtime
+#     nix run --file . umlTest.driverDebug -- --out ./o
+#     nix run --file . umlTest.driver -- --out ./o -- -k runtime
 {
   pkgs,
   lib,
@@ -28,14 +28,14 @@
   manifest,
 }:
 let
-  uml = import (sources.user-mode-nixos + "/lib.nix") { inherit pkgs; };
+  vivarium = import (sources.vivarium + "/lib.nix") { inherit pkgs; };
 
   # The rendered manifest, and the root of everything the node needs.
   #
   # `nixkube.discardStringContext = false` (see ./manifest.nix) keeps the
   # string context on the DaemonSet's store paths, so the node environment is
   # in this file's closure. Naming it in `settings` does both jobs: it pulls
-  # the closure into the sandbox, and `mkSession` registers what `settings`
+  # the closure into the sandbox, and `mkTest` registers what `settings`
   # names, which is what makes Nix inside the guest agree the paths are real.
   manifestFile = manifest.manifestYAMLFile;
 
@@ -66,9 +66,9 @@ let
   cpNode =
     { config, ... }:
     {
-      imports = [ (sources.user-mode-nixos + "/modules/k8s.nix") ];
+      imports = [ (sources.vivarium + "/modules/k8s.nix") ];
 
-      services.uml-k8s = {
+      services.vivarium-k8s = {
         enable = true;
         role = "control-plane";
 
@@ -109,7 +109,7 @@ let
         persistentVolumes = 1;
       };
 
-      boot.uml = {
+      vivarium = {
         /*
           A control plane, a CSI driver, an NRI plugin and whatever the test
           schedules, all in one guest -- so give it what the machine has.
@@ -136,13 +136,13 @@ let
           the qcow2 and everything else, and this workload has never needed
           more.
 
-          No `nixDatabase` here. `mkSession` registers the closure of everything
+          No `nixDatabase` here. `mkTest` registers the closure of everything
           in `settings`, which is every path in `seedRoots`: the manifest,
           whose own closure carries the node environment because
           `nixkube.discardStringContext = false` keeps the context on it;
           both probes; and what a workload asks the driver to mount.
         */
-        memory = if config.boot.uml.backend == "qemu" then "14336M" else "4096M";
+        memory = if config.vivarium.backend == "qemu" then "14336M" else "4096M";
         cpus = 4;
         diskSize = 4096;
         lan = {
@@ -184,7 +184,7 @@ let
 
         The other rejected option was to hand containers the node's whole
         /nix through containerd's base runtime spec. That works and is
-        wrong: user-mode-nixos already mounts /nix/store into every
+        wrong: vivarium already mounts /nix/store into every
         container, and mounting /nix as well would leave this test unable to
         tell nixkube's own /nix from the harness's -- it would pass with the
         driver switched off.
@@ -214,7 +214,7 @@ let
   /*
     The same guest plus one file, for the host phase to switch to and back
     from. The switch then changes that file, and no unit the cluster runs
-    on. The hostname and `boot.uml` values are the ones `mkSession` gives
+    on. The hostname and `vivarium` values are the ones `mkTest` gives
     the booted guest.
   */
   hostNext =
@@ -223,10 +223,10 @@ let
       cri,
       kata,
     }:
-    (uml.mkNode {
+    (vivarium.mkNode {
       imports = [ (cpFor { inherit cri kata; }) ];
       networking.hostName = "cp";
-      boot.uml = {
+      vivarium = {
         inherit backend;
         index = 0;
         sshPort = 4325;
@@ -235,7 +235,7 @@ let
     }).config.system.build.toplevel;
 
   # The RuntimeClasses besides runc a pod here can ask for. gVisor runs only
-  # under QEMU and containerd; see `services.uml-k8s.runtimes`.
+  # under QEMU and containerd; see `services.vivarium-k8s.runtimes`.
   runtimesFor =
     {
       backend,
@@ -251,14 +251,14 @@ let
     { config, ... }:
     {
       imports = [ cpNode ];
-      services.uml-k8s = {
+      services.vivarium-k8s = {
         inherit cri;
         runtimes = runtimesFor {
-          inherit (config.boot.uml) backend;
+          inherit (config.vivarium) backend;
           inherit cri kata;
         };
       };
-      boot.uml.nestedVirtualization = kata;
+      vivarium.nestedVirtualization = kata;
     };
 
   # "kubelet restarts,runtime" to `-k "kubelet-restarts or runtime"`,
@@ -272,7 +272,7 @@ let
       ))
     ];
 in
-uml.mkSession (
+vivarium.mkTest (
   { config, ... }:
   let
     backend = config.resolved.backend.value;
@@ -297,7 +297,7 @@ uml.mkSession (
 
         By hand, `-k` does the same without a new evaluation:
 
-            nix run --file . umlTest.run -- --out ./o -- -k runtime
+            nix run --file . umlTest.driver -- --out ./o -- -k runtime
       */
       scenarios = {
         env = "NIXKUBE_UML_SCENARIOS";
@@ -420,7 +420,7 @@ uml.mkSession (
       # What a workload will ask the CSI driver to mount. A store path this
       # file names is a path the sandbox has.
       workloadStorePath = "${pkgs.hello}";
-      workloadImage = "uml.test/busybox:1";
+      workloadImage = "vivarium.test/busybox:1";
       runtimes = runtimesFor { inherit backend cri kata; };
       hostNext = "${hostNext { inherit backend cri kata; }}";
     };

@@ -9,7 +9,7 @@
   /*
     Run the image this checkout built, not the one published last.
 
-    `nix run --file . ciTestCache.run` is the only end-to-end test of the
+    `nix run --file . ciTestCache.driver` is the only end-to-end test of the
     node boot path, and it deployed `imagePullPolicy = "Always"`. So kubelet
     went to ghcr.io however the guest was prepared, and the test ran an
     `appstarter` this repository did not build -- a change under `pkgs/`
@@ -33,7 +33,7 @@
     A claim the guest's disk can honour.
 
     The guest offers one hostPath volume whose `capacity.storage` is
-    `boot.uml.diskSize`, because the volume is a directory on that disk.
+    `vivarium.diskSize`, because the volume is a directory on that disk.
     That is 8192Mi, and the default claim is 10Gi, so nothing binds and
     `pynixd-0` never schedules: `0/1 nodes are available: 1 node(s) didn't
     find available persistent volumes to bind`.

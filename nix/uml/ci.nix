@@ -2,8 +2,8 @@
 
 # What the kind jobs do, on a guest instead of on a container.
 #
-#     nix run --file . ciTest.run          # test-kind-nocache
-#     nix run --file . ciTestCache.run     # test-kind-cache
+#     nix run --file . ciTest.driver -- --out ./o        # test-kind-nocache
+#     nix run --file . ciTestCache.driver -- --out ./o   # test-kind-cache
 #
 # `nix/uml/default.nix` is the other cluster test and asks a different
 # question: it renders the manifest, applies it, and then breaks the node
@@ -49,24 +49,27 @@
   lan,
 }:
 let
-  uml = import (sources.user-mode-nixos + "/lib.nix") { inherit pkgs; };
+  vivarium = import (sources.vivarium + "/lib.nix") { inherit pkgs; };
 
   # Whether this deployment brings the pynixd cache with it, which is the
   # difference between the two kind jobs.  Asked of the instance rather
   # than passed in, so the two cannot disagree.
   pynixd = instance.config.nixkube.pynixd.enable;
 in
-uml.mkTest {
+vivarium.mkTest {
   inherit name;
-  script = ./ci.py;
+  phases.test = {
+    script = ./ci.py;
+    after = [ "boot" ];
+  };
   backend = "qemu";
 
   nodes.cp =
     { config, ... }:
     {
-      imports = [ (sources.user-mode-nixos + "/modules/k8s.nix") ];
+      imports = [ (sources.vivarium + "/modules/k8s.nix") ];
 
-      services.uml-k8s = {
+      services.vivarium-k8s = {
         enable = true;
         role = "control-plane";
 
@@ -120,7 +123,7 @@ uml.mkTest {
         persistentVolumes = if pynixd then 1 else 0;
       };
 
-      boot.uml = {
+      vivarium = {
         memory = "14336M";
         cpus = 4;
         # Measured at the end of a `ciTestCache` run, which is the heavier
@@ -150,7 +153,7 @@ uml.mkTest {
         forward = [
           {
             ports = [
-              config.boot.uml.sshPort
+              config.vivarium.sshPort
               {
                 host = 16443;
                 guest = 6443;

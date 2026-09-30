@@ -9,12 +9,12 @@ What is being proved is narrow and load-bearing. The DaemonSet's init
 container fills the node's Nix store by substituting into it, and a build
 sandbox has no network. It works here because the guest's own /nix/store is
 the sandbox's, over hostfs, so `local?trusted=true` already holds every path
-the manifest names -- and `boot.uml.nixDatabase` is what makes Nix agree they
+the manifest names -- and `vivarium.nixDatabase` is what makes Nix agree they
 are real rather than go looking for them.
 """
 
-from uml_runner import Machine, MachineError
-from uml_runner.cluster import get_json, kubectl, until
+from vivarium_runner import Machine, MachineError
+from vivarium_runner.cluster import get_json, kubectl, until
 
 NAMESPACE = "nixkube"
 DAEMONSET = "nix-node"
@@ -193,7 +193,7 @@ async def check_workloads(cp: Machine) -> None:
 
     Both jobs run /mnt/csi/nix/store/...-hello/bin/hello -- through the
     volume, and not through /nix/store. That distinction is the whole
-    assertion: user-mode-nixos bind-mounts the guest's store into every
+    assertion: vivarium bind-mounts the guest's store into every
     container, so a job that ran the same binary from /nix/store would
     complete with the driver switched off. Only the driver can put a file
     under /mnt/csi.
@@ -595,8 +595,8 @@ async def kubelet_restarts(cp: Machine, settings: dict) -> None:
     await on_node(cp, "systemctl restart kubelet")
 
 
-# containerd or crio: the unit `services.uml-k8s.cri` puts behind this target.
-RUNTIME_UNIT = "$(systemctl show --property Requires --value uml-k8s-cri.target)"
+# containerd or crio: the unit `services.vivarium-k8s.cri` puts behind this target.
+RUNTIME_UNIT = "$(systemctl show --property Requires --value vivarium-k8s-cri.target)"
 
 
 async def the_runtime_restarts(cp: Machine, settings: dict) -> None:

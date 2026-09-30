@@ -13,15 +13,15 @@ because the token is in the host's environment and not the guest's.
 Outside the build sandbox only -- the node pulls from registry.k8s.io and
 what it deploys comes from ghcr.io:
 
-    nix run --file . ciTest.run
+    nix run --file . ciTest.driver -- --out ./o
 """
 
 import os
 import subprocess
 import tempfile
 
-from uml_runner import Machine, Machines, run_test
-from uml_runner.cluster import (
+from vivarium_runner import Machine, Machines
+from vivarium_runner.cluster import (
     KUBE_DNS,
     KUBE_PROXY,
     bring_up,
@@ -47,7 +47,7 @@ async def host_kubeconfig(cp: Machine) -> str:
     reachable = cp.reachable(6443)
     assert reachable, (
         "6443 is not forwarded, so the host cannot reach the API server -- "
-        "see boot.uml.forward in nix/uml/ci.nix"
+        "see vivarium.forward in nix/uml/ci.nix"
     )
     # kubeadm always names it `kubernetes`, but ask rather than assume.
     cluster = (
@@ -128,7 +128,7 @@ async def test(vms: Machines) -> None:
             #
             # pynixd is a StatefulSet whose claim names no StorageClass, so
             # it only runs on a cluster with a default one -- see
-            # `services.uml-k8s.persistentVolumes` in nix/uml/ci.nix. The
+            # `services.vivarium-k8s.persistentVolumes` in nix/uml/ci.nix. The
             # claim is reported beside the pod because a Pending pod and an
             # unbound claim look the same from here.
             await wait_for_pods(
@@ -196,16 +196,13 @@ async def test(vms: Machines) -> None:
         )
         print("[test] the jobs are gone and their pods with them")
 
-        # What `boot.uml.diskSize` has to cover, measured rather than
+        # What `vivarium.diskSize` has to cover, measured rather than
         # guessed: the images this node pulled, every store path the jobs
         # asked for, and pynixd's volume when there is one. A runner has
         # 14 GB for the whole guest.
         print(
             "[test] node disk\n"
             + await cp.succeed(
-                "df -h /; du -sh /var/lib/uml-storage 2>/dev/null || true"
+                "df -h /; du -sh /var/lib/vivarium-storage 2>/dev/null || true"
             )
         )
-
-
-run_test(test)

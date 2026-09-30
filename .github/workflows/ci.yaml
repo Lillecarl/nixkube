@@ -436,7 +436,7 @@ jobs:
         run: echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules; sudo udevadm control --reload-rules; sudo udevadm trigger --name-match=kvm; ls -l /dev/kvm
         timeout-minutes: 5
       - name: Run the node test as a virtual machine
-        run: nix run --file . umlTest.run -- --out ./uml-out
+        run: nix run --file . umlTest.driver -- --out ./uml-out
     timeout-minutes: 60
   test-qemu-ci:
     env:
@@ -468,7 +468,7 @@ jobs:
         run: echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules; sudo udevadm control --reload-rules; sudo udevadm trigger --name-match=kvm; ls -l /dev/kvm
         timeout-minutes: 5
       - name: Deploy and test without the pynixd cache, on a guest
-        run: nix run --file . ciTest.run
+        run: nix run --file . ciTest.driver -- --out ./out
     timeout-minutes: 60
   test-qemu-ci-cache:
     env:
@@ -500,7 +500,7 @@ jobs:
         run: echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules; sudo udevadm control --reload-rules; sudo udevadm trigger --name-match=kvm; ls -l /dev/kvm
         timeout-minutes: 5
       - name: Deploy and test with the pynixd cache, on a guest
-        run: nix run --file . ciTestCache.run
+        run: nix run --file . ciTestCache.driver -- --out ./out
     timeout-minutes: 60
   umbrella-rev:
     outputs:

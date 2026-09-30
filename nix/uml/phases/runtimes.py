@@ -6,7 +6,7 @@ one gets CSI, and NRI refuses it by name.
 """
 
 from nixkube_uml import check_sandboxed, check_vm, probe
-from uml_runner import Machines
+from vivarium_runner import Machines
 
 # The pid a sandboxed runtime reports is not the container's, so NRI cannot
 # reach it. Measured for gVisor; see `check_sandboxed`.

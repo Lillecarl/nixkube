@@ -19,7 +19,7 @@
 # container, the plugin never sees it, and it gets no /nix.
 #
 # In a real cluster that pod then fails, because there is no /nix to run
-# from. Here it does not: user-mode-nixos binds /nix/store into every
+# from. Here it does not: vivarium binds /nix/store into every
 # container, so it runs and proves nothing. Creating the pod after the
 # driver is Ready is what makes the NRI answer mean something.
 {

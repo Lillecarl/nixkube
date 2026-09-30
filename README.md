@@ -131,7 +131,7 @@ writable /nix.
 3. Needs Kata 4.0.0 or later. Earlier guest kernels have a use-after-free
    in virtio-fs when a container exits (kata-containers#12589): the VM's
    agent dies and every container in the pod exits with 255. This happens
-   without nixkube too. nixpkgs still packages 3.32.0; user-mode-nixos
+   without nixkube too. nixpkgs still packages 3.32.0; vivarium
    carries 4.2.0 until nixpkgs moves.
 4. Measured with CRI-O 1.36.5 and runsc 20260406, on a plain busybox pod
    without nixkube.

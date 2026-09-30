@@ -140,7 +140,7 @@ either one alone fails the build.
 - `test-qemu-ci` and `test-qemu-ci-cache` — the two kind jobs above, on a
   guest instead of a container. Same deployment, same workloads, same
   asserted jobs, and the same script a developer runs: `nix run --file .
-  ciTest.run`. They run beside the kind jobs until they have proved
+  ciTest.driver`. They run beside the kind jobs until they have proved
   themselves, and then the kind jobs go.
 - `docs-build`, `docs-deploy`, `release`.
 

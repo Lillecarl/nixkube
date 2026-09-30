@@ -1,7 +1,7 @@
 """nixkube's manifest applied, and its driver and pynixd up."""
 
 from nixkube_uml import deploy, wait_for_driver, wait_for_pynixd
-from uml_runner import Machines
+from vivarium_runner import Machines
 
 
 async def test(vms: Machines) -> None:

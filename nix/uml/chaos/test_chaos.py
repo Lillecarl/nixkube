@@ -2,7 +2,7 @@
 
 One test per scenario, in the order `SCENARIOS` lists them, against the one
 cluster the earlier phases built. `-k` picks scenarios by name --
-`nix run --file . umlTest.run -- --out ./o -- -k runtime` -- and so
+`nix run --file . umlTest.driver -- --out ./o -- -k runtime` -- and so
 does `NIXKUBE_UML_SCENARIOS`, which `nix/uml/default.nix` turns into `-k`.
 
 Each scenario runs whether an earlier one failed or not, so one run says
@@ -11,7 +11,7 @@ which of the nine break the driver, not only the first.
 
 import pytest
 from nixkube_uml import SCENARIOS, break_and_recover
-from uml_runner import Machine, Machines
+from vivarium_runner import Machine, Machines
 
 
 @pytest.mark.parametrize(

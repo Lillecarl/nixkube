@@ -1040,8 +1040,8 @@ rec {
     pynixd cache with it.  Everything else is the same, down to the job
     lists -- ./ci/test-jobs.nix.
 
-        nix run --file . ciTest.run          # no pynixd, kubenixCI2
-        nix run --file . ciTestCache.run     # pynixd, kubenixCI1
+        nix run --file . ciTest.driver -- --out ./o        # no pynixd, kubenixCI2
+        nix run --file . ciTestCache.driver -- --out ./o   # pynixd, kubenixCI1
 
     A guest takes 14 GB, so these are two runs and not one.
   */

@@ -12,7 +12,7 @@
 #
 #   images   Nothing can be pulled. Every image is imported into containerd
 #            before kubelet starts (see ./images.nix and
-#            `services.uml-k8s.extraImages`), so every container has to say
+#            `services.vivarium-k8s.extraImages`), so every container has to say
 #            `Never` -- `Always`, which two of them do say, fails on an image
 #            that is already there.
 #
@@ -64,7 +64,7 @@ in
       `appstarter run` out of it. That path has no other test. `test-kind-cache`
       needs a cluster and a published image; this needs neither. Issue #49.
 
-      The claim binds against `services.uml-k8s.persistentVolumes` in
+      The claim binds against `services.vivarium-k8s.persistentVolumes` in
       ./default.nix. `storageClassName` stays null, which means the cluster
       default, which is the `standard` class that option creates.
     */
@@ -73,7 +73,7 @@ in
     # The host phase switches the guest's own system. Issue #24.
     nixosHost.enable = true;
 
-    # The guest's whole disk is 4 GiB (`boot.uml.diskSize`), and the node's
+    # The guest's whole disk is 4 GiB (`vivarium.diskSize`), and the node's
     # own store is already on it. `cacheEnv` is about 512 MiB, so this is what
     # pynixd actually writes here plus room to see it grow. The 10Gi default
     # is for a cluster; against this disk it would only look satisfied,
@@ -88,7 +88,7 @@ in
 
     # Keeps the Nix string context on the DaemonSet's store paths, so the node
     # environment is part of the manifest's closure. That is what carries it
-    # into the sandbox at all, and `boot.uml.nixDatabase.extraRoots` in
+    # into the sandbox at all, and `vivarium.nixDatabase.extraRoots` in
     # ./default.nix registers that same closure inside the guest.
     discardStringContext = false;
 
