@@ -248,8 +248,8 @@ jobs:
     needs:
       - check
       - build-manifests
-      - test-kind-cache
-      - test-kind-nocache
+      - test-qemu-ci
+      - test-qemu-ci-cache
       - umbrella-rev
     runs-on: ubuntu-latest
     steps:
@@ -281,132 +281,6 @@ jobs:
           files: nix-csi-deployment.yaml
           prerelease: false
     timeout-minutes: 30
-  test-kind-cache:
-    env:
-      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    needs:
-      - build-manifests
-      - umbrella-rev
-    runs-on: ubuntu-latest
-    steps:
-      - timeout-minutes: 10
-        uses: actions/checkout@main
-      - if: runner.os == 'Linux'
-        name: Make room on the runner
-        run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
-        timeout-minutes: 10
-      - timeout-minutes: 15
-        uses: cachix/install-nix-action@master
-        with:
-          extra_nix_config: |
-            access-tokens = github.com=${{ github.token }}
-            experimental-features = nix-command flakes
-            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
-            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
-            trusted-users = root runner
-      - name: Create Kind cluster
-        uses: helm/kind-action@main
-      - name: Clean runner
-        run: |
-          # Remove cache because permissions can get fucked up preventing kluctl from creating it's cache directory
-          sudo rm --recursive --force /home/runner/.cache
-      - name: Deploy nix-csi
-        run: |
-          nix build --show-trace --file . kubenixCI1.deploymentScript
-          ./result/bin/kubenixDeploy --yes
-      - name: Wait for nix-csi node daemonset
-        run: |
-          kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s
-      - name: Wait for nix-csi cache pod
-        run: |
-          kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=pynixd -n nixkube --timeout=180s
-      - name: Deploy test workloads
-        run: |
-          nix build --show-trace --file . kubenixCITest.deploymentScript
-          ./result/bin/kubenixDeploy --yes
-      - name: Wait for test workload
-        run: |
-          kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/commandpath-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s
-      - name: Check the invalid workloads were refused
-        run: |
-          for job in invalid-storepath-hello invalid-flake-hello invalid-expr-hello; do
-            ok=$(kubectl get job "$job" -n nixkube -o jsonpath='{.status.succeeded}')
-            if [ -n "$ok" ] && [ "$ok" != 0 ]; then
-              echo "$job succeeded, and it asks for something that cannot be built" >&2
-              exit 1
-            fi
-          done
-      - name: Delete jobs and verify CSI cleanup
-        run: |
-          kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl nri-hello-ro nri-hello-rw invalid-storepath-hello invalid-flake-hello invalid-expr-hello -n nixkube
-          kubectl wait --for=delete pod -l "job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,nri-hello-ro,nri-hello-rw,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello)" -n nixkube --timeout=120s
-      - env:
-          DS_API: ${{ secrets.DS_API }}
-        if: failure()
-        name: Debug on failure
-        run: nix run --file . ci-debug || true
-    timeout-minutes: 45
-  test-kind-nocache:
-    env:
-      UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
-    needs:
-      - build-manifests
-      - umbrella-rev
-    runs-on: ubuntu-latest
-    steps:
-      - timeout-minutes: 10
-        uses: actions/checkout@main
-      - if: runner.os == 'Linux'
-        name: Make room on the runner
-        run: df -h /; sudo rm -rf /usr/lib/jvm /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /opt/az /usr/local/share/powershell /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox; docker system prune --all --force; docker builder prune --all --force; df -h /
-        timeout-minutes: 10
-      - timeout-minutes: 15
-        uses: cachix/install-nix-action@master
-        with:
-          extra_nix_config: |
-            access-tokens = github.com=${{ github.token }}
-            experimental-features = nix-command flakes
-            substituters = https://cache.nixos.org?priority=1 https://nixkube.cachix.org?priority=2 https://lillecarl.cachix.org?priority=3
-            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nixkube.cachix.org-1:H8UE0jlI9pxHexK/NhDmEoLDarJXp1WTymQrsajlh7M= lillecarl.cachix.org-1:NN/LLMg7mbyvZCu32Qlo8LpSHqNw7Rr3VBCEYQvRpT0=
-            trusted-users = root runner
-      - name: Create Kind cluster
-        uses: helm/kind-action@main
-      - name: Clean runner
-        run: |
-          sudo rm --recursive --force /home/runner/.cache
-      - name: Deploy nix-csi
-        run: |
-          nix build --show-trace --file . kubenixCI2.deploymentScript
-          ./result/bin/kubenixDeploy --yes
-      - name: Wait for nix-csi node daemonset
-        run: |
-          kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s
-      - name: Deploy test workloads
-        run: |
-          nix build --show-trace --file . kubenixCITest.deploymentScript
-          ./result/bin/kubenixDeploy --yes
-      - name: Wait for test workload
-        run: |
-          kubectl wait --for=condition=complete job/flake-hello job/expr-hello job/path-hello job/commandpath-hello job/env-ssl job/nri-hello-ro job/nri-hello-rw -n nixkube --timeout=300s
-      - name: Check the invalid workloads were refused
-        run: |
-          for job in invalid-storepath-hello invalid-flake-hello invalid-expr-hello; do
-            ok=$(kubectl get job "$job" -n nixkube -o jsonpath='{.status.succeeded}')
-            if [ -n "$ok" ] && [ "$ok" != 0 ]; then
-              echo "$job succeeded, and it asks for something that cannot be built" >&2
-              exit 1
-            fi
-          done
-      - name: Delete jobs and verify CSI cleanup
-        run: |
-          kubectl delete job flake-hello expr-hello path-hello commandpath-hello env-ssl nri-hello-ro nri-hello-rw invalid-storepath-hello invalid-flake-hello invalid-expr-hello -n nixkube
-          kubectl wait --for=delete pod -l "job-name in (flake-hello,expr-hello,path-hello,commandpath-hello,env-ssl,nri-hello-ro,nri-hello-rw,invalid-storepath-hello,invalid-flake-hello,invalid-expr-hello)" -n nixkube --timeout=120s
-      - env:
-          DS_API: ${{ secrets.DS_API }}
-        if: failure()
-        name: Debug on failure
-        run: nix run --file . ci-debug || true
-    timeout-minutes: 45
   test-qemu:
     env:
       UMBRELLA_REV: ${{ needs.umbrella-rev.outputs.rev }}
@@ -437,6 +311,13 @@ jobs:
         timeout-minutes: 5
       - name: Run the node test as a virtual machine
         run: nix run --file . umlTest.driver -- --out ./uml-out
+      - if: ${{ !cancelled() }}
+        name: Keep the run's evidence
+        timeout-minutes: 15
+        uses: actions/upload-artifact@main
+        with:
+          name: umlTest
+          path: uml-out
     timeout-minutes: 60
   test-qemu-ci:
     env:
@@ -469,6 +350,13 @@ jobs:
         timeout-minutes: 5
       - name: Deploy and test without the pynixd cache, on a guest
         run: nix run --file . ciTest.driver -- --out ./out
+      - if: ${{ !cancelled() }}
+        name: Keep the run's evidence
+        timeout-minutes: 15
+        uses: actions/upload-artifact@main
+        with:
+          name: ciTest
+          path: out
     timeout-minutes: 60
   test-qemu-ci-cache:
     env:
@@ -501,6 +389,13 @@ jobs:
         timeout-minutes: 5
       - name: Deploy and test with the pynixd cache, on a guest
         run: nix run --file . ciTestCache.driver -- --out ./out
+      - if: ${{ !cancelled() }}
+        name: Keep the run's evidence
+        timeout-minutes: 15
+        uses: actions/upload-artifact@main
+        with:
+          name: ciTestCache
+          path: out
     timeout-minutes: 60
   umbrella-rev:
     outputs:

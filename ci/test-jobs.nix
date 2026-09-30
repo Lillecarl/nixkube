@@ -2,11 +2,9 @@
 
 # The Jobs `kubenixCITest` creates, and what each one is supposed to do.
 #
-# Two readers, which is why this is a file rather than a `let` in one of
-# them: `ci/workflows/ci.nix` builds the kind jobs' `kubectl wait` and
-# `kubectl delete` lines out of it, and `nix/uml/ci.nix` hands it to the
-# guest test that does the same steps. A list that lived in one of those
-# would be a list the other one silently disagreed with.
+# A file of its own and not a `let` in `nix/uml/ci.nix`, because the
+# workload definitions in kubenix/ci/ and the test that asserts them are
+# two places, and this is the one list both sides can be checked against.
 rec {
   # The ones that have to finish.
   #

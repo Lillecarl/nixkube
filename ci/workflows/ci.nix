@@ -42,17 +42,13 @@ let
     "scratchImage.push"
   ];
 
-  # Every test workload the kind jobs deploy, the ones that have to finish
-  # and the ones that have to not. ../test-jobs.nix says what each list
-  # means; it is a file because nix/uml/ci.nix reads the same three.
-  testJobs = import ../test-jobs.nix;
-  deployedJobs = testJobs.deployed;
-  assertedJobs = testJobs.asserted;
-  rejectedJobs = testJobs.rejected;
-
-  # The same two deployments as the kind jobs, on a guest that boots on the
-  # runner.  The test itself is nix/uml/ci.py, so a developer runs exactly
-  # what CI runs: `nix run --file . ciTest.driver -- --out ./out`.
+  # The two cluster tests, each on a guest that boots on the runner. The
+  # test itself is nix/uml/ci.py, so a developer runs exactly what CI runs:
+  # `nix run --file . ciTest.driver -- --out ./out`.
+  #
+  # `./out` holds the run's evidence: events.jsonl, junit.xml, report.json
+  # and each guest's console and journal. It is uploaded whatever the
+  # verdict, because a red run is the one somebody has to read.
   testQemu =
     { attr, what }:
     {
@@ -65,100 +61,11 @@ let
           name = "Deploy and test ${what}, on a guest";
           run = "nix run --file . ${attr}.driver -- --out ./out";
         }
-      ];
-    };
-
-  # The two kind jobs run the same test against two deployments: one with the
-  # pynixd cache, one without. Only the instance and the readiness waits
-  # differ.
-  testKind =
-    {
-      instance,
-      extraWaits ? [ ],
-      cleanRunner,
-    }:
-    {
-      needs = "build-manifests";
-      runs-on = "ubuntu-latest";
-      timeout-minutes = 45;
-      ghanix = bootstrap;
-      steps = [
-        {
-          name = "Create Kind cluster";
-          uses = "helm/kind-action@main";
-        }
-        {
-          name = "Clean runner";
-          run = cleanRunner;
-        }
-        {
-          name = "Deploy nix-csi";
-          run = ''
-            nix build --show-trace --file . ${instance}.deploymentScript
-            ./result/bin/kubenixDeploy --yes
-          '';
-        }
-        {
-          name = "Wait for nix-csi node daemonset";
-          run = ''
-            kubectl rollout status daemonset -l app.kubernetes.io/component=node -n nixkube --timeout=180s
-          '';
-        }
-      ]
-      ++ extraWaits
-      ++ [
-        {
-          name = "Deploy test workloads";
-          run = ''
-            nix build --show-trace --file . kubenixCITest.deploymentScript
-            ./result/bin/kubenixDeploy --yes
-          '';
-        }
-        {
-          name = "Wait for test workload";
-          run = ''
-            kubectl wait --for=condition=complete ${
-              lib.concatMapStringsSep " " (j: "job/${j}") assertedJobs
-            } -n nixkube --timeout=300s
-          '';
-        }
-        # A Job here asks the driver for something that cannot be built:
-        # a store path of zeroes, a flake that is not there, an
-        # expression that does not evaluate. One that succeeded would be
-        # a driver that mounted the wrong thing quietly.
-        #
-        # Asked once, after the waits above, rather than waited for:
-        # "has not succeeded" is true of a Job that failed and of one
-        # still trying, so there is nothing to poll for.
-        {
-          name = "Check the invalid workloads were refused";
-          run = ''
-            for job in ${lib.concatStringsSep " " rejectedJobs}; do
-              ok=$(kubectl get job "$job" -n nixkube -o jsonpath='{.status.succeeded}')
-              if [ -n "$ok" ] && [ "$ok" != 0 ]; then
-                echo "$job succeeded, and it asks for something that cannot be built" >&2
-                exit 1
-              fi
-            done
-          '';
-        }
-        {
-          name = "Delete jobs and verify CSI cleanup";
-          run = ''
-            kubectl delete job ${lib.concatStringsSep " " deployedJobs} -n nixkube
-            kubectl wait --for=delete pod -l "job-name in (${lib.concatStringsSep "," deployedJobs})" -n nixkube --timeout=120s
-          '';
-        }
-        # `|| true` so a debug step never replaces the real failure. No
-        # `2>/dev/null` beside it: that hid why ci-debug itself failed, and
-        # a debug tool that fails silently is worse than none. Issue #12
-        # was this exact shape on push-ci2. See #32.
-        {
-          name = "Debug on failure";
-          "if" = "failure()";
-          env.DS_API = "\${{ secrets.DS_API }}";
-          run = "nix run --file . ci-debug || true";
-        }
+        (ghalib.steps.uploadArtifact {
+          name = "Keep the run's evidence";
+          artifactName = attr;
+          path = "out";
+        })
       ];
     };
 in
@@ -471,19 +378,22 @@ ghalib.evalWorkflow {
           name = "Run the node test as a virtual machine";
           run = "nix run --file . umlTest.driver -- --out ./uml-out";
         }
+        (ghalib.steps.uploadArtifact {
+          name = "Keep the run's evidence";
+          artifactName = "umlTest";
+          path = "uml-out";
+        })
       ];
     };
 
-    # The kind jobs, on a guest. Same deployment, same workloads, same
-    # asserted jobs -- see nix/uml/ci.nix.
+    # nixkube deployed through `kubenixDeploy` onto a kubeadm node, and the
+    # Jobs of ci/test-jobs.nix run against it: the asserted ones finish, the
+    # rejected ones do not, and deleting them cleans their volumes up. Once
+    # without the pynixd cache and once with it.
     #
-    # `needs = build-manifests` for the same reason the kind jobs have it:
-    # the deployment names images on ghcr.io and store paths on cachix, and
-    # a node cannot fetch what nothing published.
-    #
-    # Not in the `release` gate yet. These run beside the kind jobs rather
-    # than instead of them, and a release should not start depending on a
-    # job that has not yet proved itself over a few weeks of runs.
+    # `needs = build-manifests` because the deployment names images on
+    # ghcr.io and store paths on cachix, and a node cannot fetch what
+    # nothing published.
     test-qemu-ci = testQemu {
       attr = "ciTest";
       what = "without the pynixd cache";
@@ -492,29 +402,6 @@ ghalib.evalWorkflow {
     test-qemu-ci-cache = testQemu {
       attr = "ciTestCache";
       what = "with the pynixd cache";
-    };
-
-    test-kind-cache = testKind {
-      instance = "kubenixCI1";
-      cleanRunner = ''
-        # Remove cache because permissions can get fucked up preventing kluctl from creating it's cache directory
-        sudo rm --recursive --force /home/runner/.cache
-      '';
-      extraWaits = [
-        {
-          name = "Wait for nix-csi cache pod";
-          run = ''
-            kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=pynixd -n nixkube --timeout=180s
-          '';
-        }
-      ];
-    };
-
-    test-kind-nocache = testKind {
-      instance = "kubenixCI2";
-      cleanRunner = ''
-        sudo rm --recursive --force /home/runner/.cache
-      '';
     };
 
     docs-build = {
@@ -570,8 +457,8 @@ ghalib.evalWorkflow {
       needs = [
         "check"
         "build-manifests"
-        "test-kind-cache"
-        "test-kind-nocache"
+        "test-qemu-ci"
+        "test-qemu-ci-cache"
       ];
       runs-on = "ubuntu-latest";
       "if" = "startsWith(github.ref, 'refs/tags/v')";

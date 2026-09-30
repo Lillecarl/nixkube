@@ -128,20 +128,16 @@ either one alone fails the build.
 - `build-manifests` — asserts every store path the deployment names is
   fetchable, then assembles the multi-arch index. Publishes from `develop`
   and tags only.
-- `test-kind-cache` and `test-kind-nocache` — deploy `kubenixCI1` and
-  `kubenixCI2` to a Kind cluster and run the test workloads from
-  `kubenix/ci/test-workloads.nix`. The two differ in whether pynixd is
-  enabled, which is what makes them worth running both. Which Jobs have to
-  finish, and which have to not, is `ci/test-jobs.nix` — one file, because
-  the guest tests below read the same lists.
 - `test-qemu` — the node test of `nix/uml`, as a virtual machine on the
   runner. No cluster to create and no registry: the guest's store is the
   runner's.
-- `test-qemu-ci` and `test-qemu-ci-cache` — the two kind jobs above, on a
-  guest instead of a container. Same deployment, same workloads, same
-  asserted jobs, and the same script a developer runs: `nix run --file .
-  ciTest.driver`. They run beside the kind jobs until they have proved
-  themselves, and then the kind jobs go.
+- `test-qemu-ci` and `test-qemu-ci-cache` — deploy `kubenixCI2` and
+  `kubenixCI1` through `kubenixDeploy` onto a kubeadm guest, and run the
+  test workloads from `kubenix/ci/test-workloads.nix`. The two differ in
+  whether pynixd is enabled. Which Jobs have to finish, and which have to
+  not, is `ci/test-jobs.nix`. The same script a developer runs: `nix run
+  --file . ciTest.driver -- --out ./out`. They gate `release`.
+- Every test job uploads its `--out` directory as an artifact, pass or fail.
 - `docs-build`, `docs-deploy`, `release`.
 
 `test-nixos.yaml` runs the NixOS VM integration test, on the `cidev` branch
@@ -273,5 +269,5 @@ log.info("build_task_started")  # container_id included in every call
 
 ### Testing Philosophy
 - **Integration tests over unit tests**: This project orchestrates subprocess calls to Nix, rsync, mount, etc. Unit testing these would require excessive mocking and wouldn't catch real issues.
-- **Test in real environments**: Use the GitHub Actions integration tests on actual Kind clusters to validate behavior.
+- **Test in real environments**: The vivarium guest tests (`ciTest`, `ciTestCache`, `umlTest`) run a real kubeadm node, the same locally as in CI.
 - Unit tests are only valuable for pure business logic isolated from subprocess orchestration.
