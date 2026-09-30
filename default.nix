@@ -91,8 +91,8 @@ rec {
     };
 
   kubenixCI1 = kubenixInstance { module.imports = ciModules.one; };
-  # kubenixCI2 is used by tests/nixos/integration.nix for the containerd nixos test.
-  # Disables aarch64-linux to avoid needing cross-compilation support.
+  # Without pynixd; `ciTest` deploys it. Disables aarch64-linux to avoid
+  # needing cross-compilation support.
   kubenixCI2 = kubenixInstance { module.imports = ciModules.two; };
   # Separate instance for test workload Jobs, deployed after infrastructure
   # is fully rolled out so CSI and NRI are ready before pods start.
@@ -1043,8 +1043,6 @@ rec {
     A guest takes 14 GB, so these are two runs and not one.
   */
   # What the test workloads are, and what each one is supposed to do.
-  # ci/workflows/ci.nix reads the same file, so the kind jobs and the guest
-  # tests cannot disagree about which Jobs exist.
   testJobs = import ./ci/test-jobs.nix;
 
   ciTest = pkgs.callPackage ./nix/uml/ci.nix {
@@ -1178,7 +1176,6 @@ rec {
     in
     {
       ci = workflow ./ci/workflows/ci.nix ./.github/workflows/ci.yaml;
-      test-nixos = workflow ./ci/workflows/test-nixos.nix ./.github/workflows/test-nixos.yaml;
     };
 
   # Those values as the files GitHub reads.

@@ -140,10 +140,6 @@ either one alone fails the build.
 - Every test job uploads its `--out` directory as an artifact, pass or fail.
 - `docs-build`, `docs-deploy`, `release`.
 
-`test-nixos.yaml` runs the NixOS VM integration test, on the `cidev` branch
-only. `ci.yaml` excludes that branch, so a push there runs one or the other
-and never both.
-
 ### Building
 
 **Build Kubernetes manifests:**

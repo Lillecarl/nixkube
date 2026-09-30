@@ -4,10 +4,9 @@
 #
 #     nix build --file . umlTest
 #
-# tests/nixos/integration.nix asks the same questions of a QEMU VM, and needs
-# KVM and a network to do it. This runs the node as an ordinary process under
-# User-Mode Linux -- no KVM, no root, no tap device -- so the whole thing is a
-# derivation that passes or fails, and CI needs nothing but a builder.
+# This runs the node as an ordinary process under User-Mode Linux -- no KVM,
+# no root, no tap device -- so the whole thing is a derivation that passes or
+# fails, and CI needs nothing but a builder.
 #
 # What makes that possible is that a guest's /nix/store is the *sandbox's*
 # store, over hostfs. So a store path this file names is a path the guest

@@ -10,8 +10,7 @@
 { lib, ghalib }:
 let
   # The checkout, the Nix install and the runner permissions every job
-  # needs, as `ghanix` options rather than as steps written out. Shared
-  # with test-nixos.nix; see that file for why it is a file.
+  # needs, as `ghanix` options rather than as steps written out.
   inherit (import ./bootstrap.nix { inherit lib; }) bootstrap guest;
 
   # Publish from develop and tags only. The image tags are named from
@@ -76,10 +75,7 @@ ghalib.evalWorkflow {
   on = {
     pull_request = null;
     push = {
-      branches = [
-        "*"
-        "!cidev"
-      ];
+      branches = [ "*" ];
       tags = [ "v*" ];
     };
     workflow_dispatch = null;

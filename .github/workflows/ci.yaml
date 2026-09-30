@@ -418,7 +418,6 @@ jobs:
   push:
     branches:
       - '*'
-      - '!cidev'
     tags:
       - v*
   workflow_dispatch: null

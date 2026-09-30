@@ -25,6 +25,7 @@ from vivarium_runner.cluster import (
     KUBE_DNS,
     KUBE_PROXY,
     bring_up,
+    get_json,
     kubectl,
     until,
     wait_for_pods,
@@ -166,6 +167,21 @@ async def test(vms: Machines) -> None:
 
         await until(f"{len(asserted)} jobs to complete", complete, 600, cp)
         print(f"[test] {', '.join(asserted)} all completed")
+
+        # The driver reports each publish on the pod it served. A job can
+        # complete with its store from somewhere else, and then there is
+        # no such event. `report_event` prefixes every reason with `Nix`,
+        # so the code's "VolumeMount" is NixVolumeMount on the cluster.
+        mounts = await get_json(
+            cp,
+            "get events --namespace nixkube --field-selector reason=NixVolumeMount",
+        )
+        assert mounts["items"], (
+            "the jobs completed and the CSI driver reported no NixVolumeMount"
+        )
+        print(
+            f"[test] the CSI driver reported {len(mounts['items'])} NixVolumeMount events"
+        )
 
         # And the ones that must not finish -- see ci/test-jobs.nix.
         #

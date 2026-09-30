@@ -1,13 +1,9 @@
 # What every job of every workflow here needs before it does anything of
 # its own, as the `ghanix` options a job asks for by name.
 #
-# One file because there are two workflows, and issue #33 is what it cost
-# when there were two copies: `ci.yaml` held the substituters in a composite
-# action and `test-nixos.yaml` wrote them again inline, and nothing made the
-# two agree. The issue said they could not be one value yet, because the
-# action was YAML that nothing rendered and ghanix described workflows
-# rather than actions. `ghanix.nix.install.settings` is where they go now,
-# and the action is gone.
+# A file of its own so that a second workflow takes the same values. Issue
+# #33 is what two copies cost: the substituters in two places, and nothing
+# made them agree.
 { lib }:
 rec {
   /*
