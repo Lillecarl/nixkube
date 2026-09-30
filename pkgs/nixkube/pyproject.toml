@@ -35,6 +35,7 @@ dependencies = [
 
 [project.scripts]
 nixkube = "src.cli:main"
+nixkube-host-check = "src.host_check:main"
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-asyncio", "hypothesis"]
