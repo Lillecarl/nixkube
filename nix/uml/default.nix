@@ -25,6 +25,13 @@
   sources,
   umlImages,
   manifest,
+  /*
+    One cell of `umlMatrix`: `{ backend, cri, kata }` fixed here, with no
+    knob for them, so an environment variable cannot make a cell run
+    something other than its name says. `null` is `umlTest`, which reads
+    the knobs.
+  */
+  matrixCell ? null,
 }:
 let
   vivarium = import (sources.vivarium + "/lib.nix") { inherit pkgs; };
@@ -274,12 +281,16 @@ in
 vivarium.mkTest (
   { config, ... }:
   let
-    backend = config.resolved.backend.value;
-    cri = config.resolved.cri.value;
-    kata = config.resolved.kata.value == "1";
+    backend = if matrixCell != null then matrixCell.backend else config.resolved.backend.value;
+    cri = if matrixCell != null then matrixCell.cri else config.resolved.cri.value;
+    kata = if matrixCell != null then matrixCell.kata else config.resolved.kata.value == "1";
   in
   {
-    name = "nixkube";
+    name =
+      if matrixCell != null then
+        "nixkube-${backend}-${cri}${lib.optionalString kata "-kata"}"
+      else
+        "nixkube";
 
     # What every phase and the chaos tests import: waits, probes, checks.
     # Not `lib/`, which .gitignore takes for a Python build directory.
@@ -303,6 +314,8 @@ vivarium.mkTest (
         default = "";
         description = "chaos scenarios to run, by name; empty is all";
       };
+    }
+    // lib.optionalAttrs (matrixCell == null) {
 
       /*
         QEMU by default, so `nix build --file . umlTest` is the machine CI

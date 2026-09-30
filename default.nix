@@ -1021,6 +1021,37 @@ rec {
   };
 
   /*
+    `umlTest` on every combination the README's runtime table claims, one
+    attribute each, by hand and never in CI:
+
+        nix run --file . umlMatrix.uml-crio.driver -- --out ./o
+        nix build --file . umlMatrix.qemu-crio-kata
+
+    A cell fixes backend, CRI and Kata, so no environment variable can
+    change what it runs. The `-kata` cells need nested virtualization.
+  */
+  umlMatrix =
+    let
+      cell =
+        backend: cri: kata:
+        lib.nameValuePair "${backend}-${cri}${lib.optionalString kata "-kata"}" (
+          pkgs.callPackage ./nix/uml {
+            inherit sources umlImages;
+            manifest = umlManifest;
+            matrixCell = { inherit backend cri kata; };
+          }
+        );
+    in
+    lib.listToAttrs [
+      (cell "qemu" "containerd" false)
+      (cell "qemu" "crio" false)
+      (cell "uml" "containerd" false)
+      (cell "uml" "crio" false)
+      (cell "qemu" "containerd" true)
+      (cell "qemu" "crio" true)
+    ];
+
+  /*
     The kind jobs, on a guest instead of on a container.
 
     `umlTest` breaks a node nine ways to see whether the driver comes back.
