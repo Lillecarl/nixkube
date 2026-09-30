@@ -1064,6 +1064,10 @@ rec {
 
       # nixkube's own `build_farm`, as root against a real closure. Issue #65.
       farm-builder = fromNixosTest (import ./tests/nixos/farm-builder.nix { inherit pkgs lib; });
+
+      # Whether composefs can present a CSI volume: one mount, real files,
+      # nothing linked out of the store. A measurement. Issues #68 and #25.
+      composefs = fromNixosTest (import ./tests/nixos/composefs.nix { inherit pkgs lib; });
     };
 
   treefmt = (import sources.treefmt-nix).mkWrapper pkgs {
