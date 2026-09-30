@@ -248,7 +248,10 @@ let
       cri,
       kata,
     }:
-    [ "crun" ]
+    [
+      "crun"
+      "youki"
+    ]
     ++ lib.optional (backend != "uml" && cri == "containerd") "runsc"
     ++ lib.optional kata "kata";
 

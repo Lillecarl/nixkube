@@ -112,10 +112,10 @@ What each mount path gives a pod, by container runtime (CRI) and OCI runtime
 (RuntimeClass). `ro` and `rw` are the NRI modes: `nixkube/pod-rw` asks for a
 writable /nix.
 
-| | runc | crun | gVisor (runsc) | Kata Containers |
-|---|---|---|---|---|
-| **containerd** | CSI, NRI ro/rw | CSI, NRI ro/rw | CSI; NRI refused¹ | CSI, NRI ro², ³ |
-| **CRI-O** | CSI, NRI ro/rw | CSI, NRI ro/rw | no container runs⁴ | CSI, NRI ro², ³ |
+| | runc | crun | youki | gVisor (runsc) | Kata Containers |
+|---|---|---|---|---|---|
+| **containerd** | CSI, NRI ro/rw | CSI, NRI ro/rw | CSI, NRI ro/rw | CSI; NRI refused¹ | CSI, NRI ro², ³ |
+| **CRI-O** | CSI, NRI ro/rw | CSI, NRI ro/rw | CSI, NRI ro/rw | no container runs⁴ | CSI, NRI ro², ³ |
 
 1. gVisor keeps the container's rootfs out of the node's reach. The
    container fails with a message that says so and names CSI instead.
