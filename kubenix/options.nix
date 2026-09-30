@@ -109,6 +109,28 @@ in
       default = "/var/lib/nix-csi";
     };
 
+    hostStore.enable = lib.mkOption {
+      description = ''
+        Share the host's /nix with nixkube on nodes whose host runs NixOS.
+        Issue #25.
+
+        The node DaemonSet becomes two. `nix-node-host` mounts the host's
+        /nix and talks to the host's nix-daemon; `nix-node-separate` keeps
+        nixkube's own store at `hostMountPath` everywhere else. They split
+        on the `nixkube/host=nixos` Node label, which each pod's first init
+        container, `nixkube-host-check`, sets or removes: a pod on the wrong
+        host moves its node to the other DaemonSet and never starts.
+
+        In host mode the host owns garbage collection. nixkube keeps its GC
+        roots, under /nix/var/nix/gcroots, correct and never sweeps or copies
+        the store. Its state (/nix/var/nix-csi) lives in the host's /nix/var,
+        and its nix client talks to the host's nix-daemon, whose version the
+        host chooses; nothing here tests a version skew.
+      '';
+      type = lib.types.bool;
+      default = false;
+    };
+
     nixosHost.enable = lib.mkOption {
       description = ''
         Let each node switch its NixOS host to the system its Node object

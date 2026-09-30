@@ -132,6 +132,9 @@ rec {
             lib.makeBinPath [
               sysPkgs.appstarter
               init-secrets
+              # `nixkube-host-check`, the first init container when
+              # `nixkube.hostStore.enable` is on.
+              sysPkgs.nixkube
             ]
           }"
           "APPSTARTER_FALLBACK_NODE=${nodeEnv}"

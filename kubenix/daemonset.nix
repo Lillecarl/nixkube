@@ -76,44 +76,63 @@ in
       matchLabels = cfg.matchLabels // {
         "app.kubernetes.io/component" = "node";
       };
-    in
-    lib.mkIf cfg.enable {
-      kubernetes.resources.${cfg.namespace} = {
-        # **The operator's own kind, and the checked path.** An operator
-        # ignores the `prometheus.io/*` annotations on the pod template and
-        # selects pods by this object instead. A VictoriaMetrics operator
-        # converts it into a VMPodScrape, so one object serves both, and this
-        # kind has a real schema so a render is validated against an
-        # apiserver. `metrics.podMonitor` says why not a VM-native CR, and
-        # what start-up order makes an unconverted PodMonitor look like an
-        # unscraped one. Issue #40.
-        PodMonitor = lib.mkIf (cfg.metrics.enable && cfg.metrics.podMonitor) {
-          nixkube = {
-            metadata.labels = labels;
-            spec = {
-              selector.matchLabels = matchLabels;
-              podMetricsEndpoints = [
-                {
-                  # By name, not by number: the container declares the port
-                  # under this name, so the two move together.
-                  port = "metrics";
-                  path = "/metrics";
-                }
-              ];
-            };
+
+      # Set by `nixkube-host-check` on a node whose host runs NixOS.
+      hostLabel = "nixkube/host";
+
+      # First in both pods when `hostStore` is on: on the wrong host it moves
+      # the node to the other DaemonSet by its label, and waits to be deleted.
+      hostCheck = store: {
+        name = "host-check";
+        image = "ghcr.io/lillecarl/nix-csi/nix:${cfg.version}-${curPkgs.nix.version}";
+        inherit (cfg) imagePullPolicy;
+        command = [
+          "nixkube-host-check"
+          "--mode"
+          store
+        ];
+        env = lib.mkNamedList {
+          KUBE_NODE_NAME.valueFrom.fieldRef.fieldPath = "spec.nodeName";
+          HOST_ROOT.value = "/host";
+        };
+        volumeMounts = lib.mkNamedList {
+          host-root = {
+            mountPath = "/host";
+            readOnly = true;
           };
         };
-        DaemonSet.nix-node = {
-          metadata.labels = labels;
+        resources.requests = {
+          memory = "64Mi";
+          cpu = "10m";
+        };
+      };
+
+      /**
+        One node DaemonSet. `store` is null for the single DaemonSet of a
+        cluster without `hostStore`, whose render it leaves unchanged, and
+        "separate" or "host" for the two with it: the one with nixkube's own
+        store at `hostMountPath`, and the one that mounts the host's /nix.
+        Each selects its own pods by `nixkube/store`, and its nodes by the
+        `nixkube/host` label. Issue #25.
+      */
+      nodeDaemonSet =
+        store:
+        let
+          storeLabel = lib.optionalAttrs (store != null) { "nixkube/store" = store; };
+          labels' = labels // storeLabel;
+          matchLabels' = matchLabels // storeLabel;
+        in
+        {
+          metadata.labels = labels';
           metadata.annotations."nixkube/discard" = "true";
           spec = {
             updateStrategy = {
               type = "RollingUpdate";
               rollingUpdate.maxUnavailable = 1;
             };
-            selector.matchLabels = matchLabels;
+            selector.matchLabels = matchLabels';
             template = {
-              metadata.labels = labels;
+              metadata.labels = labels';
               metadata.annotations = {
                 "kubectl.kubernetes.io/default-container" = "nix-node";
                 # `appstarter-init` fetches into `/nix-volume`, which is this
@@ -138,53 +157,69 @@ in
                 lib.optionalAttrs (cfg.node.tolerations != [ ]) {
                   inherit (cfg.node) tolerations;
                 }
+                // lib.optionalAttrs (store != null) {
+                  affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms = [
+                    {
+                      matchExpressions = [
+                        {
+                          key = hostLabel;
+                          operator = if store == "host" then "In" else "NotIn";
+                          values = [ "nixos" ];
+                        }
+                      ];
+                    }
+                  ];
+                }
                 // {
                   serviceAccountName = "nixkube";
                   priorityClassName = "system-node-critical";
-                  initContainers = lib.mkNumberedList {
-                    "1" = {
-                      name = "appstarter-init";
-                      image = "ghcr.io/lillecarl/nix-csi/nix:${cfg.version}-${curPkgs.nix.version}";
-                      inherit (cfg) imagePullPolicy;
-                      securityContext.privileged = true; # chroot store
-                      command = [
-                        "appstarter"
-                        "init"
-                      ];
-                      env = lib.mkNamedList {
-                        # One environment per enabled architecture, because
-                        # one DaemonSet runs on all of them. `appstarter`
-                        # picks its own.
-                        APPSTARTER_WANTED.value = builtins.toJSON (
-                          lib.mapAttrs (_: sysPkgs: "${sysPkgs.nixkube-node-env}") csiPkgs
-                        );
-                        # Which of the image's fallbacks to take when the
-                        # fetch fails. The image carries one per role and
-                        # names them itself -- a fallback named here comes out
-                        # of this same evaluation, so it would be the path
-                        # above and would fall back to nothing.
-                        APPSTARTER_ROLE.value = "node";
-                        # Without this `appstarter` cannot tell a pynixd that
-                        # is off by choice from one that is down, and reports
-                        # the same failure for both. See issue #27.
-                        PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
-                      };
-                      volumeMounts = lib.mkNamedList {
-                        nix-store.mountPath = "/nix-volume";
-                        nix-config.mountPath = "/etc/nix";
+                  initContainers = lib.mkNumberedList (
+                    lib.optionalAttrs (store != null) { "0" = hostCheck store; }
+                    // {
+                      "1" = {
+                        name = "appstarter-init";
+                        image = "ghcr.io/lillecarl/nix-csi/nix:${cfg.version}-${curPkgs.nix.version}";
+                        inherit (cfg) imagePullPolicy;
+                        securityContext.privileged = true; # chroot store
+                        command = [
+                          "appstarter"
+                          "init"
+                        ];
+                        env = lib.mkNamedList {
+                          # One environment per enabled architecture, because
+                          # one DaemonSet runs on all of them. `appstarter`
+                          # picks its own.
+                          APPSTARTER_WANTED.value = builtins.toJSON (
+                            lib.mapAttrs (_: sysPkgs: "${sysPkgs.nixkube-node-env}") csiPkgs
+                          );
+                          # Which of the image's fallbacks to take when the
+                          # fetch fails. The image carries one per role and
+                          # names them itself -- a fallback named here comes out
+                          # of this same evaluation, so it would be the path
+                          # above and would fall back to nothing.
+                          APPSTARTER_ROLE.value = "node";
+                          # Without this `appstarter` cannot tell a pynixd that
+                          # is off by choice from one that is down, and reports
+                          # the same failure for both. See issue #27.
+                          PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
+                        };
+                        volumeMounts = lib.mkNamedList {
+                          nix-store.mountPath = "/nix-volume";
+                          nix-config.mountPath = "/etc/nix";
 
-                        ssh-config.mountPath = "/etc/ssh";
-                        ssh-key.mountPath = "/etc/ssh-key";
-                        ssh-dynauth.mountPath = "/etc/ssh-dynauth";
-                      };
-                      resources = {
-                        requests = {
-                          memory = "128Mi";
-                          cpu = "100m";
+                          ssh-config.mountPath = "/etc/ssh";
+                          ssh-key.mountPath = "/etc/ssh-key";
+                          ssh-dynauth.mountPath = "/etc/ssh-dynauth";
+                        };
+                        resources = {
+                          requests = {
+                            memory = "128Mi";
+                            cpu = "100m";
+                          };
                         };
                       };
-                    };
-                  };
+                    }
+                  );
                   containers = lib.mkNamedList {
                     nix-node = {
                       image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
@@ -282,26 +317,31 @@ in
                         failureThreshold = 2;
                       };
 
-                      env = lib.mkNamedList {
-                        PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
-                        ENABLE_COMPAT_DRIVER.value = lib.boolToString cfg.node.compat;
-                        NRI_ENABLED.value = "true";
-                        NRI_VM_RUNTIME_HANDLERS.value = lib.concatStringsSep "," cfg.nri.vmRuntimeHandlers;
-                        HOME.value = "/nix/var/nix-csi/root";
-                        HOST_MOUNT_PATH.value = cfg.hostMountPath;
-                        KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
-                        KUBE_NODE_NAME.valueFrom.fieldRef.fieldPath = "spec.nodeName";
-                        KUBE_POD_IP.valueFrom.fieldRef.fieldPath = "status.podIP";
-                        KUBE_POD_NAME.valueFrom.fieldRef.fieldPath = "metadata.name";
-                        KUBE_POD_UID.valueFrom.fieldRef.fieldPath = "metadata.uid";
-                        NIX_BUILD_TIMEOUT.value = toString cfg.nodeBuildTimeout;
-                        VERIFY_STORE_PATHS.value = lib.boolToString cfg.verifyStorePaths;
-                        NIXOS_HOST_ENABLED.value = lib.boolToString cfg.nixosHost.enable;
-                        METRICS_ENABLED.value = lib.boolToString cfg.metrics.enable;
-                        METRICS_PORT.value = toString cfg.metrics.port;
-                        NIXPKGS_ALLOW_UNFREE.value = "1";
-                        USER.value = "root";
-                      };
+                      env = lib.mkNamedList (
+                        lib.optionalAttrs (store != null) {
+                          HOST_STORE.value = lib.boolToString (store == "host");
+                        }
+                        // {
+                          PYNIXD_ENABLED.value = lib.boolToString cfg.pynixd.enable;
+                          ENABLE_COMPAT_DRIVER.value = lib.boolToString cfg.node.compat;
+                          NRI_ENABLED.value = "true";
+                          NRI_VM_RUNTIME_HANDLERS.value = lib.concatStringsSep "," cfg.nri.vmRuntimeHandlers;
+                          HOME.value = "/nix/var/nix-csi/root";
+                          HOST_MOUNT_PATH.value = cfg.hostMountPath;
+                          KUBE_NAMESPACE.valueFrom.fieldRef.fieldPath = "metadata.namespace";
+                          KUBE_NODE_NAME.valueFrom.fieldRef.fieldPath = "spec.nodeName";
+                          KUBE_POD_IP.valueFrom.fieldRef.fieldPath = "status.podIP";
+                          KUBE_POD_NAME.valueFrom.fieldRef.fieldPath = "metadata.name";
+                          KUBE_POD_UID.valueFrom.fieldRef.fieldPath = "metadata.uid";
+                          NIX_BUILD_TIMEOUT.value = toString cfg.nodeBuildTimeout;
+                          VERIFY_STORE_PATHS.value = lib.boolToString cfg.verifyStorePaths;
+                          NIXOS_HOST_ENABLED.value = lib.boolToString cfg.nixosHost.enable;
+                          METRICS_ENABLED.value = lib.boolToString cfg.metrics.enable;
+                          METRICS_PORT.value = toString cfg.metrics.port;
+                          NIXPKGS_ALLOW_UNFREE.value = "1";
+                          USER.value = "root";
+                        }
+                      );
                       volumeMounts = lib.mkNamedList {
                         csi-socket.mountPath = "/csi";
                         nix-config.mountPath = "/etc/nix";
@@ -451,10 +491,19 @@ in
                   volumes = lib.mkNamedList {
                     nix-config.configMap.name = "nix-node";
                     registration.hostPath.path = "/var/lib/kubelet/plugins_registry";
-                    nix-store.hostPath = {
-                      path = cfg.hostMountPath;
-                      type = "DirectoryOrCreate";
-                    };
+                    # The host's own / in host mode: appstarter-init's chroot
+                    # store at /nix-volume is then the host's /nix.
+                    nix-store.hostPath =
+                      if store == "host" then
+                        {
+                          path = "/";
+                          type = "Directory";
+                        }
+                      else
+                        {
+                          path = cfg.hostMountPath;
+                          type = "DirectoryOrCreate";
+                        };
                     # The store root, as its own volume, so nix-node mounts it
                     # without subPath. See the nix-root volumeMount above.
                     #
@@ -462,10 +511,17 @@ in
                     # kubelet checks hostPath type when it sets up pod volumes,
                     # which happens before appstarter-init runs. `Directory` would fail
                     # on a node that has no store yet.
-                    nix-root.hostPath = {
-                      path = "${cfg.hostMountPath}/nix";
-                      type = "DirectoryOrCreate";
-                    };
+                    nix-root.hostPath =
+                      if store == "host" then
+                        {
+                          path = "/nix";
+                          type = "Directory";
+                        }
+                      else
+                        {
+                          path = "${cfg.hostMountPath}/nix";
+                          type = "DirectoryOrCreate";
+                        };
                     csi-socket.hostPath = {
                       path = "/var/lib/kubelet/plugins/";
                       type = "DirectoryOrCreate";
@@ -504,6 +560,41 @@ in
             };
           };
         };
+    in
+    lib.mkIf cfg.enable {
+      kubernetes.resources.${cfg.namespace} = {
+        # **The operator's own kind, and the checked path.** An operator
+        # ignores the `prometheus.io/*` annotations on the pod template and
+        # selects pods by this object instead. A VictoriaMetrics operator
+        # converts it into a VMPodScrape, so one object serves both, and this
+        # kind has a real schema so a render is validated against an
+        # apiserver. `metrics.podMonitor` says why not a VM-native CR, and
+        # what start-up order makes an unconverted PodMonitor look like an
+        # unscraped one. Issue #40.
+        PodMonitor = lib.mkIf (cfg.metrics.enable && cfg.metrics.podMonitor) {
+          nixkube = {
+            metadata.labels = labels;
+            spec = {
+              selector.matchLabels = matchLabels;
+              podMetricsEndpoints = [
+                {
+                  # By name, not by number: the container declares the port
+                  # under this name, so the two move together.
+                  port = "metrics";
+                  path = "/metrics";
+                }
+              ];
+            };
+          };
+        };
+        DaemonSet =
+          if cfg.hostStore.enable then
+            {
+              nix-node-separate = nodeDaemonSet "separate";
+              nix-node-host = nodeDaemonSet "host";
+            }
+          else
+            { nix-node = nodeDaemonSet null; };
       };
     };
 }

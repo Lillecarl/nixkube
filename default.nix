@@ -536,6 +536,99 @@ rec {
     assert !(excluded nodePod "nix-node");
     pkgs.runCommand "appstarter-init-is-exempt-from-injection" { } "echo ok > $out";
 
+  /*
+    `nixkube.hostStore.enable` splits the node DaemonSet in two, on the
+    `nixkube/host` Node label. Issue #25.
+
+    Off, there is one DaemonSet, as before. On, each DaemonSet's selector
+    matches only its own pods: two DaemonSets whose selectors overlap each
+    see the other's pods as theirs. The node affinities exclude each other,
+    `nixkube-host-check` runs first with its own DaemonSet's mode, and the
+    host DaemonSet mounts nothing under `hostMountPath`, so a NixOS node
+    never gets the separate store from it.
+  */
+  hostStoreSplitsTheNodeDaemonSet =
+    let
+      render = enable: (kubenixInstance { module.nixkube.hostStore.enable = enable; }).config;
+      off = (render false).kubernetes.resources.nixkube.DaemonSet;
+      onCfg = render true;
+      on = onCfg.kubernetes.resources.nixkube.DaemonSet;
+      hostMountPath = onCfg.nixkube.hostMountPath;
+      pod = ds: ds.spec.template;
+      matches =
+        selector: labels: lib.all (k: labels.${k} or null == selector.${k}) (lib.attrNames selector);
+      initNames = ds: map (c: c.name) (pod ds).spec.initContainers;
+      firstInit = ds: lib.head (pod ds).spec.initContainers;
+      node = ds: lib.head (lib.filter (c: c.name == "nix-node") (pod ds).spec.containers);
+      envOf = ds: lib.listToAttrs (map (e: lib.nameValuePair e.name (e.value or null)) (node ds).env);
+      hostPaths = ds: map (v: v.hostPath.path) (lib.filter (v: v ? hostPath) (pod ds).spec.volumes);
+      volume = ds: name: (lib.head (lib.filter (v: v.name == name) (pod ds).spec.volumes)).hostPath.path;
+      term =
+        ds:
+        let
+          terms =
+            (pod ds)
+            .spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms;
+        in
+        (lib.head terms).matchExpressions;
+      separate = on.nix-node-separate;
+      host = on.nix-node-host;
+    in
+    assert lib.attrNames off == [ "nix-node" ];
+    assert !(lib.elem "host-check" (initNames off.nix-node));
+    assert !((pod off.nix-node).spec ? affinity);
+    assert
+      lib.attrNames on == [
+        "nix-node-host"
+        "nix-node-separate"
+      ];
+    # Each selects its own pods and not the other's.
+    assert matches separate.spec.selector.matchLabels (pod separate).metadata.labels;
+    assert matches host.spec.selector.matchLabels (pod host).metadata.labels;
+    assert !(matches separate.spec.selector.matchLabels (pod host).metadata.labels);
+    assert !(matches host.spec.selector.matchLabels (pod separate).metadata.labels);
+    # Both still carry what the PodMonitor and the tests select on.
+    assert (pod host).metadata.labels."app.kubernetes.io/component" == "node";
+    assert
+      term separate == [
+        {
+          key = "nixkube/host";
+          operator = "NotIn";
+          values = [ "nixos" ];
+        }
+      ];
+    assert
+      term host == [
+        {
+          key = "nixkube/host";
+          operator = "In";
+          values = [ "nixos" ];
+        }
+      ];
+    assert
+      (firstInit separate).command == [
+        "nixkube-host-check"
+        "--mode"
+        "separate"
+      ];
+    assert
+      (firstInit host).command == [
+        "nixkube-host-check"
+        "--mode"
+        "host"
+      ];
+    assert
+      initNames host == [
+        "host-check"
+        "appstarter-init"
+      ];
+    assert (envOf host).HOST_STORE == "true";
+    assert (envOf separate).HOST_STORE == "false";
+    assert volume host "nix-root" == "/nix";
+    assert volume separate "nix-root" == "${hostMountPath}/nix";
+    assert !(lib.any (lib.hasPrefix hostMountPath) (hostPaths host));
+    pkgs.runCommand "host-store-splits-the-node-daemonset" { } "echo ok > $out";
+
   assertionsNullShape =
     let
       instance = kubenixInstance {
@@ -1188,6 +1281,7 @@ rec {
       metricsPodMonitorShape
       nodeDriverReadiness
       appstarterInitIsExemptFromInjection
+      hostStoreSplitsTheNodeDaemonSet
       pynixdPodMonitorShape
       pynixdBindsEveryInterface
       pynixdProbesSurviveAPush
