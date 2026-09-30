@@ -106,6 +106,38 @@ spec:
     # /nix is automatically mounted by NRI plugin
 ```
 
+### Runtime compatibility
+
+What each mount path gives a pod, by container runtime (CRI) and OCI runtime
+(RuntimeClass). `ro` and `rw` are the NRI modes: `nixkube/pod-rw` asks for a
+writable /nix.
+
+| | runc | crun | gVisor (runsc) | Kata Containers |
+|---|---|---|---|---|
+| **containerd** | CSI, NRI ro/rw | CSI, NRI ro/rw | CSI; NRI refused¹ | CSI, NRI ro²; see ³ |
+| **CRI-O** | CSI, NRI ro/rw | CSI, NRI ro/rw | no container runs⁴ | CSI, NRI ro²; see ³ |
+
+1. gVisor keeps the container's rootfs out of the node's reach. The
+   container fails with a message that says so and names CSI instead.
+2. A VM gets /nix as a read-only virtio-fs share, and waits in the VM until
+   the build is done. A writable /nix and `nixkube/pod-path` mounts are
+   refused with the reason: the tree is hardlinks into the node's store.
+   Set `nixkube.nri.vmRuntimeHandlers` if your Kata handler is not `kata`.
+3. Kata's guest kernel 6.18.35 crashed in its virtio-fs code in our test
+   (`input` from `fuse_release_end`), and the pod's containers then exit with
+   255. It happens with plain shares too, without nixkube.
+4. Measured with CRI-O 1.36.5 and runsc 20260406, on a plain busybox pod
+   without nixkube.
+
+CRI-O with Kata needs `skip_mount_home = "true"` in containers-storage's
+overlay options, or the VM gets an empty rootfs. CRI-O creates a container
+when an NRI plugin returns an error, without the plugin's changes.
+
+Tested by `nix/uml` (`NIXKUBE_UML_CRI`, `NIXKUBE_UML_KATA`) on Kubernetes
+1.37, containerd 2.3.4, CRI-O 1.36.5, runc 1.4.3, crun 1.29.1, gVisor
+20260406 and Kata 3.32.0 on nested QEMU. Not tested: youki, and pods with
+`hostUsers: false`.
+
 Examples:
 * [multi-system example](https://github.com/Lillecarl/hetzkube/blob/4ed76ec77bfb104d1c2307b1ba178efa61dd34e2/kubenix/modules/cheapam.nix#L113)
 * [single-system ci example(s)](https://github.com/Lillecarl/nix-csi/blob/3179e5f8383e760bbef313300a224e44f18722c7/kubenix/ci/default.nix)
