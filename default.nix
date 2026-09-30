@@ -1103,6 +1103,30 @@ rec {
       address = "10.106.0.1/24";
     };
   };
+  /*
+    `ciTest` and `ciTestCache` on CRI-O, by hand and never in CI: the same
+    deployment and jobs on the other CRI.
+
+        nix run --file . ciMatrix.crio.driver -- --out ./o
+  */
+  ciMatrix =
+    let
+      onCrio =
+        test:
+        test.extend {
+          modules = [
+            {
+              name = lib.mkForce "${test.config.name}-crio";
+              nodes.cp.services.vivarium-k8s.cri = "crio";
+            }
+          ];
+        };
+    in
+    {
+      crio = onCrio ciTest;
+      crio-cache = onCrio ciTestCache;
+    };
+
   ci-debug = pkgs.callPackage ./pkgs/ci-debug { };
 
   # Is every store path this manifest names actually fetchable?
