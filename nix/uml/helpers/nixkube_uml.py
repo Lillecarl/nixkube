@@ -75,6 +75,16 @@ def nix_mount(mountinfo: str) -> tuple[str, str] | None:
     return None
 
 
+def own_user_namespace(mountinfo: str) -> bool:
+    """Whether a container's `/proc/self/uid_map` maps anything but the
+    host's whole range to itself. The lines are `inside outside count`;
+    mountinfo lines around them have more fields and are skipped."""
+    maps = [line.split() for line in mountinfo.splitlines() if len(line.split()) == 3]
+    return any(
+        m != ["0", "0", "4294967295"] for m in maps if all(f.isdigit() for f in m)
+    )
+
+
 # These are stuck-detectors, not patience.
 #
 # Nothing here waits on anything far away. The images are already on the
@@ -252,6 +262,7 @@ async def probe(
     why: str,
     runtime_class: str | None = None,
     wants: tuple[str, ...] = ("ro", "rw"),
+    host_users: bool = True,
 ) -> None:
     """Create one pod that wants both mount paths, and see that it gets them.
 
@@ -271,18 +282,20 @@ async def probe(
 
     *runtime_class* runs the pod under that RuntimeClass instead of the
     default runc. Issue #74. *wants* limits it to some of `PROBES`.
+    *host_users* false runs the pod in a user namespace of its own, so
+    every mount reaches it through an idmapped mount.
     """
     for want, key in PROBES:
         if want not in wants:
             continue
         # jq, then kubectl reading stdin: the agent's shell is /bin/sh.
-        runtime_filter = (
-            "cat"
-            if runtime_class is None
-            else f"jq '.spec.template.spec.runtimeClassName = \"{runtime_class}\"'"
-        )
+        edits = ["."]
+        if runtime_class is not None:
+            edits.append(f'.spec.template.spec.runtimeClassName = "{runtime_class}"')
+        if not host_users:
+            edits.append(".spec.template.spec.hostUsers = false")
         created = await cp.succeed(
-            f"{runtime_filter} {settings[key]}"
+            f"jq '{' | '.join(edits)}' {settings[key]}"
             f" | kubectl create --namespace {NAMESPACE} --filename - --output name",
             timeout=APPLY_TIMEOUT,
         )
@@ -329,6 +342,13 @@ async def probe(
                 f" the NRI plugin did not touch it. Its mount table was:\n{nri}"
             )
         options, fstype = mount
+        # The API server drops `hostUsers` when its feature gate is off, and
+        # the pod then passes on the host's ids. Asked of the container.
+        if own_user_namespace(nri) == host_users:
+            raise MachineError(
+                f"[cp] the {want} probe asked for hostUsers={host_users} after"
+                f" {why}, and its uid map says otherwise:\n{nri}"
+            )
         if want not in options.split(","):
             raise MachineError(
                 f"[cp] the {want} probe wanted a {want} /nix after {why} and"
@@ -342,7 +362,9 @@ async def probe(
         )
         under = "" if runtime_class is None else f" under {runtime_class}"
         print(
-            f"[nixkube] a {want} probe got both mounts{under} after {why}", flush=True
+            f"[nixkube] a {want} probe got both mounts{under} after {why}:"
+            f" /nix {options} ({fstype})",
+            flush=True,
         )
 
 

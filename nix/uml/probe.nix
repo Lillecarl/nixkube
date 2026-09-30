@@ -77,9 +77,12 @@ let
                   name = "nri";
                   image = scratch;
                   imagePullPolicy = "Never";
+                  # And its uid map, which says whether the pod has a user
+                  # namespace of its own; see `hostUsers` in the probe.
                   command = [
                     "${pkgs.busybox}/bin/cat"
                     "/proc/self/mountinfo"
+                    "/proc/self/uid_map"
                   ];
                 }
               ];

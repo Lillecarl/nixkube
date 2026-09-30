@@ -437,6 +437,7 @@ vivarium.mkTest (
       workloadStorePath = "${pkgs.hello}";
       workloadImage = "vivarium.test/busybox:1";
       runtimes = runtimesFor { inherit backend cri kata; };
+      inherit cri;
       hostNext = "${hostNext { inherit backend cri kata; }}";
     };
   }

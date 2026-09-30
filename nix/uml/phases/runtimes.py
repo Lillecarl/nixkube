@@ -6,7 +6,7 @@ one gets CSI, and NRI refuses it by name.
 """
 
 from nixkube_uml import check_sandboxed, check_vm, probe
-from vivarium_runner import Machines
+from vivarium_runner import MachineError, Machines
 
 # The pid a sandboxed runtime reports is not the container's, so NRI cannot
 # reach it. Measured for gVisor; see `check_sandboxed`.
@@ -25,3 +25,33 @@ async def test(vms: Machines) -> None:
             await check_vm(cp, settings, runtime)
         else:
             await probe(cp, settings, "a clean start", runtime_class=runtime)
+    # A pod in its own user namespace sees the node's files through an
+    # idmapped mount, and nixkube's store is hardlinks and binds.
+    if settings["cri"] != "containerd":
+        await probe(cp, settings, "a pod with hostUsers false", host_users=False)
+        return
+    # containerd cannot start a user-namespaced container from an image with
+    # zero layers, which the probe's scratch image is: Lillecarl/containerd#1,
+    # vivarium's `containerd-zero-layers`. Asserted, so the day containerd
+    # runs it this fails and the probe above takes over.
+    try:
+        await probe(
+            cp, settings, "a pod with hostUsers false", host_users=False, wants=("ro",)
+        )
+    except MachineError as error:
+        if "StartError" not in str(error):
+            raise
+        await cp.succeed(
+            "kubectl delete jobs --namespace nixkube --wait=true"
+            " --selector app.kubernetes.io/component=uml-probe",
+            timeout=300,
+        )
+        print(
+            "[nixkube] hostUsers false on containerd: fails as Lillecarl/containerd#1 says",
+            flush=True,
+        )
+        return
+    raise MachineError(
+        "[cp] containerd started a zero-layer pod with hostUsers false: Lillecarl/containerd#1 is"
+        " fixed here, so drop this branch and probe as on CRI-O"
+    )
