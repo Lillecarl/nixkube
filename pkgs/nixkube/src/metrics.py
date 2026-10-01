@@ -177,8 +177,8 @@ HARDLINK_PATHS = Counter(
 
 COMPOSEFS_AVAILABLE = Gauge(
     "nixkube_composefs_available",
-    "1 when this node presents CSI volumes as composefs mounts, 0 when as"
-    " hardlink trees: the kernel failed the probe, or CSI_COMPOSEFS is false",
+    "1 when this node's kernel passed the composefs probe, 0 when it failed"
+    " and volumes fall back to hardlink trees and bind farms",
 )
 
 # --- Host store ---

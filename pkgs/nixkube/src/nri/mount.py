@@ -97,6 +97,7 @@ from ..constants import (
     MS_RDONLY,
     MS_REMOUNT,
 )
+from ..csi.composefs import BASEDIR, compose
 from ..mountattr import set_readonly
 from .farm import build_farm, detach_namespace
 
@@ -316,6 +317,7 @@ def _mount_worker(
     result_queue: "multiprocessing.Queue[Exception | None]",
     host_proc_path: str,
     farm_paths: list[Path] | None = None,
+    image: Path | None = None,
 ) -> None:
     """Worker that runs in a spawned process to mount /nix and store paths.
 
@@ -344,7 +346,18 @@ def _mount_worker(
         # the store paths are. `open_tree(CLONE | AT_RECURSIVE)` carries them,
         # and the writable side of a read-write farm is the gaps between the
         # mounts, on the volume's own disk.
-        if nix_rw and not farm_paths:
+        #
+        # composefs: the overlay over the image, in this process's own
+        # namespace like the farm, and its `nix` directory cloned out. The
+        # overlay holds the image's EROFS mount, as it does for CSI, so
+        # both outlive this namespace through the clone.
+        if image is not None:
+            detach_namespace()
+            volume = nix_tree_path.parent
+            merged = volume / "merged"
+            compose(image, merged, BASEDIR, volume, volume if nix_rw else None)
+            nix_fd = _open_tree(libc, merged / "nix")
+        elif nix_rw and not farm_paths:
             nix_fd = _make_overlay_fd(
                 libc,
                 lowerdir=nix_tree_path,
@@ -442,6 +455,7 @@ async def mount_in_container(
     store_mounts: list[tuple[Path, Path]],
     nix_rw: bool = False,
     farm_paths: list[Path] | None = None,
+    image: Path | None = None,
 ) -> None:
     """Mount /nix and FHS store paths inside a container's mount namespace.
 
@@ -451,6 +465,7 @@ async def mount_in_container(
     farm_paths:    the closure to bind into `nix_tree_path/store` inside the
                    worker's own namespace. Absent means the tree is already
                    filled -- the hardlink path.
+    image:         a composefs image to present instead of `nix_tree_path`.
     Raises the worker's original exception (with traceback) on failure.
     """
     ctx = multiprocessing.get_context("spawn")
@@ -467,6 +482,7 @@ async def mount_in_container(
             result_queue,
             HOST_PROC_PATH,
             farm_paths,
+            image,
         ),
         daemon=True,
     )
@@ -492,7 +508,8 @@ async def mount_in_container(
 
     logger.info(
         "mounted_nix",
-        mode="rw_overlayfs" if nix_rw else "ro_bind",
+        mode="rw" if nix_rw else "ro",
+        presentation="composefs" if image else "farm" if farm_paths else "hardlinks",
         store_mounts=len(store_mounts),
         pid=container_pid,
     )

@@ -1234,6 +1234,19 @@ rec {
       )
     )
     // {
+      # A kernel without EROFS, as on Talos and GKE's COS: the node's own
+      # probe sends CSI to hardlink trees and NRI to the bind farm.
+      qemu-containerd-noerofs = pkgs.callPackage ./nix/uml {
+        inherit sources umlImages;
+        manifest = umlManifest;
+        matrixCell = {
+          backend = "qemu";
+          cri = "containerd";
+          kata = false;
+          erofs = false;
+        };
+      };
+
       # CSI volumes as hardlink trees, which every node whose kernel fails
       # the composefs probe still uses. Issue #68.
       uml-containerd-hardlinks = pkgs.callPackage ./nix/uml {

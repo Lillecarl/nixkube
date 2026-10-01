@@ -131,6 +131,9 @@ HOST_STORE = os.environ.get("HOST_STORE", "false") == "true"
 # everywhere, which a test cell uses so that path keeps running.
 CSI_COMPOSEFS = os.environ.get("CSI_COMPOSEFS", "true") == "true"
 
+# The same for an NRI container's /nix, which falls back to the bind farm.
+NRI_COMPOSEFS = os.environ.get("NRI_COMPOSEFS", "true") == "true"
+
 # RuntimeClass handlers that run each pod in a VM, such as Kata. The pod's
 # /nix reaches the VM as a bind mount the runtime shares over virtio-fs, and
 # not as a mount into the container's namespace. See `nri/vm.py`.

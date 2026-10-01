@@ -18,8 +18,10 @@ from kr8s.asyncio.objects import Pod
 
 from csi import csi_grpc, csi_pb2
 
+from .. import presentation
 from ..cache import schedule_copy_to_cache
 from ..constants import (
+    CSI_COMPOSEFS,
     CSI_GCROOTS,
     CSI_SOCKET_PATH,
     CSI_VOLUMES,
@@ -42,6 +44,7 @@ from ..nix import (
     get_build_args,
     get_current_system,
 )
+from ..presentation import Presentation
 from ..volume import (
     cleanup_failed_volume,
     is_mount,
@@ -313,13 +316,14 @@ class NodeServicer(csi_grpc.NodeBase):
                 )
 
             try:
-                shown = composefs.presentation(
-                    available=await composefs.available(),
+                shown = presentation.csi(
+                    enabled=CSI_COMPOSEFS,
+                    kernel=CSI_COMPOSEFS and await composefs.available(),
                     user_namespace=pod.raw.get("spec", {}).get("hostUsers") is False,
                     host_store=HOST_STORE,
                 )
                 log.debug("volume_presentation", presentation=str(shown))
-                if shown is composefs.Presentation.COMPOSEFS:
+                if shown is Presentation.COMPOSEFS:
                     image = await composefs.build_image(
                         package_paths,
                         primary_package,
@@ -334,7 +338,7 @@ class NodeServicer(csi_grpc.NodeBase):
                     await composefs.mount(
                         image, Path(request.target_path), request.readonly, volume_root
                     )
-                elif shown is composefs.Presentation.REFUSED:
+                elif shown is Presentation.REFUSED:
                     raise MountError(
                         "this node shares its host's store, where a volume can only be"
                         " a composefs mount, and this pod cannot have one: either it"

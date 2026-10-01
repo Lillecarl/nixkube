@@ -15,6 +15,7 @@ from kr8s.asyncio.objects import Pod
 
 from nri import nri_pb2
 
+from .. import presentation
 from ..cache import schedule_copy_to_cache
 from ..constants import (
     HOST_PROC_PATH,
@@ -22,6 +23,7 @@ from ..constants import (
     HOST_STORE,
     NODE_ROOT,
     NRI_BIND_FARM,
+    NRI_COMPOSEFS,
     NRI_CONTAINERS,
     NRI_PLUGIN_IDX,
     NRI_PLUGIN_NAME,
@@ -30,6 +32,7 @@ from ..constants import (
     NRI_VM_RUNTIME_HANDLERS,
 )
 from ..cri import get_cri_socket, list_container_ids
+from ..csi import composefs
 from ..events import report_event
 from ..metrics import (
     NRI_BUILD_DURATION,
@@ -39,6 +42,7 @@ from ..metrics import (
     NRI_STATE_CHANGES,
 )
 from ..nix import fetch_packages, get_build_args, get_current_system
+from ..presentation import Presentation
 from ..supervision import detach
 from ..volume import prepare_volume
 from .annotations import (
@@ -642,20 +646,37 @@ class NriPlugin(NriPluginBase):
         await fetch_packages(store_paths, volume_path, extra_args)
         log.debug("fetch_packages_done")
 
-        # A farm binds the closure in the mount worker and leaves nothing on
-        # disk; the hardlink path fills the volume here instead. Issue #65.
-        # A host-store node has only the farm: a hardlink out of the host's
-        # store fails with EXDEV. Issue #25.
-        prepared = await prepare_volume(
-            volume_path,
-            store_paths,
-            None,
-            bind_farm=NRI_BIND_FARM or HOST_STORE,
-            allow_hardlinks=not HOST_STORE,
+        shown = presentation.nri(
+            vm=False,
+            enabled=NRI_COMPOSEFS,
+            kernel=NRI_COMPOSEFS and await composefs.available(),
+            bind_farm=NRI_BIND_FARM,
+            host_store=HOST_STORE,
         )
-        # `prepared.bind_farm`, not NRI_BIND_FARM: the volume may have fallen
-        # back to a hardlink tree, and then there is nothing to bind.
-        farm_paths = prepared.paths if prepared.bind_farm else None
+        log.debug("nix_presentation", presentation=str(shown))
+        farm_paths = None
+        image = None
+        if shown is Presentation.COMPOSEFS:
+            # The image references its closure, so this out-link roots both.
+            built = await composefs.build_image(
+                store_paths, None, volume_path / "composefs", extra_args
+            )
+            image = built / composefs.IMAGE
+        else:
+            # A farm binds the closure in the mount worker and leaves nothing
+            # on disk; the hardlink path fills the volume here instead. Issue
+            # #65. A host-store node has only the farm: a hardlink out of the
+            # host's store fails with EXDEV. Issue #25.
+            prepared = await prepare_volume(
+                volume_path,
+                store_paths,
+                None,
+                bind_farm=shown is Presentation.FARM,
+                allow_hardlinks=not HOST_STORE,
+            )
+            # `prepared.bind_farm`, not `shown`: the volume may have fallen
+            # back to a hardlink tree, and then there is nothing to bind.
+            farm_paths = prepared.paths if prepared.bind_farm else None
 
         nix_tree_path = volume_path / "nix"
 
@@ -697,8 +718,11 @@ class NriPlugin(NriPluginBase):
             bundle=bundle,
             mounts=len(mounts),
             farm=len(farm_paths) if farm_paths else 0,
+            composefs=image is not None,
         )
-        await mount_in_container(pid, rootfs, nix_tree_path, mounts, nix_rw, farm_paths)
+        await mount_in_container(
+            pid, rootfs, nix_tree_path, mounts, nix_rw, farm_paths, image
+        )
 
     async def _build_for_vm(
         self,
@@ -717,6 +741,19 @@ class NriPlugin(NriPluginBase):
         reason = refusal(nix_rw, store_mounts)
         if reason:
             raise RuntimeError(reason)
+        shown = presentation.nri(
+            vm=True,
+            enabled=NRI_COMPOSEFS,
+            kernel=False,
+            bind_farm=NRI_BIND_FARM,
+            host_store=HOST_STORE,
+        )
+        if shown is Presentation.REFUSED:
+            raise RuntimeError(
+                "a VM runtime reads /nix as a hardlink tree over virtio-fs, and this"
+                " node shares its host's store, where a hardlink out of it fails"
+                " with EXDEV. Issue #25."
+            )
         extra_args = await get_build_args()
         volume_path = NRI_CONTAINERS / container_id
         await fetch_packages(store_paths, volume_path, extra_args)

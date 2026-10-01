@@ -30,6 +30,10 @@
     knob for them, so an environment variable cannot make a cell run
     something other than its name says. `null` is `umlTest`, which reads
     the knobs.
+
+    `erofs = false` refuses the guest kernel's EROFS module, so the node's
+    own probe, not an option, has to pick the fallbacks. QEMU only: the UML
+    kernel builds EROFS in.
   */
   matrixCell ? null,
 }:
@@ -279,6 +283,7 @@ vivarium.mkTest (
     cri = if matrixCell != null then matrixCell.cri else config.resolved.cri.value;
     kata = if matrixCell != null then matrixCell.kata else config.resolved.kata.value == "1";
     hostStore = manifest.config.nixkube.hostStore.enable;
+    erofs = if matrixCell != null then matrixCell.erofs or true else true;
   in
   {
     name =
@@ -404,7 +409,16 @@ vivarium.mkTest (
       };
     };
 
-    nodes.cp = cpFor { inherit cri kata; };
+    nodes.cp = {
+      imports = [
+        (cpFor { inherit cri kata; })
+      ]
+      ++ lib.optional (!erofs) {
+        # What a kernel without EROFS answers: `mount -t erofs` finds no
+        # filesystem, as on Talos and GKE's COS.
+        boot.extraModprobeConfig = "install erofs ${pkgs.coreutils}/bin/false";
+      };
+    };
 
     settings = {
       manifest = "${manifestFile}";
@@ -437,9 +451,11 @@ vivarium.mkTest (
       workloadImage = "vivarium.test/busybox:1";
       runtimes = runtimesFor { inherit backend cri kata; };
       inherit cri;
-      # How the node presents a CSI volume, as the manifest asks: the
-      # workloads phase checks every CSI mount against it.
-      csiComposefs = manifest.config.nixkube.csi.composefs;
+      # How the node presents a CSI volume and an NRI /nix: composefs where
+      # the manifest asks for it and the kernel has EROFS. The workloads
+      # phase checks every CSI mount, and each probe its NRI /nix.
+      csiComposefs = manifest.config.nixkube.csi.composefs && erofs;
+      nriComposefs = manifest.config.nixkube.nri.composefs && erofs;
       # Whether the node runs from the guest's own /nix, and so which
       # DaemonSet serves it. Issue #25.
       inherit hostStore;

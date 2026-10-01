@@ -74,6 +74,19 @@ def nix_mount(mountinfo: str) -> tuple[str, str] | None:
     return None
 
 
+def nix_is_composefs(mountinfo: str) -> bool:
+    """Whether the container's own /nix is a composefs overlay: a
+    data-only lower layer (`::`) in its superblock options, which neither
+    the bind farm nor a read-write hardlink overlay has."""
+    for line in mountinfo.splitlines():
+        fields = line.split()
+        if len(fields) < 7 or fields[4] != "/nix":
+            continue
+        after = fields[fields.index("-") + 1 :]
+        return after[0] == "overlay" and len(after) > 2 and "::" in after[2]
+    return False
+
+
 def own_user_namespace(mountinfo: str) -> bool:
     """Whether a container's `/proc/self/uid_map` maps anything but the
     host's whole range to itself. The lines are `inside outside count`;
@@ -354,6 +367,15 @@ async def probe(
                 f"[cp] the {want} probe wanted a {want} /nix after {why} and"
                 f" got `{options}` ({fstype})."
             )
+        # Without this a node that falls back to the farm -- a probe that
+        # fails, a kernel without EROFS -- passes every other check.
+        composefs = nix_is_composefs(nri)
+        if composefs != settings["nriComposefs"]:
+            raise MachineError(
+                f"[cp] the {want} probe's /nix is"
+                f" {'' if composefs else 'not '}composefs after {why}, and"
+                f" nriComposefs is {settings['nriComposefs']}:\n{nri}"
+            )
 
         await kubectl(
             cp,
@@ -361,9 +383,10 @@ async def probe(
             timeout=APPLY_TIMEOUT,
         )
         under = "" if runtime_class is None else f" under {runtime_class}"
+        shown = "composefs" if composefs else "not composefs"
         print(
             f"[nixkube] a {want} probe got both mounts{under} after {why}:"
-            f" /nix {options} ({fstype})",
+            f" /nix {options} ({fstype}, {shown})",
             flush=True,
         )
 

@@ -158,6 +158,19 @@ in
       default = false;
     };
 
+    nri.composefs = lib.mkOption {
+      description = ''
+        Give an NRI container its /nix as one composefs mount where the node's
+        kernel can: the same image and probe as `csi.composefs`. Where the
+        probe fails, the container gets the bind farm. VM runtimes always get
+        a hardlink tree.
+
+        False keeps the bind farm on every node.
+      '';
+      type = lib.types.bool;
+      default = true;
+    };
+
     nri.vmRuntimeHandlers = lib.mkOption {
       description = ''
         RuntimeClass handlers that run each pod in a virtual machine, such as

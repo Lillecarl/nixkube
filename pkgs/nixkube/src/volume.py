@@ -11,6 +11,7 @@ from pathlib import Path
 
 import structlog
 
+from . import presentation
 from .constants import (
     MNT_DETACH,
     MS_BIND,
@@ -31,6 +32,7 @@ from .nix import (
     install_result_link,
     verify_store_paths,
 )
+from .presentation import Presentation
 
 logger = structlog.get_logger("nixkube.volume")
 
@@ -132,8 +134,11 @@ async def prepare_volume(
 
     # Asked before anything is prepared, because the fallback changes what
     # preparing means.
-    if bind_farm and not affordable(len(store_paths)):
-        if not allow_hardlinks:
+    fallback = presentation.farm_fallback(
+        fits=affordable(len(store_paths)), host_store=not allow_hardlinks
+    )
+    if bind_farm and fallback is not Presentation.FARM:
+        if fallback is Presentation.REFUSED:
             # A host-store node: a hardlink out of the host's store fails
             # with EXDEV, so there is no tree to fall back to. Issue #25.
             raise MountError(

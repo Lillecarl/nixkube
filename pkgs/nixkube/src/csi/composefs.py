@@ -32,14 +32,13 @@ import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 
 import anyio
 import anyio.to_thread
 import structlog
 
-from ..constants import CSI_COMPOSEFS, MNT_DETACH, MS_RDONLY, NIX_BUILD_TIMEOUT
+from ..constants import MNT_DETACH, MS_RDONLY, NIX_BUILD_TIMEOUT
 from ..errors import MountError
 from ..metrics import COMPOSEFS_AVAILABLE
 from ..nix.build import _run_nix_build
@@ -224,32 +223,6 @@ async def mount(image: Path, target: Path, readonly: bool, volume_root: Path) ->
         ) from error
 
 
-class Presentation(StrEnum):
-    COMPOSEFS = "composefs"
-    HARDLINKS = "hardlinks"
-    REFUSED = "refused"
-
-
-def presentation(
-    *, available: bool, user_namespace: bool, host_store: bool
-) -> Presentation:
-    """How to present one pod's volume.
-
-    A pod with `hostUsers: false` gets an idmapped mount of every volume,
-    and the kernel refuses MOUNT_ATTR_IDMAP on an overlay: measured on 7.2,
-    CRI-O's runc failed "failed to set MOUNT_ATTR_IDMAP ... invalid
-    argument". So such a pod takes the hardlink tree. A node that shares
-    its host's store has no hardlink tree -- a hardlink out of it fails with
-    EXDEV -- so there it is refused, as is any volume on a kernel that
-    failed the probe.
-    """
-    if available and not user_namespace:
-        return Presentation.COMPOSEFS
-    if host_store:
-        return Presentation.REFUSED
-    return Presentation.HARDLINKS
-
-
 # The probe's image: one file, backed by an object whose name differs, so a
 # root that shows the object is a root that shows the base directory.
 _PROBE_DUMP = (
@@ -269,17 +242,15 @@ _answer: bool | None = None
 async def available() -> bool:
     """Whether this kernel mounts composefs as the volume layout needs it.
     Asked once per process: a kernel does not change under it. Two first
-    publishes at once may both probe, which costs a mount and nothing else."""
+    publishes at once may both probe, which costs a mount and nothing else.
+    CSI_COMPOSEFS and NRI_COMPOSEFS are the callers' to check."""
     global _answer
     if _answer is None:
-        if not CSI_COMPOSEFS:
-            ok, why = False, "CSI_COMPOSEFS is false"
-        else:
-            try:
-                tools()
-                ok, why = await anyio.to_thread.run_sync(_probe)
-            except FileNotFoundError as error:
-                ok, why = False, str(error)
+        try:
+            tools()
+            ok, why = await anyio.to_thread.run_sync(_probe)
+        except FileNotFoundError as error:
+            ok, why = False, str(error)
         COMPOSEFS_AVAILABLE.set(1 if ok else 0)
         log = logger.info if ok else logger.warning
         log("composefs_probe", available=ok, why=why)
