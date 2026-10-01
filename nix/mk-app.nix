@@ -26,6 +26,9 @@
   pathInputs ? [ ],
   # Set on every program here. Store paths the program reads at start-up.
   env ? { },
+  # A variable set to this wrapper's own store path, which `env` cannot name:
+  # it is the derivation being built.
+  selfEnv ? null,
   # Merged over what the venv projection already carries (`venv`, `package`,
   # `version`). For a build artefact a consumer reads off the application.
   passthru ? { },
@@ -55,7 +58,7 @@ let
     );
   meta = app.meta // lib.optionalAttrs (mainProgram != null) { inherit mainProgram; };
 in
-if wrapperArgs == [ ] then
+if wrapperArgs == [ ] && selfEnv == null then
   app.overrideAttrs (old: {
     inherit meta;
     passthru = old.passthru // passthru;
@@ -70,7 +73,9 @@ else
       for program in "$out"/bin/*; do
         base=$(basename "$program")
         rm "$program"
-        makeWrapper "${app}/bin/$base" "$program" ${lib.escapeShellArgs wrapperArgs}
+        makeWrapper "${app}/bin/$base" "$program" ${lib.escapeShellArgs wrapperArgs} ${
+          lib.optionalString (selfEnv != null) ''--set ${selfEnv} "$out"''
+        }
       done
     '';
     inherit meta;

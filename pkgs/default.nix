@@ -42,6 +42,8 @@ self: pkgs: {
       (pkgs.lib.getBin pkgs.openssh)
       (pkgs.lib.getBin pkgs.util-linuxMinimal)
       self.nri-wait
+      # mkcomposefs and mount.composefs: a CSI volume as one mount.
+      pkgs.composefs
     ];
     # `startup.py` hardlinks all three into the container root.
     env = {
@@ -50,7 +52,12 @@ self: pkgs: {
       SETUP_USRBINENV = pkgs.dockerTools.usrBinEnv;
       # Copied into a VM container's /nix; see src/nri/vm.py.
       NRI_VM_BUSYBOX = "${pkgs.pkgsStatic.busybox}/bin/busybox";
+      # The tools of nix/composefs.nix, as `composefsImage` passes them, so a
+      # node writes CI's derivation and finds CI's image. src/csi/composefs.py.
+      NIXKUBE_COMPOSEFS = pkgs.composefs;
+      NIXKUBE_NIX = pkgs.nix;
     };
+    selfEnv = "NIXKUBE_PACKAGE";
   };
 
   # kluctl = pkgs.kluctl.override {

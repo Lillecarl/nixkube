@@ -1057,9 +1057,10 @@ rec {
     {
       roots,
       primary ? null,
+      opaque ? true,
     }:
     import ./nix/composefs.nix {
-      inherit roots primary;
+      inherit roots primary opaque;
       tools = { inherit (pkgs) nixkube composefs nix; };
       inherit (pkgs.stdenv.hostPlatform) system;
     };
@@ -1068,9 +1069,12 @@ rec {
   # root on an image keeps what it presents; and it carries its database.
   composefsImageHoldsItsClosure =
     let
+      # Not the form nodes share: that one names its inputs as bare store
+      # paths, and builds only where they exist already.
       image = composefsImage {
         roots = [ pkgs.hello ];
         primary = pkgs.hello;
+        opaque = false;
       };
       held = pkgs.closureInfo { rootPaths = [ image ]; };
       wanted = pkgs.closureInfo { rootPaths = [ pkgs.hello ]; };
@@ -1084,6 +1088,20 @@ rec {
       ${pkgs.composefs}/bin/composefs-info ls ${image}/image.cfs > listing
       grep -q '^/bin/hello' listing || { echo "no /bin/hello at the root"; head listing; exit 1; }
       grep -q '^/nix/var/nix/db/db.sqlite' listing || { echo "no database"; exit 1; }
+      echo ok > $out
+    '';
+
+  # The nixkube wrapper names the tools `composefsImage` passes. A node
+  # writes the image's derivation from these, and any other path is another
+  # derivation: the node would never find CI's image.
+  nixkubeNamesComposefsTools =
+    let
+      wrapper = "${pkgs.nixkube}/bin/nixkube";
+    in
+    pkgs.runCommand "nixkube-names-composefs-tools" { } ''
+      grep -q "NIXKUBE_PACKAGE='\?${pkgs.nixkube}'\?" ${wrapper} || { echo "NIXKUBE_PACKAGE"; exit 1; }
+      grep -q "NIXKUBE_COMPOSEFS='\?${pkgs.composefs}'\?" ${wrapper} || { echo "NIXKUBE_COMPOSEFS"; exit 1; }
+      grep -q "NIXKUBE_NIX='\?${pkgs.nix}'\?" ${wrapper} || { echo "NIXKUBE_NIX"; exit 1; }
       echo ok > $out
     '';
 
@@ -1326,6 +1344,7 @@ rec {
       appstarterInitIsExemptFromInjection
       hostStoreSplitsTheNodeDaemonSet
       composefsImageHoldsItsClosure
+      nixkubeNamesComposefsTools
       pynixdPodMonitorShape
       pynixdBindsEveryInterface
       pynixdProbesSurviveAPush
