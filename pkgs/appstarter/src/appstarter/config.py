@@ -17,6 +17,14 @@ STATE_PATH = Path("nix/var/appstarter/state.json")
 # where `run` looks for the program. Relative to the store root.
 RESULT_PATH = Path("nix/var/result")
 
+# A direct GC root for what `init` put in the store, one per role. The root
+# that `nix build --out-link` registers for RESULT_PATH is indirect: it names
+# the link by the path this container sees, /nix-volume/nix/var/result. When
+# the store is a NixOS host's (issue #25) the host cannot resolve that path,
+# so its GC would take the running version. A symlink in the gcroots
+# directory is a root by itself, and its target resolves on the host.
+ROOT_DIR = Path("nix/var/nix/gcroots/appstarter")
+
 
 def nix_system() -> str:
     """This machine, spelled the way Nix spells it."""

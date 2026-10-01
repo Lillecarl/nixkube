@@ -26,6 +26,29 @@ def test_a_successful_fetch_records_no_skew(tmp_path, monkeypatch):
     assert not state.degraded
 
 
+@pytest.mark.parametrize("fetch_works", [True, False])
+def test_what_runs_is_rooted_by_a_link_the_host_can_resolve(
+    tmp_path, monkeypatch, fetch_works
+):
+    monkeypatch.setenv("PYNIXD_ENABLED", "false")
+    monkeypatch.setenv("APPSTARTER_ROLE", "node")
+
+    def refuse(*_args):
+        raise store.StoreError("no substituter that can build it")
+
+    monkeypatch.setattr(
+        store, "build", (lambda *_args: None) if fetch_works else refuse
+    )
+    monkeypatch.setattr(store, "copy", lambda *_args: None)
+
+    assert seed.run("/nix/store/wanted", "/nix/store/image", tmp_path) == 0
+    root = tmp_path / config.ROOT_DIR / "node"
+    # A symlink in the gcroots directory, straight to the store path: not a
+    # path under this container's /nix-volume.
+    expected = "/nix/store/wanted" if fetch_works else "/nix/store/image"
+    assert root.is_symlink() and str(root.readlink()) == expected
+
+
 def test_a_failed_fetch_seeds_from_the_image(tmp_path, monkeypatch):
     monkeypatch.setenv("PYNIXD_ENABLED", "false")
     copied: list[str] = []

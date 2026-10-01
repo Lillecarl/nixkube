@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from . import store
-from .config import RESULT_PATH, State, store_path_for
+from .config import RESULT_PATH, ROOT_DIR, State, store_path_for
 
 log = logging.getLogger("appstarter.init")
 
@@ -87,6 +87,8 @@ def run(wanted_spec: str, fallback: str | None, store_root: Path) -> int:
         running = fallback
 
     store.verify(running, store_root)
+    role = os.environ.get("APPSTARTER_ROLE", "app")
+    store.link(running, store_root / ROOT_DIR / role)
     State(wanted=wanted, running=running).write(store_root)
 
     if wanted != running:
