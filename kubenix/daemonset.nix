@@ -336,6 +336,7 @@ in
                           NIX_BUILD_TIMEOUT.value = toString cfg.nodeBuildTimeout;
                           VERIFY_STORE_PATHS.value = lib.boolToString cfg.verifyStorePaths;
                           NIXOS_HOST_ENABLED.value = lib.boolToString cfg.nixosHost.enable;
+                          CSI_COMPOSEFS.value = lib.boolToString cfg.csi.composefs;
                           METRICS_ENABLED.value = lib.boolToString cfg.metrics.enable;
                           METRICS_PORT.value = toString cfg.metrics.port;
                           NIXPKGS_ALLOW_UNFREE.value = "1";

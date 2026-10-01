@@ -429,6 +429,9 @@ vivarium.mkTest (
       workloadImage = "vivarium.test/busybox:1";
       runtimes = runtimesFor { inherit backend cri kata; };
       inherit cri;
+      # How the node presents a CSI volume, as the manifest asks: the
+      # workloads phase checks every CSI mount against it.
+      csiComposefs = manifest.config.nixkube.csi.composefs;
       hostNext = "${hostNext { inherit backend cri kata; }}";
     };
   }

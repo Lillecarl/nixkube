@@ -131,6 +131,21 @@ in
       default = false;
     };
 
+    csi.composefs = lib.mkOption {
+      description = ''
+        Present a CSI volume as one composefs mount where the node's kernel
+        can: an EROFS image of the closure over the store. The node probes its
+        kernel once and keeps the hardlink tree where the probe fails (Linux
+        before 6.5, no EROFS -- Talos and GKE's COS among them). Issue #68.
+
+        False keeps the hardlink tree on every node. A node that shares its
+        host's store (`hostStore.enable`) has no hardlink tree, so there it
+        refuses the publish instead.
+      '';
+      type = lib.types.bool;
+      default = true;
+    };
+
     nixosHost.enable = lib.mkOption {
       description = ''
         Let each node switch its NixOS host to the system its Node object

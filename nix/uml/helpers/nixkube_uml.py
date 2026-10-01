@@ -760,6 +760,38 @@ async def check_resident(cp: Machine, settings: dict, why: str) -> None:
     print(f"[nixkube] {name} still has both mounts after {why}", flush=True)
 
 
+def csi_presentations(mountinfo: str) -> dict[str, str]:
+    """Each CSI volume's target, and how it is presented: "composefs" for
+    an overlay with a data-only lower layer (`::`), "hardlinks" for anything
+    else, which is a bind of a hardlink tree."""
+    found = {}
+    for line in mountinfo.splitlines():
+        fields = line.split()
+        point = fields[4]
+        if "/volumes/kubernetes.io~csi/" not in point or not point.endswith("/mount"):
+            continue
+        after = fields[fields.index("-") + 1 :]
+        fstype, options = after[0], after[2] if len(after) > 2 else ""
+        found[point] = (
+            "composefs" if fstype == "overlay" and "::" in options else "hardlinks"
+        )
+    return found
+
+
+async def check_presentation(cp: Machine, settings: dict) -> None:
+    """Every CSI volume on the node is presented the way the deployment
+    asked. Without this a node that falls back to hardlinks -- a probe that
+    fails, a kernel without EROFS -- passes every other check. Issue #68."""
+    wanted = "composefs" if settings["csiComposefs"] else "hardlinks"
+    seen = csi_presentations(await cp.succeed("cat /proc/1/mountinfo"))
+    if not seen:
+        raise MachineError("[cp] no CSI volume is mounted on the node to look at")
+    wrong = {p: kind for p, kind in seen.items() if kind != wanted}
+    if wrong:
+        raise MachineError(f"[cp] CSI volumes not presented as {wanted}: {wrong}")
+    print(f"[nixkube] {len(seen)} CSI volumes presented as {wanted}", flush=True)
+
+
 async def check_unmount(cp: Machine, settings: dict) -> None:
     """The mounts go away when the pods do.
 

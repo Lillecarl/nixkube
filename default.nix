@@ -1209,7 +1209,27 @@ rec {
       (cell "uml" "crio" false)
       (cell "qemu" "containerd" true)
       (cell "qemu" "crio" true)
-    ];
+    ]
+    // {
+      # CSI volumes as hardlink trees, which every node whose kernel fails
+      # the composefs probe still uses. Issue #68.
+      uml-containerd-hardlinks = pkgs.callPackage ./nix/uml {
+        inherit sources umlImages;
+        manifest = kubenixInstance {
+          module.imports = [
+            ./kubenix/ci
+            ./nix/uml/manifest.nix
+            ./nix/uml/workloads.nix
+            { nixkube.csi.composefs = false; }
+          ];
+        };
+        matrixCell = {
+          backend = "uml";
+          cri = "containerd";
+          kata = false;
+        };
+      };
+    };
 
   /*
     The kind jobs, on a guest instead of on a container.

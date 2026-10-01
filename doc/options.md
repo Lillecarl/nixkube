@@ -30,7 +30,38 @@ true
 
 
 
+## nixkube\.csi\.composefs
+
+Present a CSI volume as one composefs mount where the node’s kernel
+can: an EROFS image of the closure over the store\. The node probes its
+kernel once and keeps the hardlink tree where the probe fails (Linux
+before 6\.5, no EROFS – Talos and GKE’s COS among them)\. Issue \#68\.
+
+False keeps the hardlink tree on every node\. A node that shares its
+host’s store (` hostStore.enable `) has no hardlink tree, so there it
+refuses the publish instead\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
 ## nixkube\.deploySecrets
+
+
 
 Deploy SSH keypair Secrets to Kubernetes\. Disable if managing secrets externally (e\.g\., with Vault or Sealed Secrets)\.
 
