@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.composefs import escape, volume
+from src.composefs import escape, registration, volume
 
 
 @pytest.fixture
@@ -122,3 +122,34 @@ def test_a_primary_with_a_nix_of_its_own_is_refused(store: Path):
 )
 def test_escape(text: str, escaped: str):
     assert escape(text) == escaped
+
+
+def test_registration_is_what_closure_info_writes():
+    closure = [
+        {
+            "path": "/nix/store/aaa-lib",
+            "narHash": "sha256-a",
+            "narSize": 10,
+            "references": [],
+        },
+        {
+            "path": "/nix/store/bbb-app",
+            "narHash": "sha256-b",
+            "narSize": 20,
+            "references": ["/nix/store/aaa-lib", "/nix/store/bbb-app"],
+        },
+    ]
+    assert registration(closure).splitlines() == [
+        "/nix/store/aaa-lib",
+        "sha256-a",
+        "10",
+        "",
+        "0",
+        "/nix/store/bbb-app",
+        "sha256-b",
+        "20",
+        "",
+        "2",
+        "/nix/store/aaa-lib",
+        "/nix/store/bbb-app",
+    ]

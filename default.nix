@@ -1048,6 +1048,45 @@ rec {
     assert lib.hasInfix "ed25519" builder.path;
     pkgs.runCommand "builder-presents-pinned-host-key" { } "echo ok > $out";
 
+  /**
+    A CSI volume as a composefs image, built with this pkgs' tools.
+    `nix/composefs.nix` says what it holds and why it takes its tools as
+    arguments.
+  */
+  composefsImage =
+    {
+      roots,
+      primary ? null,
+    }:
+    import ./nix/composefs.nix {
+      inherit roots primary;
+      tools = { inherit (pkgs) nixkube composefs nix; };
+      inherit (pkgs.stdenv.hostPlatform) system;
+    };
+
+  # The image for hello holds hello's whole closure as references, so a GC
+  # root on an image keeps what it presents; and it carries its database.
+  composefsImageHoldsItsClosure =
+    let
+      image = composefsImage {
+        roots = [ pkgs.hello ];
+        primary = pkgs.hello;
+      };
+      held = pkgs.closureInfo { rootPaths = [ image ]; };
+      wanted = pkgs.closureInfo { rootPaths = [ pkgs.hello ]; };
+    in
+    pkgs.runCommand "composefs-image-holds-its-closure" { } ''
+      test -s ${image}/image.cfs
+      test -s ${image}/db/db.sqlite
+      while read -r path; do
+        grep -qx "$path" ${held}/store-paths || { echo "the image does not hold $path"; exit 1; }
+      done < ${wanted}/store-paths
+      ${pkgs.composefs}/bin/composefs-info ls ${image}/image.cfs > listing
+      grep -q '^/bin/hello' listing || { echo "no /bin/hello at the root"; head listing; exit 1; }
+      grep -q '^/nix/var/nix/db/db.sqlite' listing || { echo "no database"; exit 1; }
+      echo ok > $out
+    '';
+
   # Tests written as nixos-test modules, run as vivarium guests: a
   # sandboxed build, a `.driver` run and an MCP session are the same test.
   nixosTests =
@@ -1286,6 +1325,7 @@ rec {
       nodeDriverReadiness
       appstarterInitIsExemptFromInjection
       hostStoreSplitsTheNodeDaemonSet
+      composefsImageHoldsItsClosure
       pynixdPodMonitorShape
       pynixdBindsEveryInterface
       pynixdProbesSurviveAPush

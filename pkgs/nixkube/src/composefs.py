@@ -23,11 +23,15 @@ and substituted everywhere after.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import stat
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 STORE = Path("/nix/store")
 
@@ -146,6 +150,73 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     closure = [Path(line) for line in args.closure.read_text().split()]
     volume(sys.stdout, closure, args.primary, args.database)
+    return 0
+
+
+def registration(closure: list[dict[str, Any]]) -> str:
+    """`nix-store --load-db` input from exportReferencesGraph entries, as
+    nixpkgs' closureInfo writes it: path, hash, size, deriver, then the
+    references counted."""
+    lines: list[str] = []
+    for entry in closure:
+        refs = entry["references"]
+        lines += [
+            entry["path"],
+            entry["narHash"],
+            str(entry["narSize"]),
+            "",
+            str(len(refs)),
+        ]
+        lines += refs
+    return "\n".join(lines) + "\n"
+
+
+def build(attrs: dict[str, Any]) -> None:
+    """The builder of `nix/composefs.nix`: the closure's database, the dump,
+    and the image, in `$out`.
+
+    `$out/db` is in the image as /nix/var/nix/db, backed by itself: the
+    payload names the output's own path, which is a self-reference and fine
+    for an input-addressed output.
+    """
+    out = Path(attrs["outputs"]["out"])
+    closure = attrs["closure"]
+    with tempfile.TemporaryDirectory() as tmp:
+        state = Path(tmp) / "state"
+        env = {
+            **os.environ,
+            "NIX_STATE_DIR": str(state),
+            "NIX_LOG_DIR": f"{tmp}/log",
+            "NIX_CONF_DIR": f"{tmp}/conf",
+        }
+        subprocess.run(
+            [attrs["nixStore"], "--load-db"],
+            input=registration(closure),
+            text=True,
+            env=env,
+            check=True,
+        )
+        out.mkdir()
+        # `reserved` is 8 MiB of nothing, kept so Nix can free space when the
+        # disk is full; on every image in the store it is only waste.
+        shutil.copytree(state / "db", out / "db", ignore=lambda *_: {"reserved"})
+        dump = Path(tmp) / "dump"
+        with dump.open("w") as handle:
+            volume(
+                handle,
+                [Path(entry["path"]) for entry in closure],
+                Path(attrs["primary"]) if attrs.get("primary") else None,
+                out / "db",
+            )
+        subprocess.run(
+            [attrs["mkcomposefs"], "--from-file", str(dump), str(out / "image.cfs")],
+            check=True,
+        )
+
+
+def builder() -> int:
+    """`nixkube-composefs-build`: what the derivation runs."""
+    build(json.loads(Path(os.environ["NIX_ATTRS_JSON_FILE"]).read_text()))
     return 0
 
 

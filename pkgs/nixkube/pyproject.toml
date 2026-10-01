@@ -37,6 +37,7 @@ dependencies = [
 nixkube = "src.cli:main"
 nixkube-host-check = "src.host_check:main"
 nixkube-composefs-dump = "src.composefs:main"
+nixkube-composefs-build = "src.composefs:builder"
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-asyncio", "hypothesis"]
