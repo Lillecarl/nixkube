@@ -33,6 +33,7 @@ from .gc_task import gc_loop
 from .nix_daemon import supervise_nix_daemon
 from .nixos_host import nixos_host_loop
 from .nri.server import nri_serve
+from .retire import retire_loop
 from .startup import run_setup
 from .supervision import supervised
 
@@ -145,14 +146,17 @@ def log_effective_app_config() -> None:
 
 
 def store_loops(*, host_store: bool) -> frozenset[str]:
-    """The loops that own the store: none on a host-store node.
+    """The loops that look after the store.
 
-    There the socket is the host's nix-daemon, and a second daemon would
-    take it. The sweep deletes every unrooted path older than an hour and
-    copies the whole store to the cache, which on the host's store is the
-    host's users' paths and the host's whole store. Issue #25.
+    A host-store node runs no nix-daemon and no sweep: the socket is the
+    host's nix-daemon, and a second daemon would take it, and the sweep
+    deletes every unrooted path older than an hour and copies the whole
+    store to the cache -- the host's users' paths and the host's whole store.
+    It retires the separate store it used before instead. Issue #25.
     """
-    return frozenset() if host_store else frozenset({"nix-daemon", "gc"})
+    if host_store:
+        return frozenset({"retire"})
+    return frozenset({"nix-daemon", "gc"})
 
 
 async def async_main():
@@ -216,6 +220,8 @@ async def async_main():
             tg.start_soon(supervise_nix_daemon, name="nix-daemon")
         if "gc" in loops:
             tg.start_soon(gc_loop, name="gc")
+        if "retire" in loops:
+            tg.start_soon(retire_loop, name="retire")
         tg.start_soon(cache_probe_loop, name="cache-probe")
         # Not supervised. It has nothing to crash on, and a restart loop
         # around a sampler would report on itself.

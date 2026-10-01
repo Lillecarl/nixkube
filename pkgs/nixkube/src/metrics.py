@@ -173,6 +173,14 @@ HARDLINK_PATHS = Counter(
     "Store paths considered for linking, whether or not the volume already had them",
 )
 
+# --- Host store ---
+
+OLD_STORE_BYTES = Gauge(
+    "nixkube_old_store_bytes",
+    "Bytes on disk of a host-store node's former separate store, until it is"
+    " retired (issue #25); 0 when there is none",
+)
+
 # --- Nix builds ---
 #
 # `kind` is which of the three volume attributes asked for this build, and
