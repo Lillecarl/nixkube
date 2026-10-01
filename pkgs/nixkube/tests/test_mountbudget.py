@@ -212,3 +212,30 @@ class TestTheVolumeFallsBackRatherThanFailing:
         assert prepared.bind_farm is True
         assert not linked, "a farm must not link anything"
         assert prepared.paths == [Path("/nix/store/aaa-pkg")]
+
+    @pytest.mark.asyncio
+    async def test_a_host_store_refuses_rather_than_falls_back(
+        self, tmp_path, monkeypatch
+    ):
+        from src import volume as volume_module
+        from src.errors import MountError
+
+        async def closure(paths):
+            return {Path("/nix/store/aaa-pkg")}
+
+        async def nothing(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(volume_module, "get_closure_paths", closure)
+        monkeypatch.setattr(volume_module, "hardlink_closure", nothing)
+        monkeypatch.setattr(volume_module, "init_database", nothing)
+        monkeypatch.setattr(volume_module, "affordable", lambda _needed: False)
+
+        with pytest.raises(MountError, match="fall back"):
+            await volume_module.prepare_volume(
+                tmp_path / "vol",
+                {Path("/nix/store/aaa-pkg")},
+                None,
+                bind_farm=True,
+                allow_hardlinks=False,
+            )

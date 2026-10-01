@@ -184,6 +184,12 @@ NRI_PLUGIN_IDX = os.environ.get("NRI_PLUGIN_IDX", "69")
 # Set via HOST_MOUNT_PATH environment variable from kubenix
 HOST_MOUNT_PATH = Path(os.environ.get("HOST_MOUNT_PATH", "/var/lib/nix-csi"))
 
+# Where on the host this container's /nix comes from: what a path the
+# runtime resolves on the host -- an OCI hook, a VM share -- has to be
+# prefixed with. A host-store node's /nix is the host's own (issue #25);
+# HOST_MOUNT_PATH there is only the old store that `retire` deletes.
+NODE_ROOT = Path("/") if HOST_STORE else HOST_MOUNT_PATH
+
 # Host root filesystem mounted into the daemonset container.
 HOST_ROOT = Path(os.environ.get("HOST_ROOT", "/host"))
 

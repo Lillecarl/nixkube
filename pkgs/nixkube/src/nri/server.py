@@ -17,9 +17,10 @@ from nri import nri_pb2
 
 from ..cache import schedule_copy_to_cache
 from ..constants import (
-    HOST_MOUNT_PATH,
     HOST_PROC_PATH,
     HOST_ROOT,
+    HOST_STORE,
+    NODE_ROOT,
     NRI_BIND_FARM,
     NRI_CONTAINERS,
     NRI_PLUGIN_IDX,
@@ -81,7 +82,7 @@ from .zmq import ZeroMQServer
 #
 # 3. Inject createRuntime OCI hook
 #    - Creates a hook that will fire during container init, before exec
-#    - Executes: chroot ${HOST_MOUNT_PATH} wait (nri-wait binary from nixkube dependencies)
+#    - Executes: chroot ${NODE_ROOT} wait (nri-wait binary from nixkube dependencies)
 #    - Hook will report container PID+bundle via ZeroMQ REQ/REP sockets
 #    - Uses OCI hooks (not NRI request handlers) because they lack forced low timeouts
 #    - Uses pkgsStatic.chroot to create a comfortable isolated execution environment
@@ -350,7 +351,7 @@ class NriPlugin(NriPluginBase):
                         )
                     tree = NRI_CONTAINERS / container_id / "nix"
                     await prepare_waiter(tree, NRI_VM_BUSYBOX)
-                    source = host_source(tree, HOST_MOUNT_PATH)
+                    source = host_source(tree, NODE_ROOT)
                     adjust.mounts.append(
                         nri_pb2.Mount(
                             destination="/nix",
@@ -374,14 +375,14 @@ class NriPlugin(NriPluginBase):
                     assert coreutils_container is not None, (
                         "coreutils not found on PATH"
                     )
-                    coreutils_host = HOST_MOUNT_PATH / Path(
-                        coreutils_container
-                    ).relative_to("/")
+                    coreutils_host = NODE_ROOT / Path(coreutils_container).relative_to(
+                        "/"
+                    )
                     hook = nri_pb2.Hook(
                         path=str(coreutils_host),
                         args=[
                             "chroot",  # somehow this works in OCI hooks but not --coreutils-prog=chroot....
-                            str(HOST_MOUNT_PATH),
+                            str(NODE_ROOT),
                             self.nri_wait_bin,
                         ],
                         env=[
@@ -643,8 +644,14 @@ class NriPlugin(NriPluginBase):
 
         # A farm binds the closure in the mount worker and leaves nothing on
         # disk; the hardlink path fills the volume here instead. Issue #65.
+        # A host-store node has only the farm: a hardlink out of the host's
+        # store fails with EXDEV. Issue #25.
         prepared = await prepare_volume(
-            volume_path, store_paths, None, bind_farm=NRI_BIND_FARM
+            volume_path,
+            store_paths,
+            None,
+            bind_farm=NRI_BIND_FARM or HOST_STORE,
+            allow_hardlinks=not HOST_STORE,
         )
         # `prepared.bind_farm`, not NRI_BIND_FARM: the volume may have fallen
         # back to a hardlink tree, and then there is nothing to bind.

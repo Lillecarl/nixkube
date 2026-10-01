@@ -99,6 +99,7 @@ async def prepare_volume(
     package_paths: set[Path],
     primary_package: Path | None,
     bind_farm: bool = False,
+    allow_hardlinks: bool = True,
 ) -> PreparedVolume:
     """Prepare a volume root, and answer the closure and the layout it got.
 
@@ -132,6 +133,15 @@ async def prepare_volume(
     # Asked before anything is prepared, because the fallback changes what
     # preparing means.
     if bind_farm and not affordable(len(store_paths)):
+        if not allow_hardlinks:
+            # A host-store node: a hardlink out of the host's store fails
+            # with EXDEV, so there is no tree to fall back to. Issue #25.
+            raise MountError(
+                f"{len(store_paths)} bind mounts would not leave headroom under"
+                " fs.mount-max, and this node shares its host's store, so it has"
+                " no hardlink tree to fall back to",
+                logs="",
+            )
         logger.error(
             "farm_fell_back_to_hardlinks",
             volume_root=str(volume_root),
