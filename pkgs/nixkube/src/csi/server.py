@@ -313,7 +313,13 @@ class NodeServicer(csi_grpc.NodeBase):
                 )
 
             try:
-                if await composefs.available():
+                shown = composefs.presentation(
+                    available=await composefs.available(),
+                    user_namespace=pod.raw.get("spec", {}).get("hostUsers") is False,
+                    host_store=HOST_STORE,
+                )
+                log.debug("volume_presentation", presentation=str(shown))
+                if shown is composefs.Presentation.COMPOSEFS:
                     image = await composefs.build_image(
                         package_paths,
                         primary_package,
@@ -328,13 +334,13 @@ class NodeServicer(csi_grpc.NodeBase):
                     await composefs.mount(
                         image, Path(request.target_path), request.readonly, volume_root
                     )
-                elif HOST_STORE:
-                    # A hardlink out of the host's store fails with EXDEV: its
-                    # /nix/store is a mount of its own. Issue #25.
+                elif shown is composefs.Presentation.REFUSED:
                     raise MountError(
-                        "this node shares its host's store, where a volume can only"
-                        " be a composefs mount, and this kernel failed the composefs"
-                        " probe (see nixkube_composefs_available and the probe's log)",
+                        "this node shares its host's store, where a volume can only be"
+                        " a composefs mount, and this pod cannot have one: either it"
+                        " sets hostUsers: false, and the kernel cannot idmap an overlay,"
+                        " or this kernel failed the composefs probe (see"
+                        " nixkube_composefs_available). Issues #25 and #68.",
                         logs="",
                     )
                 else:

@@ -5,7 +5,14 @@ from pathlib import Path
 import pytest
 
 from src.csi import cleanup
-from src.csi.composefs import Tools, expression, overlay_options, probe_root_is_exact
+from src.csi.composefs import (
+    Presentation,
+    Tools,
+    expression,
+    overlay_options,
+    presentation,
+    probe_root_is_exact,
+)
 
 TOOLS = Tools(
     nixkube=Path("/nix/store/aaa-nixkube-wrapped"),
@@ -100,3 +107,24 @@ def test_the_sweep_keeps_a_composefs_volume_whose_target_is_mounted(csi_dirs):
 
 def test_target_is_mounted_without_a_target_file_is_no(tmp_path: Path):
     assert cleanup.target_is_mounted(tmp_path) is False
+
+
+@pytest.mark.parametrize(
+    ("available", "user_namespace", "host_store", "shown"),
+    [
+        (True, False, False, Presentation.COMPOSEFS),
+        (True, False, True, Presentation.COMPOSEFS),
+        # hostUsers: false: the runtime idmaps the volume, and an overlay
+        # cannot be idmapped.
+        (True, True, False, Presentation.HARDLINKS),
+        (True, True, True, Presentation.REFUSED),
+        # A kernel that failed the probe.
+        (False, False, False, Presentation.HARDLINKS),
+        (False, False, True, Presentation.REFUSED),
+    ],
+)
+def test_presentation(available, user_namespace, host_store, shown):
+    chosen = presentation(
+        available=available, user_namespace=user_namespace, host_store=host_store
+    )
+    assert chosen is shown

@@ -32,6 +32,7 @@ import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 import anyio
@@ -221,6 +222,32 @@ async def mount(image: Path, target: Path, readonly: bool, volume_root: Path) ->
             f"composefs mount at {target} failed: {error}",
             logs=stderr.decode(errors="replace"),
         ) from error
+
+
+class Presentation(StrEnum):
+    COMPOSEFS = "composefs"
+    HARDLINKS = "hardlinks"
+    REFUSED = "refused"
+
+
+def presentation(
+    *, available: bool, user_namespace: bool, host_store: bool
+) -> Presentation:
+    """How to present one pod's volume.
+
+    A pod with `hostUsers: false` gets an idmapped mount of every volume,
+    and the kernel refuses MOUNT_ATTR_IDMAP on an overlay: measured on 7.2,
+    CRI-O's runc failed "failed to set MOUNT_ATTR_IDMAP ... invalid
+    argument". So such a pod takes the hardlink tree. A node that shares
+    its host's store has no hardlink tree -- a hardlink out of it fails with
+    EXDEV -- so there it is refused, as is any volume on a kernel that
+    failed the probe.
+    """
+    if available and not user_namespace:
+        return Presentation.COMPOSEFS
+    if host_store:
+        return Presentation.REFUSED
+    return Presentation.HARDLINKS
 
 
 # The probe's image: one file, backed by an object whose name differs, so a
