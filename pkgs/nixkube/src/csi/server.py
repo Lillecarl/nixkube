@@ -23,11 +23,12 @@ from ..constants import (
     CSI_GCROOTS,
     CSI_SOCKET_PATH,
     CSI_VOLUMES,
+    HOST_STORE,
     KUBE_NODE_NAME,
     KUBE_POD_NAME,
     NAMESPACE,
 )
-from ..errors import CSIError
+from ..errors import CSIError, MountError
 from ..events import report_event
 from ..metrics import (
     VOLUME_MOUNTS,
@@ -48,7 +49,8 @@ from ..volume import (
     prepare_volume,
     unmount,
 )
-from .cleanup import cleanup_stale_entries, collect_active_volume_handles
+from . import composefs
+from .cleanup import TARGET_FILE, cleanup_stale_entries, collect_active_volume_handles
 from .identity import IdentityServicer
 
 _NIXKUBE_DRIVERS = {"nixkube", "nix.csi.store"}
@@ -311,16 +313,41 @@ class NodeServicer(csi_grpc.NodeBase):
                 )
 
             try:
-                await prepare_volume(
-                    volume_root,
-                    package_paths,
-                    primary_package,
-                )
-                await mount_volume(
-                    volume_root,
-                    Path(request.target_path),
-                    request.readonly,
-                )
+                if await composefs.available():
+                    image = await composefs.build_image(
+                        package_paths,
+                        primary_package,
+                        gc_root / "composefs",
+                        extra_args,
+                    )
+                    volume_root.mkdir(parents=True, exist_ok=True)
+                    # The sweep cannot ask whether the volume root is a mount
+                    # source: a composefs mount's source is the image. It asks
+                    # whether this target is still mounted instead.
+                    (volume_root / TARGET_FILE).write_text(request.target_path)
+                    await composefs.mount(
+                        image, Path(request.target_path), request.readonly, volume_root
+                    )
+                elif HOST_STORE:
+                    # A hardlink out of the host's store fails with EXDEV: its
+                    # /nix/store is a mount of its own. Issue #25.
+                    raise MountError(
+                        "this node shares its host's store, where a volume can only"
+                        " be a composefs mount, and this kernel failed the composefs"
+                        " probe (see nixkube_composefs_available and the probe's log)",
+                        logs="",
+                    )
+                else:
+                    await prepare_volume(
+                        volume_root,
+                        package_paths,
+                        primary_package,
+                    )
+                    await mount_volume(
+                        volume_root,
+                        Path(request.target_path),
+                        request.readonly,
+                    )
                 # Report successful mount with closure size and elapsed time
                 elapsed = time.perf_counter() - start_time
                 VOLUME_MOUNTS.labels(result="ok").inc()

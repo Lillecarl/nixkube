@@ -1125,6 +1125,12 @@ rec {
       # Whether composefs can present a CSI volume: one mount, real files,
       # nothing linked out of the store. A measurement. Issues #68 and #25.
       composefs = fromNixosTest (import ./tests/nixos/composefs.nix { inherit pkgs lib; });
+
+      # A CSI volume as one composefs mount, through nixkube's own code, with
+      # the node building CI's derivation. Issues #68 and #25.
+      csi-composefs = fromNixosTest (
+        import ./tests/nixos/csi-composefs.nix { inherit pkgs lib composefsImage; }
+      );
     };
 
   treefmt = (import sources.treefmt-nix).mkWrapper pkgs {

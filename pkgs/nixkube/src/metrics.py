@@ -173,6 +173,14 @@ HARDLINK_PATHS = Counter(
     "Store paths considered for linking, whether or not the volume already had them",
 )
 
+# --- CSI presentation ---
+
+COMPOSEFS_AVAILABLE = Gauge(
+    "nixkube_composefs_available",
+    "1 when this node presents CSI volumes as composefs mounts, 0 when as"
+    " hardlink trees: the kernel failed the probe, or CSI_COMPOSEFS is false",
+)
+
 # --- Host store ---
 
 OLD_STORE_BYTES = Gauge(
@@ -189,7 +197,10 @@ OLD_STORE_BYTES = Gauge(
 NIX_BUILDS = Counter(
     "nixkube_nix_builds_total",
     "Nix builds this daemon has run",
-    ["kind", "result"],  # kind: store_path, flake_ref, nix_expr, packages
+    [
+        "kind",
+        "result",
+    ],  # kind: store_path, flake_ref, nix_expr, packages, composefs_image
 )
 
 NIX_BUILD_DURATION = Histogram(

@@ -126,6 +126,11 @@ NRI_BIND_FARM = os.environ.get("NRI_BIND_FARM", "true") == "true"
 # collection to the host.
 HOST_STORE = os.environ.get("HOST_STORE", "false") == "true"
 
+# Present a CSI volume as one composefs mount where the kernel can, and as a
+# hardlink tree where it cannot. Issue #68. False keeps the hardlink tree
+# everywhere, which a test cell uses so that path keeps running.
+CSI_COMPOSEFS = os.environ.get("CSI_COMPOSEFS", "true") == "true"
+
 # RuntimeClass handlers that run each pod in a VM, such as Kata. The pod's
 # /nix reaches the VM as a bind mount the runtime shares over virtio-fs, and
 # not as a mount into the container's namespace. See `nri/vm.py`.
