@@ -1324,7 +1324,35 @@ rec {
     {
       crio = onCrio ciTest;
       crio-cache = onCrio ciTestCache;
-    };
+    }
+    //
+      lib.mapAttrs
+        (
+          name:
+          { foreignHost, subnet }:
+          ciTest.override {
+            name = "nixkube-ci-${name}";
+            instance = kubenixCIGuest (ciModules.two ++ [ { nixkube.hostStore.enable = true; } ]);
+            inherit foreignHost;
+            lan = {
+              network = "nixkube-ci-${name}";
+              address = "10.${toString subnet}.0.1/24";
+            };
+          }
+        )
+        {
+          # `ciTest` with host store on: the NixOS guest runs nixkube from
+          # its own /nix. Issue #25.
+          hoststore = {
+            foreignHost = false;
+            subnet = 107;
+          };
+          # And on a node that is not NixOS, which keeps the separate store.
+          hoststore-foreign = {
+            foreignHost = true;
+            subnet = 108;
+          };
+        };
 
   ci-debug = pkgs.callPackage ./pkgs/ci-debug { };
 

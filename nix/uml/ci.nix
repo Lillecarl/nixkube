@@ -47,6 +47,9 @@
   # The guest's own segment.  Two of these tests can run at once, so each
   # needs a network of its own -- see ./default.nix.
   lan,
+  # Remove /etc/NIXOS before the deploy, so that a host-store deployment
+  # takes this NixOS guest for any other distribution.
+  foreignHost ? false,
 }:
 let
   vivarium = import (sources.vivarium + "/lib.nix") { inherit pkgs; };
@@ -55,6 +58,7 @@ let
   # difference between the two kind jobs.  Asked of the instance rather
   # than passed in, so the two cannot disagree.
   pynixd = instance.config.nixkube.pynixd.enable;
+  hostStore = instance.config.nixkube.hostStore.enable;
 in
 vivarium.mkTest {
   inherit name;
@@ -174,6 +178,8 @@ vivarium.mkTest {
       assertedJobs
       rejectedJobs
       pynixd
+      hostStore
+      foreignHost
       ;
   };
 }

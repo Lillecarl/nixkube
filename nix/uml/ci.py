@@ -100,6 +100,28 @@ def run(script: str, kubeconfig: str, *args: str) -> None:
         )
 
 
+async def check_store_split(cp: Machine, nixos: bool) -> None:
+    """With `nixkube.hostStore.enable`, the node's OS picks its DaemonSet."""
+    node = await get_json(cp, "get node cp")
+    label = node["metadata"].get("labels", {}).get("nixkube/host")
+    assert label == ("nixos" if nixos else None), (
+        f"the node's nixkube/host label is {label!r} on a"
+        f" {'NixOS' if nixos else 'non-NixOS'} node"
+    )
+    serving = "nix-node-host" if nixos else "nix-node-separate"
+    idle = "nix-node-separate" if nixos else "nix-node-host"
+    for name, want in ((serving, 1), (idle, 0)):
+        status = (await get_json(cp, f"get daemonset {name} --namespace nixkube"))[
+            "status"
+        ]
+        ready = status.get("numberReady", 0)
+        scheduled = status.get("desiredNumberScheduled", 0)
+        assert (ready, scheduled) == (want, want), (
+            f"{name} has {ready} ready of {scheduled} scheduled, not {want}"
+        )
+    print(f"[test] {serving} serves the node, {idle} schedules nothing")
+
+
 async def test(vms: Machines) -> None:
     settings = vms.settings
     cp = await bring_up(vms, nix_images=False, addons=(KUBE_PROXY, KUBE_DNS))
@@ -109,6 +131,10 @@ async def test(vms: Machines) -> None:
         write(kubeconfig, await host_kubeconfig(cp))
         print(f"[test] the host reaches the API server on {cp.reachable(6443)[0]}")
         print(await kubectl(cp, "get nodes"))
+
+        if settings["foreignHost"]:
+            await cp.succeed("rm /etc/NIXOS")
+            print("[test] /etc/NIXOS removed: the node is not NixOS to nixkube")
 
         run(settings["deploy"], kubeconfig, "--yes")
         print("[test] nixkube deployed through kubenixDeploy")
@@ -123,6 +149,9 @@ async def test(vms: Machines) -> None:
 
         await until("the node DaemonSet", rolled_out, 300, cp)
         print("[test] the node DaemonSet rolled out")
+
+        if settings["hostStore"]:
+            await check_store_split(cp, nixos=not settings["foreignHost"])
 
         if settings["pynixd"]:
             # The `Wait for nix-csi cache pod` step of `test-kind-cache`.
