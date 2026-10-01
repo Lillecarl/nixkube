@@ -12,7 +12,10 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
+    "sphinx.ext.graphviz",
 ]
+
+graphviz_output_format = "svg"
 
 myst_enable_extensions = [
     "colon_fence",

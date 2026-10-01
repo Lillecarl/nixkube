@@ -1,0 +1,60 @@
+// Rendered by `python -m src.presentation`. Do not edit.
+digraph presentation {
+  fontname=sans;
+  node [fontname=sans];
+  edge [fontname=sans];
+  subgraph cluster_csi {
+    label="CSI volume";
+    fontname=sans;
+    csi_q0 [label="composefs\noption on?", shape=diamond];
+    csi_q1 [label="kernel passes the\ncomposefs probe?", shape=diamond];
+    csi_q2 [label="hostUsers: false?", shape=diamond];
+    csi_q3 [label="host-store\nnode?", shape=diamond];
+    csi_refused [label="refused", shape=box, style="rounded,filled", fillcolor=lightpink];
+    csi_q3 -> csi_refused [label="yes"];
+    csi_hardlinks [label="hardlinks", shape=box, style="rounded,filled", fillcolor=khaki];
+    csi_q3 -> csi_hardlinks [label="no"];
+    csi_q2 -> csi_q3 [label="yes"];
+    csi_composefs [label="composefs", shape=box, style="rounded,filled", fillcolor=palegreen];
+    csi_q2 -> csi_composefs [label="no"];
+    csi_q1 -> csi_q2 [label="yes"];
+    csi_q1 -> csi_q3 [label="no"];
+    csi_q0 -> csi_q1 [label="yes"];
+    csi_q0 -> csi_q3 [label="no"];
+  }
+  subgraph cluster_nri {
+    label="NRI /nix";
+    fontname=sans;
+    nri_q0 [label="VM runtime\n(Kata)?", shape=diamond];
+    nri_q1 [label="host-store\nnode?", shape=diamond];
+    nri_refused [label="refused", shape=box, style="rounded,filled", fillcolor=lightpink];
+    nri_q1 -> nri_refused [label="yes"];
+    nri_hardlinks [label="hardlinks", shape=box, style="rounded,filled", fillcolor=khaki];
+    nri_q1 -> nri_hardlinks [label="no"];
+    nri_q0 -> nri_q1 [label="yes"];
+    nri_q4 [label="composefs\noption on?", shape=diamond];
+    nri_q5 [label="kernel passes the\ncomposefs probe?", shape=diamond];
+    nri_composefs [label="composefs", shape=box, style="rounded,filled", fillcolor=palegreen];
+    nri_q5 -> nri_composefs [label="yes"];
+    nri_q7 [label="NRI_BIND_FARM?", shape=diamond];
+    nri_q8 [label="host-store\nnode?", shape=diamond];
+    nri_q9 [label="farm fits under\nfs.mount-max?", shape=diamond];
+    nri_farm [label="farm", shape=box, style="rounded,filled", fillcolor=lightblue];
+    nri_q9 -> nri_farm [label="yes"];
+    nri_q9 -> nri_refused [label="no"];
+    nri_q8 -> nri_q9 [label="yes"];
+    nri_q11 [label="farm fits under\nfs.mount-max?", shape=diamond];
+    nri_q11 -> nri_farm [label="yes"];
+    nri_q11 -> nri_hardlinks [label="no"];
+    nri_q8 -> nri_q11 [label="no"];
+    nri_q7 -> nri_q8 [label="yes"];
+    nri_q12 [label="host-store\nnode?", shape=diamond];
+    nri_q12 -> nri_q9 [label="yes"];
+    nri_q12 -> nri_hardlinks [label="no"];
+    nri_q7 -> nri_q12 [label="no"];
+    nri_q5 -> nri_q7 [label="no"];
+    nri_q4 -> nri_q5 [label="yes"];
+    nri_q4 -> nri_q7 [label="no"];
+    nri_q0 -> nri_q4 [label="no"];
+  }
+}

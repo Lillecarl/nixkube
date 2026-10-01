@@ -7,6 +7,7 @@
   sphinx,
   myst-parser,
   furo,
+  graphviz,
 }:
 let
   pythonEnv = python.withPackages (_: [
@@ -21,7 +22,10 @@ stdenvNoCC.mkDerivation {
 
   src = lib.cleanSource ../.;
 
-  nativeBuildInputs = [ pythonEnv ];
+  nativeBuildInputs = [
+    pythonEnv
+    graphviz
+  ];
 
   buildPhase = ''
     runHook preBuild

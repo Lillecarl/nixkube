@@ -1145,7 +1145,9 @@ rec {
     programs.yamlfmt.enable = true;
   };
 
-  nixkube-docs = pkgs.python3Packages.callPackage ./nix/docs.nix { };
+  # `graphviz` by name, or python3Packages' library of that name arrives
+  # and Sphinx finds no `dot`.
+  nixkube-docs = pkgs.python3Packages.callPackage ./nix/docs.nix { inherit (pkgs) graphviz; };
 
   nixImage = pkgs.callPackage ./niximage.nix { inherit (sources) dinix; };
   scratchImage = pkgs.callPackage ./scratchimage.nix { };
@@ -1440,6 +1442,7 @@ rec {
       pynixdProbesSurviveAPush
       sourcesAreLocked
       ciWorkflowCheck
+      presentationChartIsCurrent
       docOptionsCheck
       builderPresentsPinnedHostKey
       noPrivateKeysInManifest
@@ -1580,6 +1583,30 @@ rec {
         )
         + "touch $out\n"
       );
+
+  # `docs/presentation.dot`, drawn from the functions CSI and NRI decide
+  # with. src/presentation.py imports nothing, so two files are enough.
+  presentationChart = pkgs.runCommand "presentation.dot" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+    mkdir src
+    cp ${./pkgs/nixkube/src/__init__.py} src/__init__.py
+    cp ${./pkgs/nixkube/src/presentation.py} src/presentation.py
+    python3 -m src.presentation > $out
+  '';
+
+  presentationChartIsCurrent = pkgs.runCommand "presentation-chart-is-current" { } ''
+    if ! diff --unified ${./docs/presentation.dot} ${presentationChart}; then
+      echo >&2
+      echo "docs/presentation.dot and src/presentation.py disagree." >&2
+      echo "Run: nix run --file . presentation-chart-update" >&2
+      exit 1
+    fi
+    touch $out
+  '';
+
+  presentation-chart-update = pkgs.writeScriptBin "presentation-chart-update" ''
+    #! ${pkgs.runtimeShell}
+    cp --no-preserve=mode ${presentationChart} docs/presentation.dot
+  '';
 
   ci-workflow-update = pkgs.writeScriptBin "ci-workflow-update" ''
     #! ${pkgs.runtimeShell}

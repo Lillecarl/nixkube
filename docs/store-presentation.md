@@ -17,6 +17,20 @@ mount reads the file contents from `/nix/store`. The image is a Nix
 derivation (`nix/composefs.nix`), so a node can substitute an image that CI
 or pynixd built. A pod gets one mount.
 
+## Which one a pod gets
+
+```{graphviz} presentation.dot
+```
+
+`src/presentation.py` renders this chart from the functions that CSI and
+NRI call, and the `presentationChartIsCurrent` check fails when the
+committed chart differs. After you change a decision, run
+`nix run --file . presentation-chart-update`.
+
+The chart covers the decisions, not the call sites. The test cells check
+the call sites: each one asserts how its volumes and `/nix` mounts are
+presented.
+
 ## Comparison
 
 | | Bind farm | Hardlink tree | composefs |
@@ -27,8 +41,8 @@ or pynixd built. A pod gets one mount.
 | Kernel | `mount_setattr` (Linux 5.12) | Any | EROFS, and overlay data-only lower layers (Linux 6.5) |
 | Limits | `fs.mount-max` is 100,000 for each mount namespace | The tree must be on the same filesystem as the store | None found |
 | Host store on NixOS | Works | Fails: a link out of the host's store gives EXDEV | Works |
-| `hostUsers: false` | Works | Works | Fails for CSI: the runtime cannot idmap an overlay |
-| Kata and other VM runtimes | Fails: virtio-fs does not serve each bind | Works | Not tested |
+| `hostUsers: false` | Works | Works | CSI: fails, the runtime cannot idmap an overlay. NRI: works, nobody idmaps the mount |
+| Kata and other VM runtimes | Fails: virtio-fs does not serve each bind | Works | Not used |
 | `subPath` | Fails: kubelet's `subPath` bind does not include submounts | Works | Works |
 | Read-write | The gaps between the binds are writable, on the volume's disk | An overlay over the tree, upper directory on the volume's disk | The overlay's upper directory, on the volume's disk |
 | Cleanup | The mounts go with the pod | Delete the tree | Unmount; the image stays until GC collects it |
@@ -62,10 +76,16 @@ CSI does not use the bind farm, because it breaks `subPath`.
 ## NRI
 
 NRI puts `/nix` into a container after the runtime creates it, so no
-runtime idmaps it and `subPath` does not apply.
+runtime idmaps it and `subPath` does not apply. NRI uses the same image and
+the same kernel probe as CSI.
 
 1. A VM runtime (Kata): a hardlink tree, served through virtio-fs.
-2. A host-store node: the bind farm.
-3. Otherwise: the bind farm. `NRI_BIND_FARM=false` gives a hardlink tree.
+2. `nixkube.nri.composefs` is true and the kernel passes the probe:
+   composefs. This includes `hostUsers: false` pods and host-store nodes.
+3. A host-store node: the bind farm.
+4. Otherwise: the bind farm. `NRI_BIND_FARM=false` gives a hardlink tree.
 
-NRI on composefs is not implemented yet.
+The mount worker mounts the image and the overlay in a private mount
+namespace, and clones the overlay's `nix` directory into the container.
+The clone keeps the overlay, and the overlay keeps the image mount, after
+the worker exits.
