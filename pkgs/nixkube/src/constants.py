@@ -121,6 +121,11 @@ MOUNT_BUDGET_FALLBACK_RATIO: float = _parse_float_env(
 # storage disagrees can go back to hardlinks without a new image.
 NRI_BIND_FARM = os.environ.get("NRI_BIND_FARM", "true") == "true"
 
+# This node's /nix is the host's, with the host's nix-daemon on its socket.
+# Issue #25. nixkube then runs no nix-daemon of its own and leaves garbage
+# collection to the host.
+HOST_STORE = os.environ.get("HOST_STORE", "false") == "true"
+
 # RuntimeClass handlers that run each pod in a VM, such as Kata. The pod's
 # /nix reaches the VM as a bind mount the runtime shares over virtio-fs, and
 # not as a mount into the container's namespace. See `nri/vm.py`.

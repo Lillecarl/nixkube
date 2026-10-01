@@ -14,6 +14,7 @@ from .constants import (
     BUILDERS_ENABLED,
     ENABLE_COMPAT_DRIVER,
     HOST_MOUNT_PATH,
+    HOST_STORE,
     KUBE_NODE_NAME,
     METRICS_ADDR,
     METRICS_ENABLED,
@@ -143,6 +144,17 @@ def log_effective_app_config() -> None:
     )
 
 
+def store_loops(*, host_store: bool) -> frozenset[str]:
+    """The loops that own the store: none on a host-store node.
+
+    There the socket is the host's nix-daemon, and a second daemon would
+    take it. The sweep deletes every unrooted path older than an hour and
+    copies the whole store to the cache, which on the host's store is the
+    host's users' paths and the host's whole store. Issue #25.
+    """
+    return frozenset() if host_store else frozenset({"nix-daemon", "gc"})
+
+
 async def async_main():
     """Run one-shot setup, then supervise nix-daemon, GC, CSI, and NRI concurrently.
 
@@ -198,8 +210,12 @@ async def async_main():
     await run_setup()
 
     async with anyio.create_task_group() as tg:
-        tg.start_soon(supervise_nix_daemon, name="nix-daemon")
-        tg.start_soon(gc_loop, name="gc")
+        loops = store_loops(host_store=HOST_STORE)
+        logger.info("store_loops", host_store=HOST_STORE, loops=sorted(loops))
+        if "nix-daemon" in loops:
+            tg.start_soon(supervise_nix_daemon, name="nix-daemon")
+        if "gc" in loops:
+            tg.start_soon(gc_loop, name="gc")
         tg.start_soon(cache_probe_loop, name="cache-probe")
         # Not supervised. It has nothing to crash on, and a restart loop
         # around a sampler would report on itself.
