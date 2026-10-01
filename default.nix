@@ -1210,26 +1210,30 @@ rec {
       (cell "qemu" "containerd" true)
       (cell "qemu" "crio" true)
     ]
-    // {
+    // lib.genAttrs' [ "containerd" "crio" ] (
       # The node runs from the guest's own /nix, as on a NixOS host, with
       # the separate store before it to retire. Issue #25.
-      uml-containerd-hoststore = pkgs.callPackage ./nix/uml {
-        inherit sources umlImages;
-        manifest = kubenixInstance {
-          module.imports = [
-            ./kubenix/ci
-            ./nix/uml/manifest.nix
-            ./nix/uml/workloads.nix
-            { nixkube.hostStore.enable = true; }
-          ];
-        };
-        matrixCell = {
-          backend = "uml";
-          cri = "containerd";
-          kata = false;
-        };
-      };
-
+      cri:
+      lib.nameValuePair "uml-${cri}-hoststore" (
+        pkgs.callPackage ./nix/uml {
+          inherit sources umlImages;
+          manifest = kubenixInstance {
+            module.imports = [
+              ./kubenix/ci
+              ./nix/uml/manifest.nix
+              ./nix/uml/workloads.nix
+              { nixkube.hostStore.enable = true; }
+            ];
+          };
+          matrixCell = {
+            backend = "uml";
+            inherit cri;
+            kata = false;
+          };
+        }
+      )
+    )
+    // {
       # CSI volumes as hardlink trees, which every node whose kernel fails
       # the composefs probe still uses. Issue #68.
       uml-containerd-hardlinks = pkgs.callPackage ./nix/uml {
