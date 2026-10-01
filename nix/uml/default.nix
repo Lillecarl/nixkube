@@ -278,6 +278,7 @@ vivarium.mkTest (
     backend = if matrixCell != null then matrixCell.backend else config.resolved.backend.value;
     cri = if matrixCell != null then matrixCell.cri else config.resolved.cri.value;
     kata = if matrixCell != null then matrixCell.kata else config.resolved.kata.value == "1";
+    hostStore = manifest.config.nixkube.hostStore.enable;
   in
   {
     name =
@@ -387,12 +388,19 @@ vivarium.mkTest (
           tests = ./chaos;
           args = scenarioFilter config.resolved.scenarios.value;
         };
-        after = [ "workloads" ];
+        after = [ "workloads" ] ++ lib.optional hostStore "hoststore";
       };
       report = {
         script = ./phases/report.py;
         after = [ "host" ];
         always = true;
+      };
+    }
+    // lib.optionalAttrs hostStore {
+      # The node shares the guest's own /nix: a NixOS host. Issue #25.
+      hoststore = {
+        script = ./phases/hoststore.py;
+        after = [ "workloads" ];
       };
     };
 
@@ -432,6 +440,10 @@ vivarium.mkTest (
       # How the node presents a CSI volume, as the manifest asks: the
       # workloads phase checks every CSI mount against it.
       csiComposefs = manifest.config.nixkube.csi.composefs;
+      # Whether the node runs from the guest's own /nix, and so which
+      # DaemonSet serves it. Issue #25.
+      inherit hostStore;
+      nodeDaemonSet = if hostStore then "nix-node-host" else "nix-node";
       hostNext = "${hostNext { inherit backend cri kata; }}";
     };
   }

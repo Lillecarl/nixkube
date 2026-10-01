@@ -17,7 +17,6 @@ from vivarium_runner import Machine, MachineError
 from vivarium_runner.cluster import get_json, kubectl, until
 
 NAMESPACE = "nixkube"
-DAEMONSET = "nix-node"
 STATEFULSET = "pynixd"
 
 # What `appstarter/seed.py` adds to "store holds X" when the fetch failed and
@@ -110,7 +109,7 @@ async def deploy(cp: Machine, settings: dict) -> None:
     print(out, flush=True)
 
 
-async def wait_for_driver(cp: Machine) -> None:
+async def wait_for_driver(cp: Machine, settings: dict) -> None:
     """The DaemonSet's pod reaches Ready, and kubelet knows the driver.
 
     Reported together because either alone is misleading: a Ready pod whose
@@ -119,7 +118,8 @@ async def wait_for_driver(cp: Machine) -> None:
     """
 
     async def ready():
-        data = await get_json(cp, f"get daemonset {DAEMONSET} --namespace {NAMESPACE}")
+        daemonset = settings["nodeDaemonSet"]
+        data = await get_json(cp, f"get daemonset {daemonset} --namespace {NAMESPACE}")
         status = data.get("status", {})
         want = status.get("desiredNumberScheduled", 0)
         got = status.get("numberReady", 0)
@@ -498,7 +498,8 @@ def state_dirs(settings: dict) -> dict[str, str]:
     inside the node container -- and the container's /nix is the host's
     `<hostMountPath>/nix`. So on the node they sit under that.
     """
-    root = settings["hostMountPath"].rstrip("/")
+    # A host-store node's /nix is the host's own.
+    root = "" if settings["hostStore"] else settings["hostMountPath"].rstrip("/")
     return {
         "volumes": f"{root}/nix/var/nix-csi/volumes",
         "containers": f"{root}/nix/var/nix-csi/containers",
@@ -693,7 +694,7 @@ async def break_and_recover(cp: Machine, settings: dict, name: str) -> None:
     action, resident = next((a, r) for n, a, r in SCENARIOS if n == name)
     await action(cp, settings)
     await wait_for_apiserver(cp)
-    await wait_for_driver(cp)
+    await wait_for_driver(cp, settings)
     await probe(cp, settings, name)
     if resident is REPLACED:
         # `--wait` by default, so the old pod is gone before

@@ -6,5 +6,5 @@ from vivarium_runner import Machines
 
 async def test(vms: Machines) -> None:
     await deploy(vms.cp, vms.settings)
-    await wait_for_driver(vms.cp)
+    await wait_for_driver(vms.cp, vms.settings)
     await wait_for_pynixd(vms.cp)
