@@ -1,6 +1,15 @@
 # SPDX-License-Identifier: MIT
 
-self: pkgs: {
+self: pkgs:
+let
+  # The caller's sources, when it names them, and this repository's own lock
+  # otherwise. A caller that imports this repository from the umbrella passes
+  # the umbrella's set; reading `nix/sources.nix` here instead resolved the
+  # umbrella revision this commit was written against, so bumping the caller's
+  # umbrella never moved pynixd (#79).
+  sources = pkgs.nixkubeSources or (import ../nix/sources.nix);
+in
+{
   # Overlay lib
   lib = pkgs.lib.extend (import ../lib);
 
@@ -20,12 +29,12 @@ self: pkgs: {
   # is no cycle: the set reads those two and none of the applications below.
   pythonSet = import ../nix/python-set.nix {
     inherit (self) lib;
+    inherit sources;
     pkgs = self;
-    sources = import ../nix/sources.nix;
   };
 
   mkApp = self.callPackage ../nix/mk-app.nix {
-    inherit (import (import ../nix/sources.nix).nanopynix { inherit pkgs; }) mkApp;
+    inherit (import sources.nanopynix { inherit pkgs; }) mkApp;
   };
 
   nixkube = self.mkApp {
@@ -136,23 +145,11 @@ self: pkgs: {
   # ./csi-sidecars.
   csi-sidecars = pkgs.callPackage ./csi-sidecars { };
 
-  # From the umbrella's lock, like every other source.
-  #
-  # This resolved itself, and both of its arms were wrong. The sibling
-  # working copy `../../pynixd` was read as a directory, which is a different
-  # input from the tree CI fetches, so the two built different packages from
-  # the same commit. The fallback named branch `develop` with no revision, so
-  # CI built whatever that branch pointed at when the job ran -- two runs of
-  # one nixkube commit could disagree, and nothing recorded which pynixd went
-  # in.
-  #
-  # Downstream that is a different `cacheEnv`, a manifest naming it, and a
-  # node asking its substituters for a store path nobody built.
-  #
-  # `nix/sources.nix` answers both. It reads the revision from the lock and
-  # fetches it, in CI and in a working copy alike. The old comment here asked
-  # for exactly this.
-  pynixd = (import (import ../nix/sources.nix).pynixd { inherit pkgs; }).library;
+  # From the umbrella's lock, like every other source, and never a sibling
+  # directory or a branch name: either one builds a pynixd that no lock
+  # records, so CI and a working copy ship different `cacheEnv`s and a node
+  # asks its substituters for a path nobody built.
+  pynixd = (import sources.pynixd { inherit pkgs; }).library;
   pynixd-nixkube-fake-nss = pkgs.callPackage ./pynixd-nixkube/fake-nss.nix { };
 
   pynixd-nixkube = self.mkApp {

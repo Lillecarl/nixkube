@@ -12,7 +12,10 @@ rec {
     config = {
       allowUnfree = true;
     };
-    overlays = [ (import ./pkgs) ];
+    overlays = [
+      (final: prev: { nixkubeSources = sources; })
+      (import ./pkgs)
+    ];
   };
   inherit sources;
   lib = pkgs.lib;
@@ -777,6 +780,25 @@ rec {
       ));
     pkgs.runCommand "builder-settings-override" { } "echo ok > $out";
 
+  # A caller's `sources` decide which pynixd and dinix nixkube uses, through
+  # the overlay and through the kubenix modules alike. Both read this
+  # repository's own lock instead, so a caller that bumped its umbrella still
+  # ran a pynixd 124 commits behind (#79).
+  callerSourcesReachPynixd =
+    let
+      fixture = ./nix/fixtures/caller-pynixd;
+      marked = sources // {
+        pynixd = fixture;
+        dinix = fixture;
+      };
+      viaOverlay = (import ./. { sources = marked; }).pkgs.pynixd;
+      viaModule =
+        (kubenixInstance { module._module.args.sources = lib.mkForce marked; }).config.nixkube.dinix;
+    in
+    assert viaOverlay == "caller-pynixd";
+    assert viaModule == fixture;
+    pkgs.runCommand "caller-sources-reach-pynixd" { } "echo ok > $out";
+
   # Every source is a fetched tree, not a directory on somebody's disk.
   #
   # A source read as a directory is a different input from the tree CI
@@ -1149,7 +1171,10 @@ rec {
   # and Sphinx finds no `dot`.
   nixkube-docs = pkgs.python3Packages.callPackage ./nix/docs.nix { inherit (pkgs) graphviz; };
 
-  nixImage = pkgs.callPackage ./niximage.nix { inherit (sources) dinix; };
+  nixImage = pkgs.callPackage ./niximage.nix {
+    inherit sources;
+    inherit (sources) dinix;
+  };
   scratchImage = pkgs.callPackage ./scratchimage.nix { };
 
   # Two spikes on how the image is layered. Nothing in CI reads these, and
@@ -1431,6 +1456,7 @@ rec {
       assertionsNullShape
       assertionsNeighbourScope
       builderSettingsOverride
+      callerSourcesReachPynixd
       metricsPodMonitorShape
       nodeDriverReadiness
       appstarterInitIsExemptFromInjection

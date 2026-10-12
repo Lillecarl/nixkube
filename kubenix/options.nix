@@ -4,6 +4,9 @@
   config,
   curPkgs,
   lib,
+  # The caller's `_module.args.sources`; ./default.nix falls back to this
+  # repository's own lock (#79).
+  sources,
   ...
 }:
 let
@@ -13,10 +16,6 @@ let
     "nixkube.nix_daemon".level = "WARNING";
     "httpx".level = "WARNING";
   };
-  # A module reached through easykubenix's option merge, which does not carry
-  # this repository's arguments, so it asks for the sources itself. The
-  # umbrella answers the same way it does for ../default.nix.
-  sources = import ../nix/sources.nix;
 in
 {
   imports = [
@@ -492,6 +491,7 @@ in
         import cfg.pkgs {
           inherit system;
           overlays = [
+            (final: prev: { nixkubeSources = sources; })
             (import ../pkgs)
             (
               final: prev:

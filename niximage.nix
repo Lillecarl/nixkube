@@ -21,6 +21,7 @@ rec {
       sysPkgs = import pkgs.path {
         inherit system;
         overlays = [
+          (final: prev: { nixkubeSources = sources; })
           (import ./pkgs)
         ];
       };
