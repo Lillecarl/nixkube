@@ -4,10 +4,10 @@
 # code, so the suite tests the protocol rather than a Python model of it.
 {
   lib,
-  buildGo125Module,
+  buildGoModule,
 }:
 
-buildGo125Module {
+buildGoModule {
   pname = "ttrpc-test-server";
   version = "0.1.0";
 
