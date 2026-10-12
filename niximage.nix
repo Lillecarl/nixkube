@@ -124,8 +124,13 @@ rec {
       # the closure of `nixkube` and `pynixd-nixkube`, which name them, so
       # the graph refers to them and the build failed. Only the env is left
       # out now; the three stay in the store and the database (#80).
+      #
+      # `symlinkJoin`, not `buildEnv`: buildEnv turns a directory only one
+      # path provides into one symlink, so `/etc` pointed into the
+      # `ca-certificates` store path, appstarter wrote `/etc/passwd` into
+      # it, and seeding from the image failed on a hash mismatch.
       copyToRoot = [
-        (sysPkgs.buildEnv {
+        (sysPkgs.symlinkJoin {
           name = "nix-image-root";
           paths = [
             sysPkgs.dockerTools.binSh
