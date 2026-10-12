@@ -128,8 +128,28 @@ in
         };
       };
     };
+    adminKeys = lib.mkOption {
+      description = ''
+        SSH public keys that connect to the cache as trusted clients, what
+        Nix's `trusted-users` grants. A deploy that pushes paths it built
+        itself needs one: an untrusted client may only add signed paths.
+        Keys in `authorizedKeys` stay untrusted.
+      '';
+      type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
+      apply = lib.map (v: lib.trim (if lib.typeOf v == "path" then builtins.readFile v else v));
+      default = [ ];
+    };
+    trustClusterKey = lib.mkOption {
+      description = ''
+        Trust the cluster's own SSH key on the cache, as `adminKeys` does.
+        Every node, the controller and the builders hold that key, so this
+        trusts all of them.
+      '';
+      type = lib.types.bool;
+      default = false;
+    };
     authorizedKeys = lib.mkOption {
-      description = "SSH public keys that can connect to cache. Used by nodes to push built store paths to the cache.";
+      description = "SSH public keys that can connect to cache, untrusted. Used by nodes to push built store paths to the cache.";
       type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
       apply = lib.map (v: lib.trim (if lib.typeOf v == "path" then builtins.readFile v else v));
       default = [ ];
@@ -330,6 +350,17 @@ in
         # IPv4-only bind fails every one of them on a single-stack IPv6
         # cluster. Stating it here fixes a running pod on a render alone.
         http_host = "";
+        # pynixd admits only the keys these files list, and reads them at
+        # each authentication, so a ConfigMap update applies with no restart.
+        # Lillecarl/pynixd#94.
+        ssh_user_keys = [
+          "/etc/ssh/authorized_keys"
+        ]
+        ++ lib.optional (!cfg.pynixd.trustClusterKey) "/etc/ssh-dynauth/authorized_keys";
+        ssh_admin_keys = [
+          "/etc/ssh/admin_keys"
+        ]
+        ++ lib.optional cfg.pynixd.trustClusterKey "/etc/ssh-dynauth/authorized_keys";
       })
       config.nixkube.pynixd.settings
     ];
@@ -349,6 +380,11 @@ in
         # the probes, and a builder carries the same ones.
         ssh_host = "";
         http_host = "";
+        # The controller dials a builder with the cluster key, and the builder
+        # trusts it: an untrusted sender's input-addressed `BuildDerivation`
+        # is refused (`daemon.cc:634`), so delegation needs it. The secret
+        # holds the public half beside the private key.
+        ssh_admin_keys = [ "/etc/ssh-key/id_ed25519.pub" ];
       })
       config.nixkube.pynixd.settings
     ];

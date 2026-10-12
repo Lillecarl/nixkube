@@ -17,6 +17,8 @@ in
         data = {
           # Keys that can connect to us
           "authorized_keys" = lib.concatLines cfg.pynixd.authorizedKeys;
+          # Keys that connect to us as trusted clients
+          "admin_keys" = lib.concatLines cfg.pynixd.adminKeys;
           # Keys that we can connect to
           "ssh_known_hosts" = lib.concatLines (lib.mapAttrsToList (n: v: "${n} ${v}") cfg.knownHosts);
           # Client configuration

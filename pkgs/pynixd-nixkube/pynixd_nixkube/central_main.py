@@ -13,7 +13,6 @@ from pynixd.store import Store
 from .builder_manager import BuilderManager
 from .config import NixkubeCentralSettings
 from .setup import configure_logging, install_nss
-from .ssh_keys import watch_authorized_keys
 
 log = structlog.get_logger(__name__)
 
@@ -47,14 +46,8 @@ async def _main() -> None:
     server = Server(stores=stores, settings=pynixd_settings)
 
     async with server, contextlib.AsyncExitStack() as stack:
-        # The watcher's own group, rather than `server.background_tasks`:
-        # that list is typed `asyncio.Task` and the server cancels it at the
-        # end of its own shutdown. A group says the lifetime here.
-        tasks = await stack.enter_async_context(anyio.create_task_group())
-        tasks.start_soon(watch_authorized_keys, server, name="authorized-keys")
-
         # A stack, because the manager is conditional and its lifetime is a
-        # block. Entered after the watcher, so it is cancelled first.
+        # block.
         if settings.kube_namespace:
             await stack.enter_async_context(
                 BuilderManager(
@@ -73,10 +66,7 @@ async def _main() -> None:
             )
 
         log.info("pynixd_nixkube_central_running")
-        try:
-            await server.wait_finished()
-        finally:
-            tasks.cancel_scope.cancel()
+        await server.wait_finished()
 
 
 def main() -> None:

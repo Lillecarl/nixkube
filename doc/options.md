@@ -1043,6 +1043,35 @@ positive integer, meaning >0
 
 
 
+## nixkube\.nri\.composefs
+
+
+
+Give an NRI container its /nix as one composefs mount where the node’s
+kernel can: the same image and probe as ` csi.composefs `\. Where the
+probe fails, the container gets the bind farm\. VM runtimes always get
+a hardlink tree\.
+
+False keeps the bind farm on every node\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+true
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
 ## nixkube\.nri\.vmRuntimeHandlers
 
 
@@ -1106,11 +1135,38 @@ true
 
 
 
+## nixkube\.pynixd\.adminKeys
+
+
+
+SSH public keys that connect to the cache as trusted clients, what
+Nix’s ` trusted-users ` grants\. A deploy that pushes paths it built
+itself needs one: an untrusted client may only add signed paths\.
+Keys in ` authorizedKeys ` stay untrusted\.
+
+
+
+*Type:*
+list of (string or absolute path)
+
+
+
+*Default:*
+
+```nix
+[ ]
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
 ## nixkube\.pynixd\.authorizedKeys
 
 
 
-SSH public keys that can connect to cache\. Used by nodes to push built store paths to the cache\.
+SSH public keys that can connect to cache, untrusted\. Used by nodes to push built store paths to the cache\.
 
 
 
@@ -1704,6 +1760,32 @@ string
 
 ```nix
 "1Gi"
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.trustClusterKey
+
+
+
+Trust the cluster’s own SSH key on the cache, as ` adminKeys ` does\.
+Every node, the controller and the builders hold that key, so this
+trusts all of them\.
+
+
+
+*Type:*
+boolean
+
+
+
+*Default:*
+
+```nix
+false
 ```
 
 *Declared by:*

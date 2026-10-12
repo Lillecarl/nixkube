@@ -54,13 +54,9 @@ rec {
                 "aarch64-linux" = false;
               };
               cache.storageClassName = "hcloud-volumes";
-              pynixd = {
-                settings = {
-                  admin_users = [ "nix" ];
-                };
-              };
+              pynixd.trustClusterKey = true;
               pynixd.controller.nixConfig.settings.max-jobs = lib.mkForce 0;
-              pynixd.authorizedKeys = [
+              pynixd.adminKeys = [
                 (builtins.readFile /home/lillecarl/.ssh/id_ed25519.pub)
               ];
               loggingConfig = {

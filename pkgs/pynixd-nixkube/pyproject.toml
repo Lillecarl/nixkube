@@ -14,9 +14,7 @@ dependencies = [
     # Imported directly and not only through pynixd: this package's
     # concurrency is written in anyio.
     "anyio",
-    # `ssh_keys.py` watches the mounted key with inotify; `config.py` reads
-    # its settings through pydantic-settings.
-    "asyncinotify",
+    # `config.py` reads its settings through pydantic-settings.
     "pydantic-settings",
 ]
 
