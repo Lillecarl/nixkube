@@ -118,10 +118,21 @@ rec {
       # store with no database is one Nix declines to read.
       initializeNixDatabase = true;
 
+      # One env, not the three paths. nix2container leaves every
+      # `copyToRoot` path out of the image's database and disallows it in
+      # the closure graph (nix2container e63a2619). These three are also in
+      # the closure of `nixkube` and `pynixd-nixkube`, which name them, so
+      # the graph refers to them and the build failed. Only the env is left
+      # out now; the three stay in the store and the database (#80).
       copyToRoot = [
-        sysPkgs.dockerTools.binSh
-        sysPkgs.dockerTools.caCertificates
-        sysPkgs.dockerTools.usrBinEnv
+        (sysPkgs.buildEnv {
+          name = "nix-image-root";
+          paths = [
+            sysPkgs.dockerTools.binSh
+            sysPkgs.dockerTools.caCertificates
+            sysPkgs.dockerTools.usrBinEnv
+          ];
+        })
       ];
       config = {
         Entrypoint = [
