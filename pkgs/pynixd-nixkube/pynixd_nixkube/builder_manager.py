@@ -5,7 +5,7 @@ import hashlib
 import socket
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -15,6 +15,7 @@ import anyio.abc
 import kr8s.asyncio as k8s
 import structlog
 from kr8s.asyncio.objects import Job, PodTemplate, new_class
+from pynixd.build_queue import QueuedBuild
 from pynixd.config import SSHSubprocessStoreSpec
 from pynixd.serde import StoreId
 from pynixd.store import SSHSubprocessStore
@@ -146,6 +147,21 @@ def plan_recycle(
     ]
     retire = [b.store_id for b in builders if b.draining and not b.busy]
     return drain, retire
+
+
+def pending_systems(builds: Iterable[QueuedBuild], available: set[str]) -> set[str]:
+    """The systems that pending builds need and a builder could serve.
+
+    The system is the derivation's own `platform`. `QueuedBuild.platform`
+    no longer exists, and reading it raised on every pass, so no builder
+    scaled up and a queued build was never dispatched (#78).
+    """
+    return {
+        platform
+        for build in builds
+        if build.is_pending
+        and (platform := build.request.derivation.platform) in available
+    }
 
 
 def deep_merge(base: dict, overrides: dict) -> dict:
@@ -1363,10 +1379,9 @@ class BuilderManager:
 
         while True:
             try:
-                needed_systems: set[str] = set()
-                for build in scheduler.queue.queue:
-                    if build.is_pending and build.platform in self._available_systems:
-                        needed_systems.add(build.platform)
+                needed_systems = pending_systems(
+                    scheduler.queue.queue, self._available_systems
+                )
 
                 if not needed_systems:
                     await anyio.sleep(5)
