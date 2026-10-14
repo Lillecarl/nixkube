@@ -3,10 +3,9 @@
 self: pkgs:
 let
   # The caller's sources, when it names them, and this repository's own lock
-  # otherwise. A caller that imports this repository from the umbrella passes
-  # the umbrella's set; reading `nix/sources.nix` here instead resolved the
-  # umbrella revision this commit was written against, so bumping the caller's
-  # umbrella never moved pynixd (#79).
+  # otherwise. Reading `nix/sources.nix` here when a caller passed a set
+  # resolved the nixidae revision this commit was written against, so bumping
+  # the caller's never moved pynixd (#79).
   sources = pkgs.nixkubeSources or (import ../nix/sources.nix);
 in
 {
@@ -34,7 +33,7 @@ in
   };
 
   mkApp = self.callPackage ../nix/mk-app.nix {
-    inherit (import sources.nanopynix { inherit pkgs; }) mkApp;
+    inherit (import sources.nanopynix { inherit pkgs sources; }) mkApp;
   };
 
   nixkube = self.mkApp {
@@ -145,11 +144,11 @@ in
   # ./csi-sidecars.
   csi-sidecars = pkgs.callPackage ./csi-sidecars { };
 
-  # From the umbrella's lock, like every other source, and never a sibling
+  # From the caller's sources, like every other source, and never a sibling
   # directory or a branch name: either one builds a pynixd that no lock
   # records, so CI and a working copy ship different `cacheEnv`s and a node
   # asks its substituters for a path nobody built.
-  pynixd = (import sources.pynixd { inherit pkgs; }).library;
+  pynixd = (import sources.pynixd { inherit pkgs sources; }).library;
   pynixd-nixkube-fake-nss = pkgs.callPackage ./pynixd-nixkube/fake-nss.nix { };
 
   pynixd-nixkube = self.mkApp {

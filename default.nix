@@ -100,7 +100,7 @@ rec {
   # Separate instance for test workload Jobs, deployed after infrastructure
   # is fully rolled out so CSI and NRI are ready before pods start.
   kubenixCITest = easykubenix {
-    inherit pkgs;
+    inherit pkgs sources;
     modules = [
       ./kubenix
       ./kubenix/ci/test-workloads.nix
@@ -163,7 +163,7 @@ rec {
       module ? { },
     }:
     easykubenix {
-      inherit pkgs;
+      inherit pkgs sources;
       modules = [
         module
         ./kubenix
