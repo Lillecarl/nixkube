@@ -3,10 +3,12 @@
 {
   config,
   lib,
+  ekn,
   ...
 }:
 let
   cfg = config.nixkube;
+  readConfigurationFile = import ./readConfigurationFile.nix;
 
 in
 {
@@ -63,14 +65,15 @@ in
       ConfigMap.nix-node = {
         metadata.labels = cfg.labels;
         data = {
-          "nix.conf" = builtins.readFile (cfg.node.nixConfig.nixConf);
+          "nix.conf" = readConfigurationFile ekn.lib.packageRef.enabled cfg.node.nixConfig.nixConf;
           "logging.json" = builtins.toJSON cfg.loggingConfig;
         };
       };
       ConfigMap.pynixd = {
         metadata.labels = cfg.labels;
         data = {
-          "nix.conf" = builtins.readFile (cfg.pynixd.controller.nixConfig.nixConf);
+          "nix.conf" =
+            readConfigurationFile ekn.lib.packageRef.enabled cfg.pynixd.controller.nixConfig.nixConf;
           "logging.json" = builtins.toJSON cfg.loggingConfig;
         };
       };

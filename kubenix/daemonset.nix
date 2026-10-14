@@ -5,9 +5,11 @@
   lib,
   csiPkgs,
   curPkgs,
+  ekn,
   ...
 }:
 let
+  packageRef = ekn.lib.packageRef;
   cfg = config.nixkube;
   nsRes = config.kubernetes.resources.${cfg.namespace};
 in
@@ -190,7 +192,9 @@ in
                           # one DaemonSet runs on all of them. `appstarter`
                           # picks its own.
                           APPSTARTER_WANTED.value = builtins.toJSON (
-                            lib.mapAttrs (_: sysPkgs: "${sysPkgs.nixkube-node-env}") csiPkgs
+                            lib.mapAttrs (
+                              system: sysPkgs: "${packageRef "nixkube-node-env-${system}" sysPkgs.nixkube-node-env}"
+                            ) csiPkgs
                           );
                           # Which of the image's fallbacks to take when the
                           # fetch fails. The image carries one per role and

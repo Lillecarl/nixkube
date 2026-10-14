@@ -1436,6 +1436,14 @@ rec {
   # `check` job never ran it, because that job builds `all`. A member added to
   # one place and not the other is silent both ways round.
   checkMembers = {
+    configurationPreview = import ./nix/configuration-preview.nix {
+      inherit
+        pkgs
+        lib
+        kubenixInstance
+        sources
+        ;
+    };
     inherit
       assertionsNullShape
       assertionsNeighbourScope

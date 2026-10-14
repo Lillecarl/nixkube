@@ -5,9 +5,12 @@
   lib,
   csiPkgs,
   curPkgs,
+  ekn,
   ...
 }:
 let
+  packageRef = ekn.lib.packageRef;
+  readConfigurationFile = import ./readConfigurationFile.nix;
   cfg = config.nixkube;
   nsRes = config.kubernetes.resources.${cfg.namespace};
 
@@ -17,7 +20,9 @@ let
   # What a builder mounts through the node's CSI driver. The central pod
   # fills its own PVC from an initContainer instead -- a builder is created
   # by a pynixd that is already serving, so the node has this path by then.
-  storeVolumeAttributes = lib.mapAttrs (_: pkgs: pkgs.nixkube-pynixd-env) csiPkgs;
+  storeVolumeAttributes = lib.mapAttrs (
+    system: pkgs: "${packageRef "nixkube-pynixd-env-${system}" pkgs.nixkube-pynixd-env}"
+  ) csiPkgs;
 
   # The controller and a builder answer the same way and take the same kind of
   # push, so one shape for both. See `nixkube.pynixd.probes` for why the
@@ -504,7 +509,9 @@ in
                   ];
                   env = lib.mkNamedList {
                     APPSTARTER_WANTED.value = builtins.toJSON (
-                      lib.mapAttrs (_: sysPkgs: "${sysPkgs.nixkube-pynixd-env}") csiPkgs
+                      lib.mapAttrs (
+                        system: sysPkgs: "${packageRef "nixkube-pynixd-env-${system}" sysPkgs.nixkube-pynixd-env}"
+                      ) csiPkgs
                     );
                     APPSTARTER_ROLE.value = "cache";
                     PYNIXD_ENABLED.value = "false";
@@ -699,7 +706,7 @@ in
       ConfigMap.builder = {
         metadata.labels = builderLabels;
         data = {
-          "nix.conf" = builtins.readFile cfg.pynixd.builder.nixConfig.nixConf;
+          "nix.conf" = readConfigurationFile packageRef.enabled cfg.pynixd.builder.nixConfig.nixConf;
         };
       };
       ConfigMap.pynixd-config = {
