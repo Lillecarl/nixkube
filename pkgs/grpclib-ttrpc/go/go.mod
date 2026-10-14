@@ -1,4 +1,4 @@
-module github.com/lillecarl/grpclib-ttrpc-test-server
+module github.com/nixidae/grpclib-ttrpc-test-server
 
 go 1.24.0
 

@@ -1,4 +1,4 @@
-module github.com/lillecarl/grpclib-nri-test-server
+module github.com/nixidae/grpclib-nri-test-server
 
 go 1.24.0
 

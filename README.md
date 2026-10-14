@@ -1,11 +1,11 @@
 # nixkube / nix + kube / nix-csi / nix-nri
 
-[![Documentation](https://img.shields.io/badge/docs-lillecarl.github.io-blue)](https://nixidae.github.io/nixkube/)
+[![Documentation](https://img.shields.io/badge/docs-nixidae.github.io-blue)](https://nixidae.github.io/nixkube/)
 
 Mount /nix into Kubernetes pods using the CSI ephemeral volumes or NRI(Node Resource Interface). Volumes
 share lifetime with Pods and are embedded into the Podspec.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Lillecarl/nix-csi)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/nixidae/nixkube)
 
 ## Deploying nixkube
 
