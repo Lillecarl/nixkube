@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """`nix-store --dump-db | nix-store --load-db`, without a shell to hold the pipe.
 
 The failure this file exists for is silent and has no deadline around it: the

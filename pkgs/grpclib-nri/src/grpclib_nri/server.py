@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """NRI server: async context for running a plugin with automatic registration and reconnection."""
 
 import asyncio

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Seeds a node's Nix store and starts the application it holds.
 
 **This package imports nothing outside the standard library, and that is a

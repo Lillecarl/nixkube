@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # Cache uses a patched Nix to keep storePaths registrationTime up2date when they're referenced
 # through the Daemon protocol

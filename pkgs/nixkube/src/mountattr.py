@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 """mount_setattr(2): the only way to make a mount subtree read-only.
 

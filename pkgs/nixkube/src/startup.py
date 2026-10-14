@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 """One-shot container setup, porting environments/modules/setup.nix to Python.
 

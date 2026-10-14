@@ -9,7 +9,7 @@ description = "Seeds a node's Nix store and starts the application it holds"
 authors = [{ name = "lillecarl", email = "github@lillecarl.com" }]
 readme = "README.md"
 requires-python = ">=3.13"
-license = { text = "MIT" }
+license = "Apache-2.0"
 # **No dependencies, deliberately.** This is what runs when the wanted version
 # cannot be fetched, so every import it makes is something that can keep the
 # node from starting at all. See src/appstarter/__init__.py.

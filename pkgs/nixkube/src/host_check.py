@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 """`nixkube-host-check`: the first init container of both node DaemonSets
 when `nixkube.hostStore.enable` is on. Issue #25.

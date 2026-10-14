@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # Every image the node DaemonSet names, as a docker-archive tarball.
 #

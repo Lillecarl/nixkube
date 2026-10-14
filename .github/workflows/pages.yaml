@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 # GENERATED FILE -- do not edit by hand.
 # Edit ci/workflows/pages.nix, then run: nix run --file . ci-workflow-update
 jobs:

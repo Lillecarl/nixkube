@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # The ttRPC server `tests/test_server_integration.py` talks to. Real containerd
 # code, so the suite tests the protocol rather than a Python model of it.

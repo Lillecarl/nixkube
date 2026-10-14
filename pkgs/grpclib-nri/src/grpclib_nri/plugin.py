@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """NRI plugin base class: handles protocol boilerplate so subclasses focus on business logic.
 
 NRI Event Subscription Bitmask Encoding:

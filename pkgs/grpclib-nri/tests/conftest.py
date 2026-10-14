@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Pytest fixtures for grpclib-nri testing."""
 
 import asyncio

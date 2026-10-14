@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """A container's /nix under a runtime that runs the pod in a VM, such as Kata.
 
 The namespace mount in `mount.py` cannot reach a VM: the pid the hook reports

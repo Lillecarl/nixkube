@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Import every module of each package named on the command line.
 
 Stands in for nixpkgs' `pythonImportsCheck`, which pyproject.nix's builders

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Integration tests for grpclib-nri against the Go test server.
 
 What is covered: the RegisterPlugin handshake, through to the runtime

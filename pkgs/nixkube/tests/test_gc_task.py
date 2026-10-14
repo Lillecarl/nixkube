@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """The GC loop, which collected nothing on any node for 33 hours.
 
 Issue #38 counted four independent stops in one loop. Each one of them was

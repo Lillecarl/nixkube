@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Prometheus metrics for the nixkube daemon.
 
 Served on `METRICS_ADDR:METRICS_PORT`, which `cli.py` starts once at the top

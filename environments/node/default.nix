@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # Node environment: nixkube is the sole entrypoint — no init system needed.
 # All supervision (nix-daemon, GC, CSI, NRI) is handled by nixkube itself.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 self: lib: {
   # `lib.cleanSource`, plus what Python leaves behind.

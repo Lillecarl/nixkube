@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 {
   # Where every dependency lives, as directories. nix/sources.nix says how
@@ -1516,7 +1516,7 @@ rec {
     name: wf:
     let
       header = ''
-        # SPDX-License-Identifier: MIT
+        # SPDX-License-Identifier: Apache-2.0
         # GENERATED FILE -- do not edit by hand.
         # Edit ci/workflows/${name}.nix, then run: nix run --file . ci-workflow-update
       '';

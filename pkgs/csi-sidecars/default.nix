@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # The two kubernetes-csi sidecars the node DaemonSet runs beside the driver,
 # built from source rather than pulled from registry.k8s.io.

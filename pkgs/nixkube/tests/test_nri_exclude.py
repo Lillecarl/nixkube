@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """`CreateContainer` stands down for a container that asked to be left alone.
 
 `parse_nix_exclude` is tested next door, and a correct parser wired in too

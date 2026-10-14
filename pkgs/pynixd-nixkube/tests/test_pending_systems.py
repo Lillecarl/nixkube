@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 """The builder manager reads pynixd's real `QueuedBuild`. Issue #78.
 

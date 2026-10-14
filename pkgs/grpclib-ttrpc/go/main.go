@@ -1,5 +1,5 @@
 /*
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: Apache-2.0
  *
  * TTRPC Test Server: Minimal TTRPC runtime for testing grpclib-ttrpc clients.
  * Implements the streaming service from github.com/containerd/ttrpc/integration/streaming,

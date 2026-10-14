@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """`appstarter run`: say which version this is, then become the application."""
 
 import logging

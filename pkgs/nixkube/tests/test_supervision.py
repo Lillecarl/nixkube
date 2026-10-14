@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """`detach`, which is what stops one container's failure ending the node's.
 
 A task group cancels every sibling when a child raises. The groups these

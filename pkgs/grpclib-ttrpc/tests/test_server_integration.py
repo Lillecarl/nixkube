@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Integration tests for grpclib_ttrpc against Go test server.
 
 Tests the Python client implementation against the real Go test server

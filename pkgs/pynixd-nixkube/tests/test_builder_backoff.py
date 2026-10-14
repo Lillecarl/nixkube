@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 """The consecutive-failure backoff and the startup watchdog, without a cluster.
 

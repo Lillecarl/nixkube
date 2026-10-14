@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # What has to be true of a nixkube deployment for it to come up inside a Nix
 # build sandbox, on User-Mode Linux.

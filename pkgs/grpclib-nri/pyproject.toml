@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "NRI protocol utilities built on grpclib-ttrpc"
 authors = [{ name = "lillecarl", email = "github@lillecarl.com" }]
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "Apache-2.0"
 dependencies = [
   "grpclib-ttrpc",
   # Imported directly, not only through grpclib-ttrpc.

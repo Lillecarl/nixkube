@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """NRI pod annotation parsing for Nix store mounts and RW /nix configuration."""
 
 import re

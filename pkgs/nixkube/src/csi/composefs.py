@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 """A CSI volume as one composefs mount. Issues #68 and #25.
 

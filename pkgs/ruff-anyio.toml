@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # This package writes concurrency in one vocabulary, and that vocabulary is
 # anyio. Every entry point starts with `anyio.run(backend="asyncio")`, so an

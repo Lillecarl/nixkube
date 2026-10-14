@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # The NRI server `tests/test_nri_server.py` talks to. Real containerd code, so
 # the suite tests the protocol rather than a Python model of it.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # nixkube on a real Kubernetes node, inside a Nix build sandbox.
 #

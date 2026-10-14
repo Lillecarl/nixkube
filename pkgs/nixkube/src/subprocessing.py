@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 import logging  # for log level constants (logging.DEBUG, logging.NOTSET, etc.)
 import shlex

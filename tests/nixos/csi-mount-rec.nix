@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # Does a CSI publish carry a volume root's own mounts into the pod, and are
 # they read-only when it gets there?

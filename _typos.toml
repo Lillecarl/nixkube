@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # `typos` runs over this tree as one of treefmt's formatters (see the
 # `programs.typos` line in default.nix).

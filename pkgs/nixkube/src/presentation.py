@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 """How a pod sees its closure: the decisions, and the chart drawn from them.
 

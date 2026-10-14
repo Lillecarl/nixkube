@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """The metrics endpoint answers, and says something about this node.
 
 A DaemonSet that cannot be scraped is one nobody can see. These tests state

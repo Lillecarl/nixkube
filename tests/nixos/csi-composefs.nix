@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # A CSI volume as one composefs mount, through nixkube's own functions, as
 # root. Issues #68 and #25.

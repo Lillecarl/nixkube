@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """Nix operations package."""
 
 from .build import build_flake_ref as build_flake_ref

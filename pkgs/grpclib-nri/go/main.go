@@ -1,5 +1,5 @@
 /*
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: Apache-2.0
  *
  * NRI Test Server: Minimal NRI runtime for testing grpclib-nri plugins.
  * Accepts a plugin on a Unix socket and verifies the registration handshake.

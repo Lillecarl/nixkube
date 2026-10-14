@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # NRI test workloads — validate /nix mounting via the new mount API.
 #   RO (nri-hello-ro): open_tree(2) + move_mount(2), Linux 5.2+

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """The Nix operations `init` performs, and the check that they worked."""
 
 import logging

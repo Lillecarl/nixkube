@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 """What the two modes read from the environment, and what they leave behind."""
 
 import json

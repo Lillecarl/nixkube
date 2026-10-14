@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 # One pod that uses both of nixkube's mount paths, created by the test rather
 # than applied with the manifest.
