@@ -1477,21 +1477,22 @@ rec {
   # ci/workflows/*.nix hold them and say why.
   ghanix = import sources.ghanix { inherit lib; };
 
-  ciWorkflows =
-    let
-      # Every job of every workflow reads one umbrella revision, resolved once
-      # per run. ci/workflows/umbrella-rev.nix says what goes wrong without it.
-      ghalib = ghanix // {
-        evalWorkflow = import ./ci/workflows/umbrella-rev.nix ghanix.evalWorkflow;
+  ciWorkflows = {
+    pages = {
+      committed = ./.github/workflows/pages.yaml;
+      value = import ./ci/workflows/pages.nix {
+        inherit lib;
+        ghalib = ghanix;
       };
-      workflow = module: committed: {
-        inherit committed;
-        value = import module { inherit lib ghalib; };
-      };
-    in
-    {
-      ci = workflow ./ci/workflows/ci.nix ./.github/workflows/ci.yaml;
     };
+  };
+
+  # The workflows that run the tests. nixidae renders each one to
+  # `.github/workflows/nixkube-<name>.yml`.
+  ciTestWorkflows.tests = import ./ci/workflows/tests.nix {
+    inherit lib;
+    ghalib = ghanix;
+  };
 
   # Those values as the files GitHub reads.
   #
@@ -1546,10 +1547,6 @@ rec {
   # parser answers the boolean `true` for it, which would compare a boolean
   # key against a string one and fail every run.
   #
-  # It renders with the ghanix the umbrella locks, not a working copy. So a
-  # ghanix change reaches this check only after the umbrella lock moves, and
-  # UMBRELLA_DEV=ghanix can pass here while a runner fails. That is the same
-  # asymmetry as issue #28 and not a separate bug.
   # Does doc/options.md still say what the modules say?
   #
   # The same question ciWorkflowCheck asks about the workflows, and it exists

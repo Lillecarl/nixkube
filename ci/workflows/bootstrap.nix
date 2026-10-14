@@ -29,7 +29,7 @@ rec {
       "runner"
     ];
     # nixkube is the cache this repository owns. lillecarl is the one the
-    # other umbrella projects push to, and it is here because this
+    # other nixidae sources push to, and it is here because this
     # repository's closure contains theirs: without it every job rebuilt
     # nanopynix from source. A read-only substituter costs nothing when it
     # misses.

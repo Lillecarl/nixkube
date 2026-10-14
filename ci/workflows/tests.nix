@@ -1,8 +1,8 @@
-# The CI workflow, as a value rather than as text.
+# The test workflow, as a value rather than as text.
 #
-# `.github/workflows/ci.yaml` is rendered from this file. Edit this one; the
-# `check` job compares the render against what is committed and fails when
-# they differ. `nix run --file . ci-workflow-update` writes the new render.
+# nixidae renders it to `.github/workflows/nixkube-tests.yml`, with nixkube as
+# the working directory of every step. Tests run only in nixidae; nixkube's
+# own repository runs ci/workflows/pages.nix. nixidae/nixidae#4.
 #
 # ghanix is the schema. It takes `lib` and nothing else, which is what lets
 # this repository use it while pinning its own nixpkgs. See issue #13.
@@ -13,10 +13,13 @@ let
   # needs, as `ghanix` options rather than as steps written out.
   inherit (import ./bootstrap.nix { inherit lib; }) bootstrap guest;
 
-  # Publish from develop and tags only. The image tags are named from
+  # Publish from main and release tags only. The image tags are named from
   # versions, not from the commit, so a branch that changes neither version
-  # would overwrite develop's tag with its own content under the same name.
-  publishRef = "github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/v')";
+  # would overwrite main's tag with its own content under the same name.
+  #
+  # A release tag is `nixkube/v<version>`: every source of nixidae shares one
+  # tag namespace.
+  publishRef = "github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/nixkube/v')";
 
   # Every attribute a job builds, checked for the architecture it is built on.
   #
@@ -68,15 +71,15 @@ let
       ];
     };
 in
-# No `name`. GitHub shows the file path instead, which is what this workflow
-# has always done, and `${{ github.workflow }}` in the concurrency group below
-# is that path. Naming it would change the group.
+# `${{ github.workflow }}` in the concurrency group below is this name, as
+# nixidae renders it.
 ghalib.evalWorkflow {
+  name = "tests";
   on = {
     pull_request = null;
     push = {
       branches = [ "*" ];
-      tags = [ "v*" ];
+      tags = [ "nixkube/v*" ];
     };
     workflow_dispatch = null;
   };
@@ -97,12 +100,7 @@ ghalib.evalWorkflow {
     cancel-in-progress = "\${{ !startsWith(github.ref, 'refs/tags/') }}";
   };
 
-  # UMBRELLA_GIT makes the umbrella fetch each source over the git
-  # protocol, and not through api.github.com. Anonymous api.github.com
-  # allows 60 calls an hour per IP, GitHub's runners share a NAT pool, and
-  # every source a job resolves is one call. nanopynix issue #301.
   env = {
-    UMBRELLA_GIT = "1";
     REPO_USERNAME = "\${{ github.actor }}";
     REPO_TOKEN = "\${{ secrets.GITHUB_TOKEN }}";
     CACHIX_AUTH_TOKEN = "\${{ secrets.CACHIX_AUTH_TOKEN }}";
@@ -135,11 +133,6 @@ ghalib.evalWorkflow {
         # The derivation still came from shell.nix, so the type check was
         # correct, but the shell around it was the runner's rather than a
         # pinned one.
-        #
-        # Pinned inputs are the rule here. One input still breaks it, and it
-        # is not this one: nix/sources.nix fetches the umbrella with no rev
-        # when nixkube is built standalone, which is how CI builds it. See
-        # issue #28.
         {
           name = "Run type checker";
           run = "nix develop --file shell.nix --command pyright pkgs/nixkube/src";
@@ -171,7 +164,7 @@ ghalib.evalWorkflow {
           name = "Check formatting";
           run = ''
             nix run --file . treefmt
-            git diff --exit-code
+            git diff --exit-code -- .
           '';
         }
       ];
@@ -199,7 +192,7 @@ ghalib.evalWorkflow {
             ./nix-envs/bin/push
           '';
         }
-        # Built on every branch, published from develop and tags only.
+        # Built on every branch, published from main and tags only.
         # Building still proves it builds.
         {
           name = "Build amd64 nix image";
@@ -254,7 +247,7 @@ ghalib.evalWorkflow {
             ./nix-envs/bin/push
           '';
         }
-        # Built everywhere, published from develop and tags only. See the
+        # Built everywhere, published from main and tags only. See the
         # amd64 job above for why.
         {
           name = "Build arm64 nix image";
@@ -301,7 +294,7 @@ ghalib.evalWorkflow {
         # because `build-arm64` stalls before this job runs.
         #
         # A branch still builds and still asserts. It just does not publish,
-        # so the kind tests below run against the images develop published.
+        # so the kind tests below run against the images main published.
         {
           name = "Build the index and scratch publishers";
           run = ''
@@ -400,55 +393,6 @@ ghalib.evalWorkflow {
       what = "with the pynixd cache";
     };
 
-    docs-build = {
-      "if" = "github.ref == 'refs/heads/develop'";
-      runs-on = "ubuntu-24.04";
-      timeout-minutes = 30;
-      # `nixkube` and not `lillecarl`: this is the cache the repository owns
-      # and the one every other job pushes to. A push to `lillecarl`
-      # answered 403 "You're not authorized to access binary cache
-      # lillecarl."
-      ghanix = lib.mkMerge [
-        bootstrap
-        {
-          nix.cachix = {
-            enable = true;
-            name = "nixkube";
-          };
-        }
-      ];
-      steps = [
-        {
-          name = "Build documentation";
-          run = "nix build --file . nixkube-docs --out-link result --print-build-logs --print-out-paths";
-        }
-        (ghalib.steps.verifyClosure { name = "Verify docs closure"; })
-        (ghalib.steps.preparePages { })
-        (ghalib.steps.uploadPages { })
-      ];
-    };
-
-    docs-deploy = {
-      "if" = "github.ref == 'refs/heads/develop'";
-      needs = "docs-build";
-      runs-on = "ubuntu-24.04";
-      timeout-minutes = 15;
-      permissions = {
-        pages = "write";
-        id-token = "write";
-      };
-      environment = {
-        name = "github-pages";
-        url = "\${{ steps.deployment.outputs.page_url }}";
-      };
-      concurrency = {
-        group = "pages";
-        cancel-in-progress = false;
-      };
-      # `steps.deployment.outputs.page_url` above is what names the id.
-      steps = [ (ghalib.steps.deployPages { }) ];
-    };
-
     release = {
       needs = [
         "check"
@@ -457,7 +401,7 @@ ghalib.evalWorkflow {
         "test-qemu-ci-cache"
       ];
       runs-on = "ubuntu-latest";
-      "if" = "startsWith(github.ref, 'refs/tags/v')";
+      "if" = "startsWith(github.ref, 'refs/tags/nixkube/v')";
       timeout-minutes = 30;
       ghanix = bootstrap;
       steps = [
