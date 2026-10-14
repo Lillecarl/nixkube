@@ -13,7 +13,7 @@
 }:
 rec {
   server = "ghcr.io";
-  repo = "${server}/lillecarl/nix-csi";
+  repo = "${server}/nixidae/nixkube";
 
   images = lib.genAttrs [ "aarch64-linux" "x86_64-linux" ] (
     system:

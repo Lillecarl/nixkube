@@ -207,7 +207,7 @@ Cache pod will claim PVCs for:
 
 ### Pod Verification
 ```python
-# In testScript - using ghcr.io/lillecarl/nix-csi/scratch:1.0.1
+# In testScript - using ghcr.io/nixidae/nixkube/scratch:1.0.1
 machine.succeed("kubectl create -f /nix/store/.../test-pod.yaml")
 machine.wait_until_succeeds("kubectl get pod test-pod -o jsonpath='{.status.phase}' | grep Running")
 machine.succeed("kubectl exec test-pod -- test -d /nix/store")
@@ -262,7 +262,7 @@ nix flake check --override-input nixpkgs github:nixos/nixpkgs/nixos-unstable
 1. **CNI choice**: bridge-cni (simple, minimal dependencies)
 2. **kubelet flags**: Minimal, as few as possible
 3. **Builder pods**: Yes, include in cluster for Phase 2+ tests
-4. **Test pod images**: `ghcr.io/lillecarl/nix-csi/scratch:1.0.1`
+4. **Test pod images**: `ghcr.io/nixidae/nixkube/scratch:1.0.1`
 5. **Manifest generation**: Bake `kubenixApply.deploymentScript` into VM, execute post-kubeadm
 6. **Storage provisioner**: local-path-provisioner for cache pod PVCs
 7. **Control-plane taints**: Remove `node-role.kubernetes.io/control-plane:NoSchedule-` after kubeadm init

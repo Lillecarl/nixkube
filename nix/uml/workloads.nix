@@ -55,7 +55,7 @@ let
   # Only the driver can put a file at that path.
   helloThroughVolume = lib.mkNamedList {
     hello = {
-      image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
+      image = "ghcr.io/nixidae/nixkube/scratch:1.0.1";
       command = [ "${mountPath}${lib.getExe curPkgs.hello}" ];
       volumeMounts = lib.mkNamedList {
         store.mountPath = mountPath;
@@ -114,7 +114,7 @@ in
           spec = {
             containers = lib.mkNamedList {
               resident = {
-                image = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
+                image = "ghcr.io/nixidae/nixkube/scratch:1.0.1";
                 command = [
                   "${curPkgs.coreutils}/bin/sleep"
                   "infinity"

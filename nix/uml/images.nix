@@ -70,8 +70,8 @@ rec {
   # What the DaemonSet asks for. Written out rather than derived, so that a
   # bump on either side fails the tag check below rather than at ImagePull.
   tags = {
-    nix = "ghcr.io/lillecarl/nix-csi/nix:${nixkubeVersion}-${pkgs.nix.version}";
-    scratch = "ghcr.io/lillecarl/nix-csi/scratch:1.0.1";
+    nix = "ghcr.io/nixidae/nixkube/nix:${nixkubeVersion}-${pkgs.nix.version}";
+    scratch = "ghcr.io/nixidae/nixkube/scratch:1.0.1";
   };
 
   nix = convert {

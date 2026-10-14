@@ -96,7 +96,7 @@ vivarium.mkTest {
 
           Everything else a node needs still comes off the network, which is
           the point of `pull` above. This one image does not: a pod names
-          `ghcr.io/lillecarl/nix-csi/nix:<version>-<nix>`, and pulling it
+          `ghcr.io/nixidae/nixkube/nix:<version>-<nix>`, and pulling it
           means the test runs whatever was published last, whatever this
           checkout says. A change to `pkgs/appstarter` could not be tried
           here at all -- and one that could never work shipped because of
