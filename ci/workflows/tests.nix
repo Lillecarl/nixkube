@@ -17,8 +17,9 @@ let
   # versions, not from the commit, so a branch that changes neither version
   # would overwrite main's tag with its own content under the same name.
   #
-  # A release tag is `nixkube/v<version>`: every source of nixidae shares one
-  # tag namespace.
+  # A release tag here is `nixkube/v<version>`: every source of nixidae
+  # shares one tag namespace. The release job tags `v<version>` in
+  # Lillecarl/nixkube.
   publishRef = "github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/nixkube/v')";
 
   # Every attribute a job builds, checked for the architecture it is built on.
@@ -403,7 +404,11 @@ ghalib.evalWorkflow {
       runs-on = "ubuntu-latest";
       "if" = "startsWith(github.ref, 'refs/tags/nixkube/v')";
       timeout-minutes = 30;
-      ghanix = bootstrap;
+      # The whole history, because josh filters all of it.
+      ghanix = lib.mkMerge [
+        bootstrap
+        { checkout.fetchDepth = 0; }
+      ];
       steps = [
         # A release YAML nobody has checked is deployable is how #3 and #4
         # reached users. Every path it names has to be fetchable, because a
@@ -419,10 +424,28 @@ ghalib.evalWorkflow {
           name = "Assert the release manifest is deployable";
           run = "nix run --file . assert-cached -- nix-csi-deployment.yaml";
         }
+        # **The release lives in Lillecarl/nixkube, where its users look.**
+        # The tag there is `v<version>`, on the commit that repository holds
+        # for this one: josh at the version nixidae pins gives the same hash
+        # the export pushed. The export runs on the push to main, so a tag on
+        # a commit of main names a commit that repository already has.
+        {
+          id = "exported";
+          name = "Find nixkube's own commit and tag";
+          env.TAG = "\${{ github.ref_name }}";
+          run = ''
+            echo "commit=$(nix shell --file .. josh --command josh-filter :/nixkube "$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+            echo "tag=''${TAG#nixkube/}" >> "$GITHUB_OUTPUT"
+          '';
+        }
         {
           name = "Create GitHub Release";
           uses = "softprops/action-gh-release@v1";
           "with" = {
+            repository = "Lillecarl/nixkube";
+            token = "\${{ secrets.JOSH_EXPORT_TOKEN }}";
+            tag_name = "\${{ steps.exported.outputs.tag }}";
+            target_commitish = "\${{ steps.exported.outputs.commit }}";
             files = "nix-csi-deployment.yaml";
             draft = false;
             prerelease = false;
