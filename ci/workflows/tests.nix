@@ -19,7 +19,7 @@ let
   #
   # A release tag here is `nixkube/v<version>`: every source of nixidae
   # shares one tag namespace. The release job tags `v<version>` in
-  # Lillecarl/nixkube.
+  # nixidae/nixkube.
   publishRef = "github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/nixkube/v')";
 
   # Every attribute a job builds, checked for the architecture it is built on.
@@ -424,7 +424,7 @@ ghalib.evalWorkflow {
           name = "Assert the release manifest is deployable";
           run = "nix run --file . assert-cached -- nix-csi-deployment.yaml";
         }
-        # **The release lives in Lillecarl/nixkube, where its users look.**
+        # **The release lives in nixidae/nixkube, where its users look.**
         # The tag there is `v<version>`, on the commit that repository holds
         # for this one: josh at the version nixidae pins gives the same hash
         # the export pushed. The export runs on the push to main, so a tag on
@@ -442,7 +442,7 @@ ghalib.evalWorkflow {
           name = "Create GitHub Release";
           uses = "softprops/action-gh-release@v1";
           "with" = {
-            repository = "Lillecarl/nixkube";
+            repository = "nixidae/nixkube";
             token = "\${{ secrets.JOSH_EXPORT_TOKEN }}";
             tag_name = "\${{ steps.exported.outputs.tag }}";
             target_commitish = "\${{ steps.exported.outputs.commit }}";
