@@ -778,6 +778,46 @@ strings concatenated with “\\n”
 
 
 
+## nixkube\.nixConfig\.nixConf\.file
+
+
+
+Validated configuration file\.
+
+
+
+*Type:*
+package
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
+## nixkube\.nixConfig\.nixConf\.text
+
+
+
+Exact file contents for preview, or null to read the file\.
+
+
+
+*Type:*
+null or string
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [/kubenix/options\.nix](file:///kubenix/options.nix)
+
+
+
 ## nixkube\.nixConfig\.settings
 
 
@@ -927,6 +967,46 @@ strings concatenated with “\\n”
 
 ```nix
 ""
+```
+
+*Declared by:*
+ - [/kubenix/daemonset\.nix](file:///kubenix/daemonset.nix)
+
+
+
+## nixkube\.node\.nixConfig\.nixConf\.file
+
+
+
+Validated configuration file\.
+
+
+
+*Type:*
+package
+
+*Declared by:*
+ - [/kubenix/daemonset\.nix](file:///kubenix/daemonset.nix)
+
+
+
+## nixkube\.node\.nixConfig\.nixConf\.text
+
+
+
+Exact file contents for preview, or null to read the file\.
+
+
+
+*Type:*
+null or string
+
+
+
+*Default:*
+
+```nix
+null
 ```
 
 *Declared by:*
@@ -1238,6 +1318,46 @@ strings concatenated with “\\n”
 
 
 
+## nixkube\.pynixd\.builder\.nixConfig\.nixConf\.file
+
+
+
+Validated configuration file\.
+
+
+
+*Type:*
+package
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.builder\.nixConfig\.nixConf\.text
+
+
+
+Exact file contents for preview, or null to read the file\.
+
+
+
+*Type:*
+null or string
+
+
+
+*Default:*
+
+```nix
+null
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
 ## nixkube\.pynixd\.builder\.nixConfig\.settings
 
 
@@ -1345,6 +1465,46 @@ strings concatenated with “\\n”
 
 ```nix
 ""
+```
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.controller\.nixConfig\.nixConf\.file
+
+
+
+Validated configuration file\.
+
+
+
+*Type:*
+package
+
+*Declared by:*
+ - [/kubenix/pynixd\.nix](file:///kubenix/pynixd.nix)
+
+
+
+## nixkube\.pynixd\.controller\.nixConfig\.nixConf\.text
+
+
+
+Exact file contents for preview, or null to read the file\.
+
+
+
+*Type:*
+null or string
+
+
+
+*Default:*
+
+```nix
+null
 ```
 
 *Declared by:*

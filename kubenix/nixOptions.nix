@@ -48,7 +48,7 @@ types.submodule (
   {
     options = {
       nixConf = mkOption {
-        type = types.package;
+        type = import ./configurationFileType.nix { inherit lib; };
         internal = true;
       };
 
@@ -90,18 +90,27 @@ types.submodule (
         trusted-users = [ "root" ];
         system-features = defaultSystemFeatures;
       };
-      nixConf =
-        (pkgs.formats.nixConf {
-          inherit (config)
-            checkAllErrors
-            checkConfig
-            extraOptions
-            ;
-          package = nix.out;
-          inherit (nix) version;
-        }).generate
-          "nix.conf"
-          config.settings;
+      # A file override must discard the default preview text with its file.
+      nixConf = mkDefault (
+        let
+          file =
+            (pkgs.formats.nixConf {
+              inherit (config)
+                checkAllErrors
+                checkConfig
+                extraOptions
+                ;
+              package = nix.out;
+              inherit (nix) version;
+            }).generate
+              "nix.conf"
+              config.settings;
+        in
+        {
+          inherit file;
+          text = file.text;
+        }
+      );
     };
   }
 )

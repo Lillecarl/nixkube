@@ -5,4 +5,5 @@
 :caption: Contents
 
 store-presentation
+preview-rendering
 ```
